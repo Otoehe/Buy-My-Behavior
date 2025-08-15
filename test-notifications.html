@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔔 Тест Push-сповіщень BMB</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 10px 5px;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .status {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 6px;
+            border-left: 4px solid;
+        }
+        .success { 
+            background: #d4edda; 
+            border-color: #28a745; 
+            color: #155724; 
+        }
+        .error { 
+            background: #f8d7da; 
+            border-color: #dc3545; 
+            color: #721c24; 
+        }
+        .warning { 
+            background: #fff3cd; 
+            border-color: #ffc107; 
+            color: #856404; 
+        }
+        code {
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔔 Тест Push-сповіщень BuyMyBehavior</h1>
+        
+        <div id="status" class="status warning">
+            ⏳ Перевіряємо підтримку браузера...
+        </div>
+
+        <div style="margin: 20px 0;">
+            <button onclick="checkSupport()">🔍 Перевірити підтримку</button>
+            <button onclick="requestPermission()">🔑 Запитати дозвіл</button>
+            <button onclick="sendTestNotification()">🔔 Тестове сповіщення</button>
+        </div>
+
+        <div style="margin: 20px 0;">
+            <h3>🎬 Симуляція сценаріїв:</h3>
+            <button onclick="simulateAgreement()">🤝 Угоду погоджено</button>
+            <button onclick="simulateCompletion()">✅ Сценарій завершено</button>
+            <button onclick="simulateNewScenario()">🆕 Новий сценарій</button>
+        </div>
+
+        <div style="margin: 20px 0;">
+            <h3>📊 Информація:</h3>
+            <p><strong>Підтримка:</strong> <span id="support-info">Перевіряється...</span></p>
+            <p><strong>Дозвіл:</strong> <span id="permission-info">Перевіряється...</span></p>
+            <p><strong>Останнє сповіщення:</strong> <span id="last-notification">—</span></p>
+        </div>
+
+        <div style="margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 6px;">
+            <h4>💡 Інструкції:</h4>
+            <ol>
+                <li>Спочатку натисніть <code>Перевірити підтримку</code></li>
+                <li>Потім <code>Запитати дозвіл</code> та дозвольте сповіщення</li>
+                <li>Тестуйте різні типи сповіщень</li>
+                <li>Перевірте звукові сигнали (🔊 включіть звук)</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        class TestNotificationManager {
+            constructor() {
+                this.audio = null;
+                this.initializeAudio();
+                this.updateInfo();
+            }
+
+            initializeAudio() {
+                try {
+                    // Для тесту використовуємо стандартний звук
+                    this.audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmIcBiWB0fPvhjgHGGm++OSfSwMKUqjl8bNiGgU9k9n3yXkqBSJ+z/LefDkGHWq+7OGdRQIIUKnl8bdhHggOQKnl8bdhHAgLQ6vn87fFBYGFiWxdX3SYr6yQYTY1YKHQ26thHAY/mtvyy3IlBSyBzvLYiTcIGWi77OefTAwMUKfj8LYjHAY4kdbyy3ksBSR3x/DdkEAKFF606OuoVRIKRp/g8r5iHAYlgdHz74Y4BxhpvvjknwMDClKo5fGzYhoFPZPZ98l5KgUifc/y3nw5Bh1qvuzhgTQIGWi8++OdRQQH==');
+                    this.audio.volume = 0.3;
+                } catch (error) {
+                    console.warn('🔇 Не вдалося ініціалізувати звук:', error);
+                }
+            }
+
+            updateInfo() {
+                const supportEl = document.getElementById('support-info');
+                const permissionEl = document.getElementById('permission-info');
+                
+                if ('Notification' in window) {
+                    supportEl.textContent = '✅ Підтримується';
+                    supportEl.style.color = '#28a745';
+                } else {
+                    supportEl.textContent = '❌ Не підтримується';
+                    supportEl.style.color = '#dc3545';
+                }
+
+                const permission = this.getPermission();
+                let permissionText = '';
+                let permissionColor = '';
+                
+                switch (permission) {
+                    case 'granted':
+                        permissionText = '✅ Дозволено';
+                        permissionColor = '#28a745';
+                        break;
+                    case 'denied':
+                        permissionText = '❌ Заблоковано';
+                        permissionColor = '#dc3545';
+                        break;
+                    default:
+                        permissionText = '⏳ Не запитано';
+                        permissionColor = '#ffc107';
+                }
+                
+                permissionEl.textContent = permissionText;
+                permissionEl.style.color = permissionColor;
+            }
+
+            getPermission() {
+                if (!('Notification' in window)) return 'denied';
+                return Notification.permission;
+            }
+
+            async requestPermission() {
+                if (!('Notification' in window)) {
+                    this.showStatus('❌ Браузер не підтримує сповіщення', 'error');
+                    return 'denied';
+                }
+
+                try {
+                    const permission = await Notification.requestPermission();
+                    this.updateInfo();
+                    
+                    if (permission === 'granted') {
+                        this.showStatus('✅ Дозвіл отримано! Можете тестувати сповіщення.', 'success');
+                    } else {
+                        this.showStatus('❌ Дозвіл не надано. Включіть їх у налаштуваннях браузера.', 'error');
+                    }
+                    
+                    return permission;
+                } catch (error) {
+                    this.showStatus('❌ Помилка при запиті дозволу: ' + error.message, 'error');
+                    return 'denied';
+                }
+            }
+
+            playSound() {
+                if (this.audio) {
+                    try {
+                        this.audio.currentTime = 0;
+                        this.audio.play().catch(e => {
+                            console.warn('🔇 Не вдалося відтворити звук:', e);
+                        });
+                    } catch (error) {
+                        console.warn('🔇 Помилка звуку:', error);
+                    }
+                }
+            }
+
+            async showNotification(title, body, options = {}) {
+                if (this.getPermission() !== 'granted') {
+                    this.showStatus('❌ Немає дозволу на сповіщення', 'error');
+                    return false;
+                }
+
+                try {
+                    this.playSound();
+                    
+                    const notification = new Notification(title, {
+                        body,
+                        icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="%23007bff"/><text x="50" y="60" font-size="40" text-anchor="middle" fill="white">🔔</text></svg>',
+                        badge: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="%23007bff"/></svg>',
+                        tag: options.tag || 'bmb-test',
+                        requireInteraction: true,
+                        ...options
+                    });
+
+                    notification.onclick = () => {
+                        window.focus();
+                        notification.close();
+                        this.showStatus('👆 Сповіщення натиснуто!', 'success');
+                    };
+
+                    setTimeout(() => notification.close(), 8000);
+                    
+                    const now = new Date().toLocaleTimeString();
+                    document.getElementById('last-notification').textContent = `${title} (${now})`;
+                    this.showStatus(`✅ Сповіщення "${title}" показано`, 'success');
+                    
+                    return true;
+                } catch (error) {
+                    this.showStatus('❌ Помилка показу сповіщення: ' + error.message, 'error');
+                    return false;
+                }
+            }
+
+            showStatus(message, type = 'warning') {
+                const statusEl = document.getElementById('status');
+                statusEl.textContent = message;
+                statusEl.className = `status ${type}`;
+            }
+        }
+
+        // Глобальний менеджер для тестування
+        const testManager = new TestNotificationManager();
+
+        // Функції для кнопок
+        function checkSupport() {
+            testManager.updateInfo();
+            if ('Notification' in window) {
+                testManager.showStatus('✅ Браузер підтримує push-сповіщення!', 'success');
+            } else {
+                testManager.showStatus('❌ Браузер не підтримує push-сповіщення.', 'error');
+            }
+        }
+
+        function requestPermission() {
+            testManager.requestPermission();
+        }
+
+        function sendTestNotification() {
+            testManager.showNotification(
+                '🔔 Тестове сповіщення BMB',
+                'Система push-сповіщень працює коректно! 🎉',
+                { tag: 'test-notification' }
+            );
+        }
+
+        function simulateAgreement() {
+            testManager.showNotification(
+                '🤝 Угоду погоджено!',
+                'Сценарій "Демонстрація поведінки у магазині..." підтверджено обома сторонами. Сума: 50 USDT',
+                { tag: 'agreement-demo' }
+            );
+        }
+
+        function simulateCompletion() {
+            testManager.showNotification(
+                '✅ Сценарій завершено!',
+                'Кошти розподілено через escrow. Ви отримали 90% від суми угоди.',
+                { tag: 'completion-demo' }
+            );
+        }
+
+        function simulateNewScenario() {
+            testManager.showNotification(
+                '🆕 Новий сценарій доступний!',
+                '"Реакція на пропозицію скидки при виборі товару..." • Сума: 75 USDT',
+                { tag: 'new-scenario-demo' }
+            );
+        }
+
+        // Автоматична перевірка при завантаженні
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                checkSupport();
+            }, 500);
+        });
+    </script>
+</body>
+</html>
