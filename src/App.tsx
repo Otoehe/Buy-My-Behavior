@@ -4,7 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import UploadBehavior from './UploadBehavior';
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { supabase } from './lib/supabase';
+import { supabase } from './supabase'
 import BehaviorsFeed from './components/BehaviorsFeed';
 import NavigationBar from './components/NavigationBar';
 import Register from './components/Register';
