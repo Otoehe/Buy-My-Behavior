@@ -3,22 +3,19 @@ import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 
-// ---------- components (звичайні) ----------
 import BehaviorsFeed   from './components/BehaviorsFeed';
 import NavigationBar   from './components/NavigationBar';
 import Register        from './components/Register';
 import Profile         from './components/Profile';
 import AuthCallback    from './components/AuthCallback';
 import A2HS            from './components/A2HS';
-import NetworkToast    from './components/NetworkToast';
-import SWUpdateToast   from './components/SWUpdateToast';
-// import HomeGate     from './components/HomeGate'; // якщо треба — розкоментуй
 
-// ---------- hooks / lib ----------
-import useViewportVH from './lib/useViewportVH';
-import useGlobalImageHints from './lib/useGlobalImageHints';
+import useViewportVH        from './lib/useViewportVH';
+import useGlobalImageHints  from './lib/useGlobalImageHints';
+import NetworkToast         from './components/NetworkToast';
+import SWUpdateToast        from './components/SWUpdateToast';
+// import HomeGate          from './components/HomeGate'; // тимчасово вимкнено
 
-// ---------- components (lazy) ----------
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
 const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
@@ -43,7 +40,7 @@ class ErrorBoundary extends React.Component<any, { error: any | null }> {
   }
   render() {
     if (this.state.error) {
-      const msg = String(this.state.error?.message || this.state.error);
+      const msg = String((this.state.error as any)?.message ?? this.state.error);
       return (
         <div style={{ padding: 16, color: '#b91c1c', fontWeight: 600 }}>
           Помилка рендеру: {msg}
@@ -60,7 +57,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   const [isAuthed, setIsAuthed] = useState(false);
 
   useEffect(() => {
-    let unsub: (() => void) | undefined;
+    let unsub: undefined | (() => void);
     (async () => {
       const { data } = await supabase.auth.getSession();
       setIsAuthed(!!data.session);
@@ -89,14 +86,14 @@ export default function App() {
       <ErrorBoundary>
         <Suspense fallback={<Loader />}>
           <Routes>
-            {/* редірект з кореня на карту */}
+            {/* Редірект з кореня на карту */}
             <Route path="/" element={<Navigate to="/map" replace />} />
 
-            {/* публічні */}
+            {/* Публічні */}
             <Route path="/register" element={<Register />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
 
-            {/* захищені */}
+            {/* Захищені */}
             <Route path="/profile"      element={<RequireAuth><Profile /></RequireAuth>} />
             <Route path="/behaviors"    element={<RequireAuth><BehaviorsFeed /></RequireAuth>} />
             <Route path="/map"          element={<RequireAuth><MapView /></RequireAuth>} />
@@ -104,8 +101,10 @@ export default function App() {
             <Route path="/received"     element={<RequireAuth><ReceivedScenarios /></RequireAuth>} />
             <Route path="/manifest"     element={<RequireAuth><Manifest /></RequireAuth>} />
 
-            {/* форма сценарію */}
+            {/* Форма сценарію */}
             <Route path="/scenario/new"       element={<RequireAuth><ScenarioForm /></RequireAuth>} />
+
+            {/* Карта з вибором локації */}
             <Route path="/scenario/location"  element={<RequireAuth><ScenarioLocation /></RequireAuth>} />
             <Route path="/select-location"    element={<RequireAuth><ScenarioLocation /></RequireAuth>} />
 
