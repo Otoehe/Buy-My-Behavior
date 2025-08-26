@@ -1,5 +1,16 @@
+# dependencies
 node_modules/
+
+# build output / cache
 dist/
-.env
-.env.local
+build/
+.vite/
 .history/
+coverage/
+.cache/
+*.log
+
+# local env
+.env
+.env.*
+!.env.example
