@@ -1,103 +1,122 @@
-// 📄 App.tsx — оновлено логіку: повідомлення після реєстрації, один редірект на профіль, збереження через localStorage
+// src/App.tsx
+import React, { useEffect, useState, Suspense, lazy } from 'react';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { supabase } from './lib/supabase';
 
-import { Toaster } from 'react-hot-toast';
-import UploadBehavior from './UploadBehavior';
-import React, { useEffect, useState } from 'react';
-import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { supabase } from './supabase'
-import BehaviorsFeed from './components/BehaviorsFeed';
-import NavigationBar from './components/NavigationBar';
-import Register from './components/Register';
-import Profile from './components/Profile';
-import MapView from './components/MapView';
-import ScenarioForm from './components/ScenarioForm';
-import ReceivedScenarios from './components/ReceivedScenarios';
-import ReceivedScenarioCardWrapper from './components/ReceivedScenarioCard';
-import SelectLocation from './components/SelectLocation';
-import KYCForm from './components/KYCForm';
-import AdminDashboard from './components/AdminDashboard';
-import Manifest from './components/Manifest';
-import MyOrders from './components/MyOrders';
-import ScenarioLocation from './components/ScenarioLocation';
+import BehaviorsFeed   from './components/BehaviorsFeed';
+import NavigationBar   from './components/NavigationBar';
+import Register        from './components/Register';
+import Profile         from './components/Profile';
+import AuthCallback    from './AuthCallback';   // ✅ з кореня src
+import A2HS            from './A2HS';           // ✅ з кореня src
 
-const App: React.FC = () => {
-  const [session, setSession] = useState<any>(null);
-  const navigate = useNavigate();
+import useViewportVH from './lib/useViewportVH';
+import useGlobalImageHints from './lib/useGlobalImageHints';
+import NetworkToast from './components/NetworkToast';
+import SWUpdateToast from './components/SWUpdateToast';
+// import HomeGate from './components/HomeGate'; // тимчасово вимкнено
+
+const MapView           = lazy(() => import('./components/MapView'));
+const MyOrders          = lazy(() => import('./components/MyOrders'));
+const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
+const Manifest          = lazy(() => import('./components/Manifest'));
+const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
+const ScenarioLocation  = lazy(() => import('./components/ScenarioLocation'));
+
+function Loader() {
+  return <div style={{ padding: 16, fontWeight: 600 }}>Завантаження…</div>;
+}
+
+class ErrorBoundary extends React.Component<any, { error: any | null }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: any) {
+    return { error };
+  }
+  componentDidCatch(error: any, info: any) {
+    console.error('[Render Error]', error, info);
+  }
+  render() {
+    if (this.state.error) {
+      const msg = String(this.state.error?.message || this.state.error);
+      return (
+        <div style={{ padding: 16, color: '#b91c1c', fontWeight: 600 }}>
+          Помилка рендеру: {msg}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function RequireAuth({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-
-  const [hasRedirected, setHasRedirected] = useState(() => {
-    return localStorage.getItem('hasRedirected') === 'true';
-  });
+  const [checking, setChecking] = useState(true);
+  const [isAuthed, setIsAuthed] = useState(false);
 
   useEffect(() => {
-    const getSession = async () => {
+    let unsub: (() => void) | undefined;
+    (async () => {
       const { data } = await supabase.auth.getSession();
-      setSession(data.session);
+      setIsAuthed(!!data.session);
+      const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+        setIsAuthed(!!session);
+      });
+      unsub = () => sub.subscription.unsubscribe();
+      setChecking(false);
+    })();
+    return () => { if (unsub) unsub(); };
+  }, []);
 
-      const publicRoutes = ['/register'];
-      const isPublic = publicRoutes.includes(location.pathname);
-      if (!data.session && !isPublic) {
-        navigate('/register');
-      }
-    };
+  if (checking) return <Loader />;
+  if (!isAuthed) return <Navigate to="/register" replace state={{ from: location }} />;
+  return <>{children}</>;
+}
 
-    getSession();
-
-    const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
-      setSession(newSession);
-
-      if (event === 'SIGNED_IN' && !hasRedirected) {
-        setHasRedirected(true);
-        localStorage.setItem('hasRedirected', 'true');
-
-        const lastVisited = localStorage.getItem('lastVisitedPath') || '/map';
-        navigate(lastVisited);
-      }
-    });
-
-    return () => {
-      listener?.subscription.unsubscribe();
-    };
-  }, [location.pathname, navigate, hasRedirected]);
-
-  useEffect(() => {
-    const justRegistered = localStorage.getItem('justRegistered');
-    if (justRegistered === 'true') {
-      alert('✅ Ви успішно зареєструвались! Перейдіть на свою пошту та натисніть на магічне посилання для входу.');
-      localStorage.removeItem('justRegistered');
-    }
-
-    const params = new URLSearchParams(window.location.hash);
-    const error = params.get('error');
-    const errorCode = params.get('error_code');
-
-    if (error && errorCode === 'otp_expired') {
-      alert('⚠️ Магічне посилання недійсне або протерміноване. Повторіть вхід.');
-      navigate('/register');
-    }
-  }, [navigate]);
+export default function App() {
+  useViewportVH();
+  useGlobalImageHints();
 
   return (
     <>
       <NavigationBar />
-      <Routes>
-        <Route path="/register" element={<Register />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/map" element={<MapView />} />
-        <Route path="/scenario" element={<ScenarioForm />} />
-        <Route path="/select-location" element={<SelectLocation />} />
-        <Route path="/scenario/:id" element={<ReceivedScenarioCardWrapper />} />
-        <Route path="/received" element={<ReceivedScenarios />} />
-        <Route path="/my-orders" element={<MyOrders />} />
-        <Route path="/scenario-location" element={<ScenarioLocation />} />
-        <Route path="/kyc" element={<KYCForm />} />
-        <Route path="/manifest" element={<Manifest />} />
-        <Route path="/behaviors" element={<BehaviorsFeed gridMode={true} />} />
-        <Route path="/behaviors/:id" element={<BehaviorsFeed gridMode={true} />} />
-        <Route path="/admin-dashboard" element={<AdminDashboard />} />
-      </Routes>
+
+      <ErrorBoundary>
+        <Suspense fallback={<Loader />}>
+          <Routes>
+            {/* Тимчасово: редірект з кореня на карту */}
+            <Route path="/" element={<Navigate to="/map" replace />} />
+
+            {/* Публічні */}
+            <Route path="/register" element={<Register />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
+
+            {/* Захищені */}
+            <Route path="/profile"      element={<RequireAuth><Profile /></RequireAuth>} />
+            <Route path="/behaviors"    element={<RequireAuth><BehaviorsFeed /></RequireAuth>} />
+            <Route path="/map"          element={<RequireAuth><MapView /></RequireAuth>} />
+            <Route path="/my-orders"    element={<RequireAuth><MyOrders /></RequireAuth>} />
+            <Route path="/received"     element={<RequireAuth><ReceivedScenarios /></RequireAuth>} />
+            <Route path="/manifest"     element={<RequireAuth><Manifest /></RequireAuth>} />
+
+            {/* Форма сценарію */}
+            <Route path="/scenario/new"       element={<RequireAuth><ScenarioForm /></RequireAuth>} />
+
+            {/* Карта з вибором локації */}
+            <Route path="/scenario/location"  element={<RequireAuth><ScenarioLocation /></RequireAuth>} />
+            <Route path="/select-location"    element={<RequireAuth><ScenarioLocation /></RequireAuth>} />
+
+            {/* 404 */}
+            <Route path="*" element={<div style={{ padding: 16 }}>Сторінку не знайдено</div>} />
+          </Routes>
+        </Suspense>
+      </ErrorBoundary>
+
+      <NetworkToast />
+      <SWUpdateToast />
+      <A2HS />
     </>
   );
-};
-
-export default App;
+}

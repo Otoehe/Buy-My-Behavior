@@ -1,0 +1,22 @@
+<svg width="150" height="150" viewBox="0 0 150 150" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+<stop offset="0%" stop-color="#667eea"/>
+<stop offset="100%" stop-color="#764ba2"/>
+</linearGradient>
+<linearGradient id="userIconGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+<stop offset="0%" stop-color="#ffffff" stop-opacity="0.9"/>
+<stop offset="100%" stop-color="#f8f9fa" stop-opacity="0.8"/>
+</linearGradient>
+</defs>
+
+<rect width="150" height="150" rx="75" fill="url(#bgGradient)"/>
+
+<text x="75" y="90" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="white" text-anchor="middle">BMB</text>
+
+<circle cx="75" cy="55" r="18" fill="url(#userIconGradient)" stroke="white" stroke-width="2"/>
+<path d="M68 48h14v8H68z" fill="#495057"/>
+<circle cx="70" cy="52" r="1.5" fill="#495057"/>
+<circle cx="80" cy="52" r="1.5" fill="#495057"/>
+<path d="M65 62c0-5 4.5-10 10-10s10 5 10 10H65z" fill="url(#userIconGradient)"/>
+</svg>

@@ -1,0 +1,36 @@
+/* 📄 src/components/Icons.css */
+
+@import url("https://fonts.googleapis.com/icon?family=Material+Icons");
+
+.icon-heart-outline::before {
+  content: 'favorite_border';
+  font-family: 'Material Icons';
+  font-size: 28px;
+  color: #ffcdd6;
+}
+
+.icon-skull-outline::before {
+  content: 'skull'; /* альтернатива — emoji або кастомна іконка */
+  font-family: 'Material Icons';
+  font-size: 28px;
+  color: #888;
+}
+
+.icon-share-outline::before {
+  content: 'share';
+  font-family: 'Material Icons';
+  font-size: 28px;
+  color: white;
+}
+
+.reaction-count {
+  display: block;
+  font-size: 12px;
+  margin-top: 2px;
+  text-align: center;
+}
+
+.white-thin {
+  color: white;
+  font-weight: 300;
+}

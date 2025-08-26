@@ -1,0 +1,32 @@
+<svg width="150" height="150" viewBox="0 0 150 150" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#764ba2;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f093fb;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f8f9fa;stop-opacity:0.9" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Фон -->
+  <circle cx="75" cy="75" r="75" fill="url(#bgGradient)"/>
+  
+  <!-- BMB логотип -->
+  <text x="75" y="55" font-family="Arial Black, sans-serif" font-size="24" font-weight="900" 
+        fill="url(#logoGradient)" text-anchor="middle">BMB</text>
+  
+  <!-- Іконка користувача -->
+  <g transform="translate(60, 75)">
+    <!-- Голова -->
+    <circle cx="15" cy="8" r="8" fill="white" opacity="0.8"/>
+    <!-- Тіло -->
+    <path d="M5 20 Q5 15 15 15 Q25 15 25 20 L25 30 L5 30 Z" fill="white" opacity="0.8"/>
+  </g>
+  
+  <!-- Текст -->
+  <text x="75" y="110" font-family="Arial, sans-serif" font-size="10" 
+        fill="white" text-anchor="middle" opacity="0.9">ПРОФІЛЬ</text>
+</svg>

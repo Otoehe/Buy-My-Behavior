@@ -1,0 +1,54 @@
+table_name,column_name,data_type
+notifications,id,uuid
+notifications,recipient_id,uuid
+notifications,scenario_id,uuid
+notifications,title,text
+notifications,message,text
+notifications,status,text
+notifications,created_at,timestamp with time zone
+profiles,user_id,uuid
+profiles,email,text
+profiles,username,text
+profiles,role,text
+profiles,abilities,text
+profiles,wallet,text
+profiles,avatar_url,text
+profiles,kyc_verified,boolean
+profiles,latitude,double precision
+profiles,longitude,double precision
+profiles,updated_at,timestamp without time zone
+profiles,description,text
+profiles,name,text
+profiles,promo_code,text
+profiles,kyc_passed,boolean
+profiles,lat,double precision
+profiles,lng,double precision
+profiles,accuracy,numeric
+profiles,photo_url,text
+profiles,kyc_completed,boolean
+profiles,bio,text
+referrals,id,uuid
+referrals,inviter_id,uuid
+referrals,invitee_email,text
+referrals,referral_code,text
+referrals,used_at,timestamp without time zone
+referrals,is_successful,boolean
+referrals,bonus_sent,boolean
+scenario_drafts,id,integer
+scenario_drafts,user_id,uuid
+scenario_drafts,description,text
+scenario_drafts,price,numeric
+scenario_drafts,hidden,boolean
+scenario_drafts,created_at,timestamp with time zone
+scenario_drafts,address,text
+scenarios,id,uuid
+scenarios,creator_id,uuid
+scenarios,executor_id,uuid
+scenarios,description,text
+scenarios,donation_amount_usdt,numeric
+scenarios,date,date
+scenarios,time,text
+scenarios,latitude,numeric
+scenarios,longitude,numeric
+scenarios,status,text
+scenarios,created_at,timestamp with time zone

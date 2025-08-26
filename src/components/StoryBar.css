@@ -1,0 +1,106 @@
+/* 📁 src/components/StoryBar.css */
+
+/* Контейнер стрічки історій */
+.story-bar {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  align-items: center;
+  background: white;
+
+  /* поверх карти, ловить кліки */
+  position: relative;
+  z-index: 10000;
+  pointer-events: auto;
+
+  /* 🔼 впритул до навбару */
+  margin-top: 0;          /* якщо бачиш «волосинку» — постав -1px */
+  /* margin-top: -1px; */
+
+  /* сховати смугу прокрутки всюди */
+  -ms-overflow-style: none;   /* IE/Edge Legacy */
+  scrollbar-width: none;      /* Firefox */
+  overscroll-behavior-x: contain;
+}
+/* Chrome / Safari / Edge */
+.story-bar::-webkit-scrollbar { height: 0; width: 0; background: transparent; }
+.story-bar::-webkit-scrollbar-thumb { background: transparent; }
+.story-bar::-webkit-scrollbar-track { background: transparent; }
+
+/* Кружечок */
+.story-item {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+  overflow: hidden;
+  pointer-events: auto;
+
+  /* одна біла окантовка + м’яка тінь */
+  border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.story-item:hover { transform: scale(1.05); }
+
+/* Відео всередині кружечка */
+.story-video {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  pointer-events: none; /* відео не краде клік */
+}
+
+/* Якщо показуєш емодзі/іконку */
+.story-circle {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.emoji { font-size: 24px; }
+
+/* Кнопка додавання (“+”) */
+.add-button {
+  font-size: 28px;
+  font-weight: bold;
+  color: black;
+}
+
+/* страховка від сторонніх стилів */
+.story-bar, .story-bar * { pointer-events: auto; }
+
+/* модалка завжди поверх карти */
+.upload-modal-backdrop { z-index: 30000 !important; }
+
+/* Підпис у модалці */
+.upload-hint {
+  text-align: center;
+  font-size: 13px;
+  color: #6b7280;
+  margin-top: 10px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  background-color: #f9fafb;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+/* Додатковий override */
+.story-item,
+.story-item.add-button { background: #e5e7eb !important; }

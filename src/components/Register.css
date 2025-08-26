@@ -1,0 +1,145 @@
+.register-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding-top: 100px;
+}
+
+.register-container {
+  background-color: #f9f9f9;
+  padding: 40px 30px;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+  border: 3px solid white; /* товща біла окантовка */
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.2); /* глибша тінь */
+}
+
+.register-container h2 {
+  margin-bottom: 24px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.register-container input {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 16px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 16px;
+  box-sizing: border-box;
+}
+
+.register-container button {
+  background-color: black;
+  color: white;
+  padding: 12px;
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.register-container button:hover {
+  background-color: #333;
+}
+
+.referral-wrapper {
+  position: relative;
+}
+
+.attention-icon {
+  position: absolute;
+  right: 14px;
+  top: 0;
+  bottom: 0;              /* розтягуємо по висоті обгортки */
+  display: flex;          /* дає змогу центрувати контент */
+  align-items: center;    /* ідеальний вертикальний центр */
+  font-size: 18px;
+  color: #FFD700;
+  pointer-events: none;
+  animation: pulse 1.6s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: translateY(-50%) scale(1.2);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+} /* ← закриваюча дужка для @keyframes */
+
+/* === BMB modal: рожеве попередження з бульбашками (ADD-ONLY) === */
+.bmb-modal-overlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: none;                 /* ховаємо за замовчуванням */
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 16px;
+}
+/* якщо показуєш модалку інлайн-стилем display:flex у TSX — підстрахуємося */
+.bmb-modal-overlay[style*="display: flex"]{ display:flex; }
+
+.bmb-modal-card{
+  width: min(560px, 92vw);
+  border-radius: 24px;
+  border: 3px solid #fff;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.25);
+  text-align: center;
+  padding: 32px 28px 28px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* фон з “бульбашками” у бренд-рожевому #ffcdd6 */
+.bmb-pink-bubbles{
+  background:
+    radial-gradient(120px 120px at 85% 20%, rgba(255,255,255,0.7), rgba(255,255,255,0) 60%),
+    radial-gradient(160px 160px at 15% 65%, rgba(255,255,255,0.6), rgba(255,255,255,0) 65%),
+    radial-gradient(80px 80px at 70% 80%, rgba(255,255,255,0.55), rgba(255,255,255,0) 60%),
+    #ffcdd6;
+}
+
+.bmb-modal-icon{
+  width: 64px; height: 64px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background:#000; color:#fff; font-size:34px;
+  display:flex; align-items:center; justify-content:center;
+}
+
+.bmb-modal-card h3{
+  margin: 8px 0 8px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #111;
+}
+
+.bmb-modal-card p{
+  margin: 0 0 18px;
+  color: #222;
+  line-height: 1.4;
+}
+
+.bmb-btn-black{
+  background:#000; color:#fff; border:none;
+  border-radius:999px; padding:10px 18px;
+  font-weight:700; cursor:pointer;
+  box-shadow:0 6px 20px rgba(0,0,0,0.25);
+}
+.bmb-btn-black:hover{ background:#222; }
+

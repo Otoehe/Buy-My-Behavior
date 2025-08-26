@@ -1,0 +1,60 @@
+/* 📄 src/components/BehaviorViewer.css — стилі для повноекранного вертикального перегляду біхейворсів */
+
+.behavior-viewer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.95);
+  z-index: 9999;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 60px;
+}
+
+.close-behavior-viewer {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  font-size: 32px;
+  color: white;
+  background: none;
+  border: none;
+  cursor: pointer;
+  z-index: 10000;
+}
+
+.behavior-viewer-scroll {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  padding: 0 12px 60px;
+  align-items: center;
+}
+
+.behavior-viewer-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.behavior-video {
+  width: 100%;
+  max-height: 80vh;
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6);
+  background: black;
+}
+
+.behavior-username {
+  color: white;
+  font-size: 16px;
+  font-weight: 500;
+  margin-top: 12px;
+  text-align: center;
+}

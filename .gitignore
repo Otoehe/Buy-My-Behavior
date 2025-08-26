@@ -1,16 +1,18 @@
-# dependencies
+# build / кеш
 node_modules/
-
-# build output / cache
 dist/
-build/
 .vite/
-.history/
 coverage/
+.history/
 .cache/
-*.log
 
-# local env
+# env
 .env
 .env.*
 !.env.example
+
+# hardhat build
+onchain/artifacts/
+onchain/cache/
+*.example
+bmb_ci_pack.zip

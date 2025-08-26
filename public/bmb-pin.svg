@@ -1,0 +1,15 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="BMB pin">
+  <!-- Коло-маячок -->
+  <circle cx="32" cy="32" r="28" fill="#FFC3D2" stroke="#FFFFFF" stroke-width="4"/>
+  <!-- фірмовий “m”-знак (2 арки, товстий штрих, за зразком на логотипі) -->
+  <path d="
+      M18 42
+      C18 26 30 26 30 42
+      M30 42
+      C30 26 46 26 46 42"
+    fill="none"
+    stroke="#0B0D10"
+    stroke-width="8"
+    stroke-linecap="round"
+    stroke-linejoin="round"/>
+</svg>

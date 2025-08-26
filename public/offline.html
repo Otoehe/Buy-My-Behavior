@@ -1,0 +1,107 @@
+<!-- /public/offline.html -->
+<!DOCTYPE html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Buy My Behavior — офлайн</title>
+    <meta name="theme-color" content="#ffcdd6" />
+    <style>
+      :root {
+        --brand: #ffcdd6;
+        --text: #111;
+        --muted: #666;
+        --radius: 16px;
+      }
+      html, body {
+        height: 100%;
+        margin: 0;
+        background: #fff;
+        font-family: sans-serif;
+        color: var(--text);
+      }
+      .wrap {
+        min-height: 100%;
+        padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+        display: grid;
+        place-items: center;
+      }
+      .card {
+        width: 100%;
+        max-width: 420px;
+        padding: 20px 18px;
+        border-radius: var(--radius);
+        box-shadow: 0 12px 30px rgba(0,0,0,.12);
+        border: 1px solid #eee;
+        background: #fff;
+        text-align: center;
+      }
+      .logo {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 800;
+        font-size: 22px;
+        margin-bottom: 8px;
+      }
+      .badge {
+        display: inline-block;
+        padding: 4px 10px;
+        font-size: 12px;
+        border-radius: 999px;
+        background: var(--brand);
+        color: #000;
+        margin-bottom: 8px;
+      }
+      p {
+        margin: 8px 0 0 0;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      .actions {
+        margin-top: 16px;
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+      }
+      .btn {
+        padding: 10px 14px;
+        border-radius: 12px;
+        border: 1px solid #ddd;
+        background: #fff;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .btn.primary {
+        background: var(--brand);
+        border-color: var(--brand);
+      }
+      .hint {
+        margin-top: 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="logo">
+          <img src="/logo.png" alt="BMB" width="28" height="28" style="border-radius:8px" />
+          Buy My Behavior
+        </div>
+        <div class="badge">Офлайн-режим</div>
+        <p>Немає підключення до Інтернету.</p>
+        <p>Спробуйте оновити сторінку, коли зʼявиться мережа.</p>
+        <div class="actions">
+          <button class="btn primary" onclick="location.reload()">Оновити</button>
+          <button class="btn" onclick="history.back()">Назад</button>
+        </div>
+        <div class="hint">PWA працює — базові сторінки доступні офлайн.</div>
+      </div>
+    </div>
+  </body>
+</html>
