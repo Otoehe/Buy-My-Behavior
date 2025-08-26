@@ -7,7 +7,7 @@ import BehaviorsFeed   from './components/BehaviorsFeed';
 import NavigationBar   from './components/NavigationBar';
 import Register        from './components/Register';
 import Profile         from './components/Profile';
-import AuthCallback    from './AuthCallback';   // ✅ з кореня src
+import AuthCallback    from './components/AuthCallback';   // ✅ з кореня src
 import A2HS            from './A2HS';           // ✅ з кореня src
 
 import useViewportVH from './lib/useViewportVH';
