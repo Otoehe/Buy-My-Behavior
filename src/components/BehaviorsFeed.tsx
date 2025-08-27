@@ -32,8 +32,8 @@ type DisputeInfo = {
   counts: Counts;
   myVote: VoteChoice | null;
   created_at?: string | null;
-  status?: string | null;                  // 'open' | 'closed'
-  winner?: 'executor' | 'customer' | null; // переможець, якщо закрито
+  status?: string | null;
+  winner?: 'executor' | 'customer' | null;
 };
 
 const isVotingClosed = (m?: DisputeInfo) => {
@@ -52,7 +52,6 @@ const BehaviorsFeed: React.FC = () => {
   const [likedIds, setLikedIds] = useState<number[]>([]);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
 
-  // активне відео (грає тільки воно)
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
 
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
@@ -94,7 +93,7 @@ const BehaviorsFeed: React.FC = () => {
       if (d?.behavior_id && d?.id) disputeIdByBehavior[d.behavior_id as number] = d.id as string;
     });
     processed.forEach(b => {
-      if (b.dispute_id && !disputeIdByBehavior[b.id]) disputeIdByBehavior[b.id] = b.dispute_id;
+      if (b.dispute_id && !disputeIdByBehavior[b.id]) disputeIdByBehavior[b.id] = b.dispute_id!;
     });
 
     // ---- B) disputeId -> scenario_id (+ meta)
@@ -189,14 +188,12 @@ const BehaviorsFeed: React.FC = () => {
 
   useEffect(() => { fetchBehaviors(); }, [fetchBehaviors]);
 
-  // ---------- вибір найвидимішого (scroll-snap) ----------
+  // ---------- pick most visible ----------
   const pickMostVisible = useCallback(() => {
     let bestId: string | null = null;
     let bestArea = 0;
-
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-
     for (const [id, el] of Object.entries(videoRefs.current)) {
       if (!el) continue;
       const r = el.getBoundingClientRect();
@@ -250,17 +247,14 @@ const BehaviorsFeed: React.FC = () => {
     };
   }, [behaviors, pickMostVisible]);
 
-  // ---------- керування відтворенням ----------
+  // ---------- playback control ----------
   useEffect(() => {
     Object.entries(videoRefs.current).forEach(async ([id, v]) => {
       if (!v) return;
-
       if (id === activeVideoId) {
         v.loop = true;
         v.muted = true; v.volume = 0;
         try { await v.play(); } catch {}
-
-        // спроба ввімкнути звук
         try {
           v.muted = false; v.volume = 1;
           await v.play();
@@ -276,7 +270,7 @@ const BehaviorsFeed: React.FC = () => {
     });
   }, [activeVideoId]);
 
-  // ---------- дії ----------
+  // ---------- actions ----------
   const handleAuthorClick = (authorId?: string | null) => {
     if (authorId) navigate('/map', { state: { profile: authorId } });
   };
@@ -284,20 +278,16 @@ const BehaviorsFeed: React.FC = () => {
   const handleLike = async (behaviorId: number) => {
     if (likedIds.includes(behaviorId)) return;
     setLikedIds((s) => [...s, behaviorId]);
-    // оптимістично збільшуємо
     setBehaviors(prev => prev.map(b => (b.id === behaviorId ? { ...b, likes_count: (b.likes_count || 0) + 1 } : b)));
-
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user?.id) throw new Error('no-user');
-
       const { data: existingLike } = await supabase
         .from('likes')
         .select('*')
         .eq('behavior_id', behaviorId)
         .eq('user_id', user.id)
         .maybeSingle();
-
       if (!existingLike) {
         await supabase.from('likes').insert({
           behavior_id: behaviorId,
@@ -306,7 +296,6 @@ const BehaviorsFeed: React.FC = () => {
         });
       }
     } catch {
-      // офлайн/помилка — у чергу
       enqueueLike(behaviorId);
     }
   };
@@ -329,9 +318,7 @@ const BehaviorsFeed: React.FC = () => {
       try {
         await navigator.share({ title: title || 'Buy My Behavior', url });
         return;
-      } catch {
-        // скасовано — падаємо на модалку
-      }
+      } catch {}
     }
     setShareUrl(url);
   };
@@ -359,26 +346,42 @@ const BehaviorsFeed: React.FC = () => {
                   ref={(el) => (videoRefs.current[b.id] = el)}
                 />
 
-                {/* ⬇️ АВАТАР-ЧІП АВТОРА (клік → профіль) */}
-                {b.author_id && (
-                  <button
-                    className="author-chip"
-                    onClick={() => handleAuthorClick(b.author_id)}
-                    title="Профіль автора"
-                  >
-                    {b.author_avatar_url ? (
-                      <img
-                        src={b.author_avatar_url}
-                        alt=""
-                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                      />
-                    ) : (
-                      <span className="author-initials">
-                        {(b.title?.[0] || 'B').toUpperCase()}
-                      </span>
-                    )}
-                  </button>
-                )}
+                {/* Авторський чіп — INLINE стилі, щоб точно відобразився */}
+                <button
+                  onClick={() => handleAuthorClick(b.author_id)}
+                  title="Профіль автора"
+                  aria-label="Профіль автора"
+                  style={{
+                    position: 'absolute',
+                    left: 10,
+                    bottom: 10,
+                    width: 44,
+                    height: 44,
+                    borderRadius: '999px',
+                    border: '2px solid #fff',
+                    boxShadow: '0 4px 12px rgba(0,0,0,.25)',
+                    overflow: 'hidden',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: '#eee',
+                    cursor: b.author_id ? 'pointer' : 'default',
+                    zIndex: 10000
+                  }}
+                >
+                  {b.author_avatar_url ? (
+                    <img
+                      src={b.author_avatar_url}
+                      alt=""
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  ) : (
+                    <span style={{ fontWeight: 800, color: '#111', fontSize: 12, letterSpacing: '.5px' }}>
+                      {(b.title?.[0] || 'B').toUpperCase()}
+                    </span>
+                  )}
+                </button>
 
                 {(st.title || st.description) && (
                   <div
@@ -431,7 +434,7 @@ const BehaviorsFeed: React.FC = () => {
                       style={{
                         position: 'absolute',
                         bottom: 8,
-                        left: 64,       // ⬅️ зсув, щоб не накладалось на аватар-чіп (44px + відступи)
+                        left: 64,  // щоб не наїжджало на аватар-чіп
                         right: 8,
                         display: 'grid',
                         gridTemplateColumns: '1fr 1fr',
