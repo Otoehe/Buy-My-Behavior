@@ -1,4 +1,6 @@
+// src/components/Profile.tsx
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import './Profile.css';
 
@@ -16,7 +18,17 @@ const RatingStars: React.FC<{ value: number }> = ({ value }) => {
         const filled = i < rounded;
         const color = filled ? '#f5c542' : '#e5e7eb';
         return (
-          <svg key={i} width="18" height="18" viewBox="0 0 24 24" fill={filled ? color : 'none'} stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            key={i}
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill={filled ? color : 'none'}
+            stroke={color}
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <polygon points="12 2 15 9 22 9 16.5 13.5 18.5 21 12 16.8 5.5 21 7.5 13.5 2 9 9 9 12 2" />
           </svg>
         );
@@ -66,21 +78,27 @@ const ProfileAuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
   return <>{children}</>;
 };
 
-/* ===== MetaMask helpers (без змін твоєї логіки) ===== */
+/* ===== MetaMask helpers ===== */
 function waitForEthereum(ms = 3500): Promise<any | null> {
   return new Promise((resolve) => {
     const eth = (window as any).ethereum;
     if (eth) return resolve(eth);
     const onInit = () => resolve((window as any).ethereum);
     window.addEventListener('ethereum#initialized', onInit, { once: true });
-    setTimeout(() => { window.removeEventListener('ethereum#initialized', onInit); resolve((window as any).ethereum || null); }, ms);
+    setTimeout(() => {
+      window.removeEventListener('ethereum#initialized', onInit);
+      resolve((window as any).ethereum || null);
+    }, ms);
   });
 }
+
 async function getMetaMaskProvider(): Promise<any | null> {
   const eth = await waitForEthereum();
   const candidates = eth?.providers?.length ? eth.providers : (eth ? [eth] : []);
   const mm = candidates?.find((p: any) => p?.isMetaMask) || (eth?.isMetaMask ? eth : null);
   if (mm) return mm;
+
+  // EIP-6963 discovery
   const discovered: any[] = [];
   const onAnnounce = (ev: any) => discovered.push(ev.detail);
   window.addEventListener('eip6963:announceProvider', onAnnounce);
@@ -90,13 +108,14 @@ async function getMetaMaskProvider(): Promise<any | null> {
   const mm6963 = discovered.find((d) => d?.provider?.isMetaMask || (d?.info?.rdns || '').toLowerCase().includes('metamask'));
   return mm6963?.provider || null;
 }
+
 async function ensureBSC(provider: any) {
   const BSC = {
     chainId: '0x38',
     chainName: 'BNB Smart Chain',
     nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
     rpcUrls: ['https://bsc-dataseed.binance.org/'],
-    blockExplorerUrls: ['https://bscscan.com']
+    blockExplorerUrls: ['https://bscscan.com'],
   } as const;
 
   try {
@@ -111,17 +130,21 @@ async function ensureBSC(provider: any) {
   }
 }
 
-/* ==== ДОДАНО: мобільний deeplink у MetaMask ==== */
+/* ==== Мобільний deeplink у MetaMask (виправлено) ==== */
 const isMobileUA = () =>
   /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent);
 
-function toDeeplinkUrl(appUrl: string) {
-  // офіційний формат: https://metamask.app.link/dapp/<FULL_URL>
-  const trimmed = appUrl.replace(/^https?:\/\//i, '');
-  return `https://metamask.app.link/dapp/${encodeURIComponent(trimmed)}`;
+// офіційний формат диплінка: https://metamask.app.link/dapp/<domain>
+function toDeeplinkUrl() {
+  const env = (import.meta as any)?.env?.VITE_PUBLIC_APP_URL as string | undefined;
+  const origin = env || window.location.origin;      // напр. https://buy-my-behavior.vercel.app
+  const clean  = origin.replace(/^https?:\/\//i, ''); // buy-my-behavior.vercel.app
+  return `https://metamask.app.link/dapp/${clean}`;
 }
 
 export default function Profile() {
+  const navigate = useNavigate();
+
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState({
     username: '', role: '', description: '', wallet: '', avatar_url: '', email: ''
@@ -147,7 +170,10 @@ export default function Profile() {
       if (!user?.id) return;
 
       const { data, error } = await supabase
-        .from('profiles').select('*').eq('user_id', user.id).maybeSingle();
+        .from('profiles')
+        .select('*')
+        .eq('user_id', user.id)
+        .maybeSingle();
 
       if (!error && data) {
         setProfile({
@@ -156,7 +182,7 @@ export default function Profile() {
           description: data.description || '',
           wallet: data.wallet || '',
           avatar_url: data.avatar_url || '',
-          email: data.email || user.email || ''
+          email: data.email || user.email || '',
         });
 
         if (data.role === 'Інше') setCustomRole('');
@@ -175,7 +201,9 @@ export default function Profile() {
       }
 
       const { data: scenariosData } = await supabase
-        .from('scenario_drafts').select('*').eq('user_id', user.id);
+        .from('scenario_drafts')
+        .select('*')
+        .eq('user_id', user.id);
       setScenarios(scenariosData || []);
     };
 
@@ -186,7 +214,10 @@ export default function Profile() {
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session && (window.location.hash.includes('access_token=') || window.location.hash.includes('refresh_token='))) {
+      if (
+        session &&
+        (window.location.hash.includes('access_token=') || window.location.hash.includes('refresh_token='))
+      ) {
         window.history.replaceState(null, '', window.location.pathname + window.location.search);
       }
     })();
@@ -275,7 +306,10 @@ export default function Profile() {
         navigator.geolocation.getCurrentPosition(
           async (pos) => {
             const { latitude, longitude } = pos.coords;
-            await supabase.from('profiles').update({ latitude, longitude }).eq('user_id', user.id);
+            await supabase
+              .from('profiles')
+              .update({ latitude, longitude })
+              .eq('user_id', user.id);
           },
           () => {},
           { enableHighAccuracy: true, timeout: 30000, maximumAge: 0 }
@@ -290,7 +324,8 @@ export default function Profile() {
   }, [user]);
 
   const handleAvatarChange = (file: File) => {
-    if (!file) return; setAvatarPreview(URL.createObjectURL(file));
+    if (!file) return;
+    setAvatarPreview(URL.createObjectURL(file));
   };
 
   const handleSaveProfile = async () => {
@@ -313,7 +348,9 @@ export default function Profile() {
         }
       } catch {
         alert('❌ Помилка завантаження аватара');
-      } finally { setAvatarUploading(false); }
+      } finally {
+        setAvatarUploading(false);
+      }
     }
 
     const updates = {
@@ -324,21 +361,26 @@ export default function Profile() {
       wallet: profile.wallet,
       avatar_url: finalAvatarUrl,
       kyc_verified: kycCompleted,
-      email: profile.email
+      email: profile.email,
     } as const;
 
     const { error } = await supabase.from('profiles').upsert(updates, { onConflict: 'user_id' });
-    if (!error) alert('✅ Профіль збережено успішно');
-    else alert('❌ Помилка при збереженні: ' + JSON.stringify(error, null, 2));
+    if (!error) {
+      alert('✅ Профіль збережено успішно');
+      navigate('/map', { replace: true }); // ← після збереження ведемо на "Вибрати виконавця"
+    } else {
+      alert('❌ Помилка при збереженні: ' + JSON.stringify(error, null, 2));
+    }
   };
 
   const handleAddScenario = async () => {
     if (!newScenarioDescription || !newScenarioPrice || !user) return;
     const { error } = await supabase.from('scenario_drafts').insert([
-      { user_id: user.id, description: newScenarioDescription, price: parseFloat(newScenarioPrice) }
+      { user_id: user.id, description: newScenarioDescription, price: parseFloat(newScenarioPrice) },
     ]);
     if (!error) {
-      setNewScenarioDescription(''); setNewScenarioPrice('');
+      setNewScenarioDescription('');
+      setNewScenarioPrice('');
       const { data } = await supabase.from('scenario_drafts').select('*').eq('user_id', user.id);
       setScenarios(data || []);
     }
@@ -386,10 +428,7 @@ export default function Profile() {
 
       // 2) Якщо інжекції немає і це МОБІЛЬНИЙ браузер → відкриваємо MetaMask через deeplink
       if (isMobileUA()) {
-        const envUrl = (import.meta as any)?.env?.VITE_PUBLIC_APP_URL as string | undefined;
-        const appUrl = envUrl || window.location.origin; // РЕКОМЕНДОВАНО HTTPS тунель у деві
-        const deeplink = toDeeplinkUrl(appUrl);
-        window.location.href = deeplink; // відкриє додаток MetaMask і завантажить ваш сайт у ньому
+        window.location.href = toDeeplinkUrl(); // відкриє MetaMask Mobile та завантажить ваш сайт у ньому
         return;
       }
 
