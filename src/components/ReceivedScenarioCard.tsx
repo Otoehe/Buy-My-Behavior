@@ -1,6 +1,7 @@
 // src/components/ReceivedScenarioCard.tsx
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import ScenarioDisputeBlock from './ScenarioDisputeBlock'; // ⬅️ ДОДАНО
 
 interface ReceivedScenarioCardProps { scenarioId: string; }
 interface Scenario {
@@ -21,7 +22,7 @@ export default function ReceivedScenarioCard({ scenarioId }: ReceivedScenarioCar
   useEffect(() => {
     (async () => {
       const { data, error } = await supabase
-        .from('scenarios') // ✅ правильна таблиця
+        .from('scenarios')            // ✅ правильна таблиця
         .select('*')
         .eq('id', scenarioId)
         .single();
@@ -38,7 +39,7 @@ export default function ReceivedScenarioCard({ scenarioId }: ReceivedScenarioCar
     if (!error) setScenario((prev) => prev ? { ...prev, status: 'agreed' } : null);
   };
 
-  if (loading) return <div className="text-center">Завантаження...</div>;
+  if (loading) return <div className="text-center">Завантаження…</div>;
   if (!scenario) return <div className="text-red-500">Сценарій не знайдено.</div>;
 
   return (
@@ -51,10 +52,16 @@ export default function ReceivedScenarioCard({ scenarioId }: ReceivedScenarioCar
       <p><strong>📌 Статус:</strong> {scenario.status || '—'}</p>
 
       {scenario.status === 'created' && (
-        <button onClick={agreeToScenario} className="bg-black hover:bg-gray-800 text-white px-5 py-2 rounded-full transition">
+        <button
+          onClick={agreeToScenario}
+          className="bg-black hover:bg-gray-800 text-white px-5 py-2 rounded-full transition"
+        >
           ✅ ПОГОДИТИ ЗАМОВЛЕННЯ
         </button>
       )}
+
+      {/* ⬇️ Блок спору/голосування/завантаження відеодоказів */}
+      <ScenarioDisputeBlock scenarioId={scenarioId} />
     </div>
   );
 }

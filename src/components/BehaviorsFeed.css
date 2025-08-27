@@ -125,6 +125,41 @@
   min-height: 50px;
   border-top: 1px solid #eee;
 }
+/* Автор відео — круглий чіп у лівому нижньому куті */
+.author-chip{
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  box-shadow: 0 4px 12px rgba(0,0,0,.25);
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #eee;
+  cursor: pointer;
+  z-index: 10000;
+}
+.author-chip img{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.author-chip .author-initials{
+  font-weight: 800;
+  color: #111;
+  font-size: 12px;
+  letter-spacing: .5px;
+}
+
+@media (min-width: 640px){
+  .author-chip{ left: 12px; bottom: 12px; }
+}
+
 
 /* (необов’язково) сховати системний скролбар на мобільних */
 .shorts-scroll-container::-webkit-scrollbar { width: 0; height: 0; }

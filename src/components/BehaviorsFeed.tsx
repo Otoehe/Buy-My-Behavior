@@ -1,3 +1,4 @@
+// src/components/BehaviorsFeed.tsx
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -26,12 +27,28 @@ interface Behavior {
 type ScenarioText = { title?: string; description?: string };
 type Counts = { executor: number; customer: number; total: number };
 
+type DisputeInfo = {
+  disputeId: string;
+  counts: Counts;
+  myVote: VoteChoice | null;
+  created_at?: string | null;
+  status?: string | null;                  // 'open' | 'closed'
+  winner?: 'executor' | 'customer' | null; // переможець, якщо закрито
+};
+
+const isVotingClosed = (m?: DisputeInfo) => {
+  if (!m) return true;
+  if (m.status === 'closed') return true;
+  const started = m.created_at ? new Date(m.created_at).getTime() : 0;
+  const timeOver = started ? (Date.now() - started) >= 7 * 24 * 60 * 60 * 1000 : false; // 7 днів
+  const capOver = (m.counts?.total || 0) >= 101;
+  return timeOver || capOver;
+};
+
 const BehaviorsFeed: React.FC = () => {
   const [behaviors, setBehaviors] = useState<Behavior[]>([]);
   const [scenarioTextByBehavior, setScenarioTextByBehavior] = useState<Record<number, ScenarioText>>({});
-  const [disputeMeta, setDisputeMeta] = useState<
-    Record<number, { disputeId: string; counts: Counts; myVote: VoteChoice | null }>
-  >({});
+  const [disputeMeta, setDisputeMeta] = useState<Record<number, DisputeInfo>>({});
   const [likedIds, setLikedIds] = useState<number[]>([]);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
 
@@ -73,23 +90,28 @@ const BehaviorsFeed: React.FC = () => {
       .in('behavior_id', behaviorIds);
 
     const disputeIdByBehavior: Record<number, string> = {};
-    (byBehavior || []).forEach(d => {
+    (byBehavior || []).forEach((d: any) => {
       if (d?.behavior_id && d?.id) disputeIdByBehavior[d.behavior_id as number] = d.id as string;
     });
     processed.forEach(b => {
       if (b.dispute_id && !disputeIdByBehavior[b.id]) disputeIdByBehavior[b.id] = b.dispute_id;
     });
 
-    // ---- B) disputeId -> scenario_id
+    // ---- B) disputeId -> scenario_id (+ meta)
     const disputeIds = Array.from(new Set(Object.values(disputeIdByBehavior).concat(knownDisputeIds)));
     let disputesRows: any[] = [];
     if (disputeIds.length) {
-      const { data: d2 } = await supabase.from('disputes').select('id, scenario_id').in('id', disputeIds);
+      const { data: d2 } = await supabase
+        .from('disputes')
+        .select('id, scenario_id, created_at, status, winner')
+        .in('id', disputeIds);
       disputesRows = d2 || [];
     }
     const scenarioIdByDispute: Record<string, string> = {};
-    disputesRows.forEach(d => {
+    const disputeInfoById: Record<string, { created_at?: string | null; status?: string | null; winner?: string | null }> = {};
+    disputesRows.forEach((d: any) => {
       if (d?.id && d?.scenario_id) scenarioIdByDispute[d.id] = d.scenario_id as string;
+      if (d?.id) disputeInfoById[d.id] = { created_at: d.created_at, status: d.status, winner: d.winner };
     });
 
     // ---- C) звичайні поведінки -> scenario_id через proofs
@@ -100,7 +122,7 @@ const BehaviorsFeed: React.FC = () => {
       .in('behavior_id', normalBehaviors.map(b => b.id));
 
     const scenarioIdByBehavior: Record<number, string> = {};
-    (proofs || []).forEach(p => {
+    (proofs || []).forEach((p: any) => {
       if (p?.behavior_id && p?.scenario_id) scenarioIdByBehavior[p.behavior_id as number] = p.scenario_id as string;
     });
 
@@ -117,7 +139,9 @@ const BehaviorsFeed: React.FC = () => {
       scenarios = sc || [];
     }
     const scenarioTextById: Record<string, ScenarioText> = {};
-    scenarios.forEach(s => (scenarioTextById[s.id] = { title: s.title || undefined, description: s.description || undefined }));
+    scenarios.forEach((s: any) => {
+      scenarioTextById[s.id] = { title: s.title || undefined, description: s.description || undefined };
+    });
 
     setScenarioTextByBehavior(prev => {
       const next: Record<number, ScenarioText> = { ...prev };
@@ -131,24 +155,34 @@ const BehaviorsFeed: React.FC = () => {
       return next;
     });
 
-    // ініціалізація спорів + підвантаження лічильників
+    // ініціалізація спорів + мета
     setDisputeMeta(prev => {
       const next = { ...prev };
       for (const b of processed) {
         const dispId = disputeIdByBehavior[b.id];
         if (dispId) {
-          next[b.id] = next[b.id] || { disputeId: dispId, counts: { executor: 0, customer: 0, total: 0 }, myVote: null };
+          const base = next[b.id] || {
+            disputeId: dispId,
+            counts: { executor: 0, customer: 0, total: 0 },
+            myVote: null,
+          };
+          const extra = disputeInfoById[dispId] || {};
+          next[b.id] = { ...base, ...extra };
         }
       }
       return next;
     });
 
+    // лічильники + мій голос
     for (const b of processed) {
       const dispId = disputeIdByBehavior[b.id];
       if (!dispId) continue;
       try {
         const [counts, mine] = await Promise.all([getVoteCounts(dispId), getMyVote(dispId)]);
-        setDisputeMeta(prev => ({ ...prev, [b.id]: { ...prev[b.id], counts, myVote: mine } }));
+        setDisputeMeta(prev => ({
+          ...prev,
+          [b.id]: { ...(prev[b.id] || { disputeId: dispId, counts: { executor: 0, customer: 0, total: 0 }, myVote: null }), counts, myVote: mine }
+        }));
       } catch { /* ignore */ }
     }
   }, []);
@@ -226,7 +260,7 @@ const BehaviorsFeed: React.FC = () => {
         v.muted = true; v.volume = 0;
         try { await v.play(); } catch {}
 
-        // пробуємо увімкнути звук на активному
+        // спроба ввімкнути звук
         try {
           v.muted = false; v.volume = 1;
           await v.play();
@@ -279,7 +313,7 @@ const BehaviorsFeed: React.FC = () => {
 
   const handleVote = async (behaviorId: number, choice: VoteChoice) => {
     const meta = disputeMeta[behaviorId];
-    if (!meta) return;
+    if (!meta || isVotingClosed(meta)) return;
     try {
       await voteOnDispute(meta.disputeId, choice);
       const [counts, mine] = await Promise.all([getVoteCounts(meta.disputeId), getMyVote(meta.disputeId)]);
@@ -325,14 +359,25 @@ const BehaviorsFeed: React.FC = () => {
                   ref={(el) => (videoRefs.current[b.id] = el)}
                 />
 
-                {!!b.author_avatar_url && (
-                  <img
-                    className="shorts-author-avatar"
-                    src={b.author_avatar_url}
-                    alt="Author avatar"
+                {/* ⬇️ АВАТАР-ЧІП АВТОРА (клік → профіль) */}
+                {b.author_id && (
+                  <button
+                    className="author-chip"
                     onClick={() => handleAuthorClick(b.author_id)}
-                    onError={(e) => (e.currentTarget.style.display = 'none')}
-                  />
+                    title="Профіль автора"
+                  >
+                    {b.author_avatar_url ? (
+                      <img
+                        src={b.author_avatar_url}
+                        alt=""
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <span className="author-initials">
+                        {(b.title?.[0] || 'B').toUpperCase()}
+                      </span>
+                    )}
+                  </button>
                 )}
 
                 {(st.title || st.description) && (
@@ -368,39 +413,59 @@ const BehaviorsFeed: React.FC = () => {
                 </div>
 
                 {dm && (
-                  <div
-                    style={{
-                      position: 'absolute', bottom: 8, left: 8, right: 8,
-                      display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
-                    }}
-                  >
-                    <button
-                      onClick={() => handleVote(b.id, 'customer')}
-                      disabled={dm.myVote === 'customer'}
+                  <>
+                    {isVotingClosed(dm) && (
+                      <div
+                        style={{
+                          position: 'absolute', bottom: 60, left: 8,
+                          background: '#fff', borderRadius: 999, padding: '8px 12px',
+                          fontWeight: 700, boxShadow: '0 2px 8px rgba(0,0,0,.15)'
+                        }}
+                      >
+                        Голосування завершено
+                        {dm.winner && <> · Переміг {dm.winner === 'executor' ? 'виконавець' : 'замовник'}</>}
+                      </div>
+                    )}
+
+                    <div
                       style={{
-                        border: 'none', borderRadius: 999, padding: '10px 12px',
-                        background: '#ffffffd0', backdropFilter: 'blur(4px)',
-                        boxShadow: '0 2px 8px rgba(0,0,0,.15)', fontWeight: 600,
-                        cursor: dm.myVote === 'customer' ? 'not-allowed' : 'pointer',
+                        position: 'absolute',
+                        bottom: 8,
+                        left: 64,       // ⬅️ зсув, щоб не накладалось на аватар-чіп (44px + відступи)
+                        right: 8,
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr',
+                        gap: 8,
                       }}
-                      title="Підтримати замовника"
                     >
-                      ↩️ Замовник ({dm.counts.customer})
-                    </button>
-                    <button
-                      onClick={() => handleVote(b.id, 'executor')}
-                      disabled={dm.myVote === 'executor'}
-                      style={{
-                        border: 'none', borderRadius: 999, padding: '10px 12px',
-                        background: '#ffffffd0', backdropFilter: 'blur(4px)',
-                        boxShadow: '0 2px 8px rgba(0,0,0,.15)', fontWeight: 600,
-                        cursor: dm.myVote === 'executor' ? 'not-allowed' : 'pointer',
-                      }}
-                      title="Підтримати виконавця"
-                    >
-                      ✅ Виконавець ({dm.counts.executor})
-                    </button>
-                  </div>
+                      <button
+                        onClick={() => handleVote(b.id, 'customer')}
+                        disabled={dm.myVote === 'customer' || isVotingClosed(dm)}
+                        style={{
+                          border: 'none', borderRadius: 999, padding: '10px 12px',
+                          background: '#ffffffd0', backdropFilter: 'blur(4px)',
+                          boxShadow: '0 2px 8px rgba(0,0,0,.15)', fontWeight: 600,
+                          cursor: (dm.myVote === 'customer' || isVotingClosed(dm)) ? 'not-allowed' : 'pointer',
+                        }}
+                        title="Підтримати замовника"
+                      >
+                        ↩️ Замовник ({dm.counts.customer})
+                      </button>
+                      <button
+                        onClick={() => handleVote(b.id, 'executor')}
+                        disabled={dm.myVote === 'executor' || isVotingClosed(dm)}
+                        style={{
+                          border: 'none', borderRadius: 999, padding: '10px 12px',
+                          background: '#ffffffd0', backdropFilter: 'blur(4px)',
+                          boxShadow: '0 2px 8px rgba(0,0,0,.15)', fontWeight: 600,
+                          cursor: (dm.myVote === 'executor' || isVotingClosed(dm)) ? 'not-allowed' : 'pointer',
+                        }}
+                        title="Підтримати виконавця"
+                      >
+                        ✅ Виконавець ({dm.counts.executor})
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
             </div>
