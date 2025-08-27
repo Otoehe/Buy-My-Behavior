@@ -334,7 +334,7 @@ const BehaviorsFeed: React.FC = () => {
         return (
           <div className="shorts-scroll-item" key={b.id}>
             <div className="shorts-feed-layout">
-              <div className="shorts-video-wrapper" style={{ position: 'relative' }}>
+              <div className="shorts-video-wrapper">
                 <video
                   src={src}
                   className="shorts-video"
@@ -346,56 +346,31 @@ const BehaviorsFeed: React.FC = () => {
                   ref={(el) => (videoRefs.current[b.id] = el)}
                 />
 
-                {/* Авторський чіп — INLINE стилі, щоб точно відобразився */}
+                {/* Авторський чіп (завжди є, навіть без аватарки) */}
                 <button
+                  className="shorts-author-chip"
                   onClick={() => handleAuthorClick(b.author_id)}
-                  title="Профіль автора"
                   aria-label="Профіль автора"
-                  style={{
-                    position: 'absolute',
-                    left: 10,
-                    bottom: 10,
-                    width: 44,
-                    height: 44,
-                    borderRadius: '999px',
-                    border: '2px solid #fff',
-                    boxShadow: '0 4px 12px rgba(0,0,0,.25)',
-                    overflow: 'hidden',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: '#eee',
-                    cursor: b.author_id ? 'pointer' : 'default',
-                    zIndex: 10000
-                  }}
+                  title="Профіль автора"
                 >
-                  {b.author_avatar_url ? (
+                  {/* fallback-літера під зображенням */}
+                  <span className="shorts-author-fallback">
+                    {(b.title?.[0] || 'B').toUpperCase()}
+                  </span>
+                  {b.author_avatar_url && (
                     <img
                       src={b.author_avatar_url}
                       alt=""
-                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      className="shorts-author-img"
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                     />
-                  ) : (
-                    <span style={{ fontWeight: 800, color: '#111', fontSize: 12, letterSpacing: '.5px' }}>
-                      {(b.title?.[0] || 'B').toUpperCase()}
-                    </span>
                   )}
                 </button>
 
                 {(st.title || st.description) && (
-                  <div
-                    style={{
-                      position: 'absolute', top: 8, left: 8, right: 48,
-                      padding: '8px 10px', borderRadius: 12,
-                      background: 'linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,.25))',
-                      color: '#fff', fontSize: 14, lineHeight: 1.25,
-                      maxHeight: 120, overflow: 'hidden',
-                      textShadow: '0 1px 2px rgba(0,0,0,.6)',
-                    }}
-                  >
-                    {st.title && <div style={{ fontWeight: 700, marginBottom: 4 }}>{st.title}</div>}
-                    {st.description && <div style={{ opacity: .95 }}>{st.description}</div>}
+                  <div className="shorts-caption">
+                    {st.title && <div className="shorts-caption-title">{st.title}</div>}
+                    {st.description && <div className="shorts-caption-text">{st.description}</div>}
                   </div>
                 )}
 
@@ -418,38 +393,17 @@ const BehaviorsFeed: React.FC = () => {
                 {dm && (
                   <>
                     {isVotingClosed(dm) && (
-                      <div
-                        style={{
-                          position: 'absolute', bottom: 60, left: 8,
-                          background: '#fff', borderRadius: 999, padding: '8px 12px',
-                          fontWeight: 700, boxShadow: '0 2px 8px rgba(0,0,0,.15)'
-                        }}
-                      >
+                      <div className="vote-closed-pill">
                         Голосування завершено
                         {dm.winner && <> · Переміг {dm.winner === 'executor' ? 'виконавець' : 'замовник'}</>}
                       </div>
                     )}
 
-                    <div
-                      style={{
-                        position: 'absolute',
-                        bottom: 8,
-                        left: 64,  // щоб не наїжджало на аватар-чіп
-                        right: 8,
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 1fr',
-                        gap: 8,
-                      }}
-                    >
+                    <div className="vote-buttons-row">
                       <button
                         onClick={() => handleVote(b.id, 'customer')}
                         disabled={dm.myVote === 'customer' || isVotingClosed(dm)}
-                        style={{
-                          border: 'none', borderRadius: 999, padding: '10px 12px',
-                          background: '#ffffffd0', backdropFilter: 'blur(4px)',
-                          boxShadow: '0 2px 8px rgba(0,0,0,.15)', fontWeight: 600,
-                          cursor: (dm.myVote === 'customer' || isVotingClosed(dm)) ? 'not-allowed' : 'pointer',
-                        }}
+                        className="vote-btn"
                         title="Підтримати замовника"
                       >
                         ↩️ Замовник ({dm.counts.customer})
@@ -457,12 +411,7 @@ const BehaviorsFeed: React.FC = () => {
                       <button
                         onClick={() => handleVote(b.id, 'executor')}
                         disabled={dm.myVote === 'executor' || isVotingClosed(dm)}
-                        style={{
-                          border: 'none', borderRadius: 999, padding: '10px 12px',
-                          background: '#ffffffd0', backdropFilter: 'blur(4px)',
-                          boxShadow: '0 2px 8px rgba(0,0,0,.15)', fontWeight: 600,
-                          cursor: (dm.myVote === 'executor' || isVotingClosed(dm)) ? 'not-allowed' : 'pointer',
-                        }}
+                        className="vote-btn"
                         title="Підтримати виконавця"
                       >
                         ✅ Виконавець ({dm.counts.executor})
