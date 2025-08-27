@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+// src/components/Register.tsx
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import './Register.css';
@@ -6,7 +7,7 @@ import './Register.css';
 export default function Register() {
   const navigate = useNavigate();
 
-  // ✅ Ініціалізація сесії + підписка — щоб уникнути «блимання» форми
+  // ====== SESSION BOOT ======
   useEffect(() => {
     let unsub: (() => void) | undefined;
 
@@ -16,11 +17,10 @@ export default function Register() {
         const session = data?.session ?? null;
 
         if (session?.user) {
-          // разова синхронізація рефералки
+          // разова синхронізація рефералки (якщо ще не записана)
           try {
             const referred_by = localStorage.getItem('referred_by');
             const referrer_wallet = localStorage.getItem('referrer_wallet');
-
             if (referred_by || referrer_wallet) {
               const { data: prof } = await supabase
                 .from('profiles')
@@ -29,13 +29,15 @@ export default function Register() {
                 .maybeSingle();
 
               if (!prof || (!prof.referred_by && !prof.referrer_wallet)) {
-                const payload: any = { user_id: session.user.id };
+                const payload: Record<string, any> = { user_id: session.user.id };
                 if (referred_by) payload.referred_by = referred_by;
                 if (referrer_wallet) payload.referrer_wallet = referrer_wallet;
                 await supabase.from('profiles').upsert(payload, { onConflict: 'user_id' });
               }
             }
-          } catch {}
+          } catch {
+            // ignore
+          }
 
           navigate('/profile', { replace: true });
           return;
@@ -44,11 +46,9 @@ export default function Register() {
         // ignore
       }
 
-      // підписка: як тільки сесія з'явиться — миттєво злітаємо з /register
+      // якщо сесія з'явиться — одразу злітаємо з /register
       const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-        if (session?.user) {
-          navigate('/profile', { replace: true });
-        }
+        if (session?.user) navigate('/profile', { replace: true });
       });
       unsub = () => sub.subscription.unsubscribe();
     })();
@@ -56,27 +56,56 @@ export default function Register() {
     return () => { try { unsub?.(); } catch {} };
   }, [navigate]);
 
+  // ====== STATE ======
   const [email, setEmail] = useState('');
   const [referral_code, setReferralCode] = useState('');
-  const [loading, setLoading] = useState(false);
+
+  // окремі лоадінги для кнопок
+  const [loadingSignup, setLoadingSignup] = useState(false);
+  const [loadingLogin, setLoadingLogin] = useState(false);
+
+  // глобальний in-flight + короткий кулдаун, щоб не ловити 429
+  const inFlightRef = useRef(false);
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const blocked = () => inFlightRef.current || Date.now() < cooldownUntil;
+  const startFlight = (ms = 2400) => { inFlightRef.current = true; setCooldownUntil(Date.now() + ms); };
+  const endFlight   = () => { inFlightRef.current = false; };
+
+  // модалка «реєстрація лише за реф-кодом»
+  const [showRefModal, setShowRefModal] = useState(false);
 
   const isEmailValid = useMemo(
     () => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
     [email]
   );
 
-  const submit = async (e: React.FormEvent) => {
+  // куди редіректити після маглінка
+  const base =
+    (import.meta.env.VITE_PUBLIC_APP_URL as string) ||
+    (typeof window !== 'undefined' ? window.location.origin : '');
+  const redirectTo = `${base}/auth/callback?next=${encodeURIComponent('/profile')}`;
+
+  // ====== HANDLERS ======
+  // Реєстрація з реф-кодом
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isEmailValid) return;
+    if (!isEmailValid || blocked()) {
+      if (!isEmailValid) return;
+      alert('Зачекайте пару секунд…');
+      return;
+    }
 
-    setLoading(true);
+    // якщо реф-код не заповнено — показуємо модалку і не шлемо запит
+    if (!referral_code.trim()) {
+      setShowRefModal(true);
+      return;
+    }
+
+    setLoadingSignup(true);
+    startFlight();
+
     try {
-      if (!referral_code.trim()) {
-        alert('Введіть реферальне слово амбасадора.');
-        return;
-      }
-
-      // Перевіряємо реф-код
+      // перевіряємо валідність реф-коду
       const { data, error } = await supabase
         .from('profiles')
         .select('user_id, wallet')
@@ -89,33 +118,64 @@ export default function Register() {
         return;
       }
 
-      // Збережемо контекст до колбеку
+      // збережемо контекст до колбеку
       localStorage.setItem('referred_by', data.user_id);
       localStorage.setItem('referrer_wallet', data.wallet || '');
-
-      // Після підтвердження хочемо опинитись у профілі
       localStorage.setItem('post_auth_next', '/profile');
 
-      const siteUrl = (import.meta.env.VITE_SITE_URL as string) || window.location.origin;
       const { error: sErr } = await supabase.auth.signInWithOtp({
         email: email.trim(),
-        options: {
-          emailRedirectTo: `${siteUrl}/auth/callback?next=${encodeURIComponent('/profile')}`,
-        },
+        options: { emailRedirectTo: redirectTo },
       });
       if (sErr) throw sErr;
 
-      alert('Лист надіслано. Відкрийте пошту та підтвердьте вхід.');
+      alert('Лист надіслано. Перевірте пошту.');
     } catch (err: any) {
       alert('Помилка реєстрації: ' + (err?.message || 'невідома'));
     } finally {
-      setLoading(false);
+      setLoadingSignup(false);
+      endFlight();
     }
   };
 
+  // Вхід без реф-коду
+  const handleLogin = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isEmailValid || blocked()) {
+      if (!isEmailValid) return;
+      alert('Зачекайте пару секунд…');
+      return;
+    }
+
+    setLoadingLogin(true);
+    startFlight();
+
+    try {
+      localStorage.setItem('post_auth_next', '/profile');
+
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim(),
+        options: {
+          emailRedirectTo: redirectTo,
+          shouldCreateUser: false, // тільки вхід
+        },
+      });
+      if (error) throw error;
+
+      alert('Лист для входу надіслано. Перевірте пошту.');
+    } catch (err: any) {
+      alert('Помилка входу: ' + (err?.message || 'невідома'));
+    } finally {
+      setLoadingLogin(false);
+      endFlight();
+    }
+  };
+
+  // ====== UI ======
   return (
     <div className="register-page">
-      <form className="register-container" onSubmit={submit}>
+      <form className="register-container" onSubmit={handleSignup}>
         <h2>Реєстрація з реферальним словом</h2>
 
         <input
@@ -131,15 +191,53 @@ export default function Register() {
         <input
           type="text"
           placeholder="Реферальний код"
-          required
           value={referral_code}
           onChange={(e) => setReferralCode(e.target.value)}
         />
 
-        <button className="bmb-btn-black" disabled={!isEmailValid || loading}>
-          {loading ? 'Відправляю…' : 'Зареєструватися'}
+        {/* Кнопка реєстрації (збережено стиль bmb-btn-black) */}
+        <button
+          className="bmb-btn-black"
+          type="submit"
+          disabled={!isEmailValid || loadingSignup || loadingLogin || blocked()}
+        >
+          {loadingSignup ? 'Відправляю…' : 'Зареєструватися'}
+        </button>
+
+        {/* Кнопка входу (той самий дизайн, type="button") */}
+        <button
+          className="bmb-btn-black"
+          type="button"
+          onClick={handleLogin}
+          disabled={!isEmailValid || loadingSignup || loadingLogin || blocked()}
+          style={{ marginTop: 8 }}
+        >
+          {loadingLogin ? 'Відправляю…' : 'Увійти'}
         </button>
       </form>
+
+      {/* === BMB MODAL: реєстрація лише за реф-кодом === */}
+      <div
+        className="bmb-modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bmb-ref-modal-title"
+        style={{ display: showRefModal ? 'flex' : 'none' }}
+        onClick={(e) => { if (e.target === e.currentTarget) setShowRefModal(false); }}
+        onKeyDown={(e) => { if (e.key === 'Escape') setShowRefModal(false); }}
+      >
+        <div className="bmb-modal-card bmb-pink-bubbles">
+          <div className="bmb-modal-icon">🔑</div>
+          <h3 id="bmb-ref-modal-title">Реєстрація лише за реферальним словом</h3>
+          <p>
+            Введіть реферальне слово амбасадора, щоб продовжити.
+            Якщо коду немає — зверніться до амбасадора BMB.
+          </p>
+          <button type="button" className="bmb-btn-black" onClick={() => setShowRefModal(false)}>
+            Добре
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

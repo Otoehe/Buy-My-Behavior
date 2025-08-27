@@ -1,3 +1,4 @@
+// src/components/AuthCallback.tsx
 import { useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -9,32 +10,36 @@ export default function AuthCallback() {
   useEffect(() => {
     (async () => {
       try {
-        // 1) новий шлях: code в query
-        if (new URLSearchParams(loc.search).get('code')) {
-          const { error } = await supabase.auth.exchangeCodeForSession(loc.search);
+        const qs = new URLSearchParams(loc.search);
+        const code = qs.get('code');
+        const next = qs.get('next') || localStorage.getItem('post_auth_next') || '/profile';
+
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
         } else {
-          // 2) fallback для старих флоу (hash)
-          // @ts-ignore
-          if (supabase.auth.getSessionFromUrl) {
+          const hash = window.location.hash || '';
+          if (hash.includes('access_token') || hash.includes('refresh_token')) {
             // @ts-ignore
             const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
             if (error) throw error;
           }
         }
 
-        // дочекатися, поки сесія точно зʼявиться
-        await supabase.auth.getSession();
+        // дочекаємось сесію
+        for (let i = 0; i < 20; i++) {
+          const { data } = await supabase.auth.getSession();
+          if (data.session) break;
+          await new Promise(r => setTimeout(r, 100));
+        }
 
-        const qs = new URLSearchParams(loc.search);
-        const next = qs.get('next') || localStorage.getItem('post_auth_next') || '/profile';
-
-        // прибираємо одноразовий маркер
         try { localStorage.removeItem('post_auth_next'); } catch {}
 
+        // красиво чистимо URL
+        try { window.history.replaceState(null, '', next); } catch {}
         navigate(next, { replace: true });
       } catch (e) {
-        // якщо щось пішло не так — ведемо на /register (але без циклу)
+        console.error('Auth callback error', e);
         navigate('/register', { replace: true });
       }
     })();

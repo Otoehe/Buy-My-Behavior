@@ -9,12 +9,12 @@ import Register        from './components/Register';
 import Profile         from './components/Profile';
 import AuthCallback    from './components/AuthCallback';
 import A2HS            from './components/A2HS';
+import AuthAutoCapture from './components/AuthAutoCapture'; // лишаємо
 
 import useViewportVH        from './lib/useViewportVH';
 import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
-// import HomeGate          from './components/HomeGate'; // тимчасово вимкнено
 
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
@@ -28,27 +28,37 @@ function Loader() {
 }
 
 class ErrorBoundary extends React.Component<any, { error: any | null }> {
-  constructor(props: any) {
-    super(props);
-    this.state = { error: null };
-  }
-  static getDerivedStateFromError(error: any) {
-    return { error };
-  }
-  componentDidCatch(error: any, info: any) {
-    console.error('[Render Error]', error, info);
-  }
-  render() {
-    if (this.state.error) {
-      const msg = String((this.state.error as any)?.message ?? this.state.error);
-      return (
-        <div style={{ padding: 16, color: '#b91c1c', fontWeight: 600 }}>
-          Помилка рендеру: {msg}
-        </div>
-      );
-    }
-    return this.props.children;
-  }
+  constructor(props: any) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error: any) { return { error }; }
+  componentDidCatch(error: any, info: any) { console.error('[Render Error]', error, info); }
+  render() { return this.state.error
+    ? <div style={{ padding: 16, color: '#b91c1c', fontWeight: 600 }}>Помилка рендеру: {String((this.state.error as any)?.message ?? this.state.error)}</div>
+    : this.props.children; }
+}
+
+// ⬇️ НОВЕ: якщо вже автентифікований — не показувати /register, а одразу на /profile
+function RedirectIfAuthed({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+  const [ready, setReady] = useState(false);
+  const [isAuthed, setIsAuthed] = useState(false);
+
+  useEffect(() => {
+    let unsub: undefined | (() => void);
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      setIsAuthed(!!data.session);
+      const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+        setIsAuthed(!!session);
+      });
+      unsub = () => sub.subscription.unsubscribe();
+      setReady(true);
+    })();
+    return () => { if (unsub) unsub(); };
+  }, []);
+
+  if (!ready) return <Loader />;
+  if (isAuthed) return <Navigate to="/profile" replace state={{ from: location }} />;
+  return <>{children}</>;
 }
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -82,15 +92,22 @@ export default function App() {
   return (
     <>
       <NavigationBar />
+      <AuthAutoCapture /> {/* ловить ?code=... навіть якщо лінк відкрив не /auth/callback */}
 
       <ErrorBoundary>
         <Suspense fallback={<Loader />}>
           <Routes>
-            {/* Редірект з кореня на карту */}
             <Route path="/" element={<Navigate to="/map" replace />} />
 
             {/* Публічні */}
-            <Route path="/register" element={<Register />} />
+            <Route
+              path="/register"
+              element={
+                <RedirectIfAuthed>
+                  <Register />
+                </RedirectIfAuthed>
+              }
+            />
             <Route path="/auth/callback" element={<AuthCallback />} />
 
             {/* Захищені */}
@@ -103,12 +120,9 @@ export default function App() {
 
             {/* Форма сценарію */}
             <Route path="/scenario/new"       element={<RequireAuth><ScenarioForm /></RequireAuth>} />
-
-            {/* Карта з вибором локації */}
             <Route path="/scenario/location"  element={<RequireAuth><ScenarioLocation /></RequireAuth>} />
             <Route path="/select-location"    element={<RequireAuth><ScenarioLocation /></RequireAuth>} />
 
-            {/* 404 */}
             <Route path="*" element={<div style={{ padding: 16 }}>Сторінку не знайдено</div>} />
           </Routes>
         </Suspense>
