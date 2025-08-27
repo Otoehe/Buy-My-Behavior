@@ -3,13 +3,14 @@ import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 
+import AuthAutoCapture from './components/AuthAutoCapture';
 import BehaviorsFeed   from './components/BehaviorsFeed';
 import NavigationBar   from './components/NavigationBar';
 import Register        from './components/Register';
 import Profile         from './components/Profile';
 import AuthCallback    from './components/AuthCallback';
 import A2HS            from './components/A2HS';
-import AuthAutoCapture from './components/AuthAutoCapture';
+
 
 import useViewportVH        from './lib/useViewportVH';
 import useGlobalImageHints  from './lib/useGlobalImageHints';

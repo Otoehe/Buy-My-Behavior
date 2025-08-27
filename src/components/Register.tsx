@@ -79,15 +79,13 @@ export default function Register() {
     [email]
   );
 
-  // ====== REDIRECTS (ОНОВЛЕНО) ======
-  const siteUrl =
-    (import.meta.env.VITE_PUBLIC_APP_URL as string) ||
+  // куди редіректити після маглінка
+  const appBase =
+    (import.meta as any).env?.VITE_PUBLIC_APP_URL ||
     (typeof window !== 'undefined' ? window.location.origin : '');
 
-  // новий користувач → після підтвердження на /profile
-  const redirectToSignup = `${siteUrl}/auth/callback?next=${encodeURIComponent('/profile')}`;
-  // існуючий користувач → після входу на /map
-  const redirectToLogin  = `${siteUrl}/auth/callback?next=${encodeURIComponent('/map')}`;
+  const redirectAfterSignup = `${appBase}/auth/callback?next=${encodeURIComponent('/profile')}`; // новачок → профіль
+  const redirectAfterLogin  = `${appBase}/auth/callback?next=${encodeURIComponent('/map')}`;     // існуючий → вибрати виконавця
 
   // ====== HANDLERS ======
   // Реєстрація з реф-кодом
@@ -125,14 +123,11 @@ export default function Register() {
       // збережемо контекст до колбеку
       localStorage.setItem('referred_by', data.user_id);
       localStorage.setItem('referrer_wallet', data.wallet || '');
-      localStorage.setItem('post_auth_next', '/profile'); // ОНОВЛЕНО
+      localStorage.setItem('post_auth_next', '/profile');
 
       const { error: sErr } = await supabase.auth.signInWithOtp({
         email: email.trim(),
-        options: {
-          emailRedirectTo: redirectToSignup,      // ОНОВЛЕНО
-          shouldCreateUser: true,                 // ОНОВЛЕНО (явно)
-        },
+        options: { emailRedirectTo: redirectAfterSignup },
       });
       if (sErr) throw sErr;
 
@@ -145,7 +140,7 @@ export default function Register() {
     }
   };
 
-  // Вхід без реф-коду
+  // Вхід без реф-коду (існуючий користувач)
   const handleLogin = async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
@@ -159,13 +154,13 @@ export default function Register() {
     startFlight();
 
     try {
-      localStorage.setItem('post_auth_next', '/map'); // ОНОВЛЕНО
+      localStorage.setItem('post_auth_next', '/map');
 
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
         options: {
-          emailRedirectTo: redirectToLogin,       // ОНОВЛЕНО
-          shouldCreateUser: false,                // тільки вхід
+          emailRedirectTo: redirectAfterLogin,
+          shouldCreateUser: false, // тільки вхід
         },
       });
       if (error) throw error;
@@ -202,7 +197,7 @@ export default function Register() {
           onChange={(e) => setReferralCode(e.target.value)}
         />
 
-        {/* Кнопка реєстрації (збережено стиль bmb-btn-black) */}
+        {/* Кнопка реєстрації */}
         <button
           className="bmb-btn-black"
           type="submit"
