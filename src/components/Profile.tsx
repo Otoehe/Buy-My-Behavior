@@ -145,6 +145,14 @@ function toDeeplinkUrl() {
 export default function Profile() {
   const navigate = useNavigate();
 
+  // ⬅️ ГАСИМО залишкові редіректи одразу після монтування (щоб не тягнуло назад на /profile)
+  useEffect(() => {
+    try {
+      localStorage.removeItem('post_auth_next');
+      localStorage.removeItem('justRegistered');
+    } catch {}
+  }, []);
+
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState({
     username: '', role: '', description: '', wallet: '', avatar_url: '', email: ''
@@ -367,7 +375,7 @@ export default function Profile() {
     const { error } = await supabase.from('profiles').upsert(updates, { onConflict: 'user_id' });
     if (!error) {
       alert('✅ Профіль збережено успішно');
-      navigate('/map', { replace: true }); // ← після збереження ведемо на "Вибрати виконавця"
+      navigate('/map', { replace: true }); // після збереження ведемо на "Вибрати виконавця"
     } else {
       alert('❌ Помилка при збереженні: ' + JSON.stringify(error, null, 2));
     }
@@ -452,152 +460,154 @@ export default function Profile() {
 
   return (
     <ProfileAuthGate>
-      <div className="profile-container">
-        <h1 className="title">Профіль</h1>
+      <main className="profile-page">
+        <div className="profile-container">
+          <h1 className="title">Профіль</h1>
 
-        {/* Аватар */}
-        <div
-          className={`avatar-container ${isDragOver ? 'drag-over' : ''}`}
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-          onDragEnter={(e) => { e.preventDefault(); setIsDragOver(true); }}
-          onDragLeave={(e) => { e.preventDefault(); setIsDragOver(false); }}
-          onDrop={(e) => {
-            e.preventDefault(); setIsDragOver(false);
-            const file = e.dataTransfer.files[0];
-            if (file?.type.startsWith('image/')) handleAvatarChange(file);
-          }}
-        >
-          {getAvatarUrl() ? (
-            <img
-              src={getAvatarUrl()!}
-              alt="Аватар користувача"
-              width={192}
-              height={192}
-              style={{ borderRadius: '50%', objectFit: 'cover', cursor: 'pointer' }}
-            />
-          ) : (
-            <div className="avatar-placeholder">
-              <UserIcon />
-              <span>Додати фото</span>
-            </div>
-          )}
-
-          {avatarUploading && <div className="avatar-uploading-spinner"></div>}
-
-          <input
-            type="file"
-            ref={fileInputRef}
-            style={{ display: 'none' }}
-            accept="image/*"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleAvatarChange(file);
+          {/* Аватар */}
+          <div
+            className={`avatar-container ${isDragOver ? 'drag-over' : ''}`}
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+            onDragEnter={(e) => { e.preventDefault(); setIsDragOver(true); }}
+            onDragLeave={(e) => { e.preventDefault(); setIsDragOver(false); }}
+            onDrop={(e) => {
+              e.preventDefault(); setIsDragOver(false);
+              const file = e.dataTransfer.files[0];
+              if (file?.type.startsWith('image/')) handleAvatarChange(file);
             }}
-          />
-        </div>
-
-        {/* Рейтинг */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', marginTop: 8 }}>
-          <RatingStars value={ratingAvg} />
-          <span style={{ fontSize: 13, color: '#6b7280' }}>{ratingAvg.toFixed(1)} / 10 · {ratingCount} оцінок</span>
-        </div>
-
-        {/* Форма профілю */}
-        <div className="profile-form">
-          <input
-            placeholder="Ім’я або псевдонім"
-            value={profile.username}
-            onChange={(e) => setProfile({ ...profile, username: e.target.value })}
-            className="input"
-          />
-
-          <select
-            value={profile.role}
-            onChange={(e) => setProfile({ ...profile, role: e.target.value })}
-            className="input"
           >
-            <option value="">Оберіть роль</option>
-            {roles.map((role) => (
-              <option key={role} value={role}>{role}</option>
-            ))}
-          </select>
+            {getAvatarUrl() ? (
+              <img
+                src={getAvatarUrl()!}
+                alt="Аватар користувача"
+                width={192}
+                height={192}
+                style={{ borderRadius: '50%', objectFit: 'cover', cursor: 'pointer' }}
+              />
+            ) : (
+              <div className="avatar-placeholder">
+                <UserIcon />
+                <span>Додати фото</span>
+              </div>
+            )}
 
-          {profile.role === 'Інше' && (
+            {avatarUploading && <div className="avatar-uploading-spinner"></div>}
+
             <input
-              type="text"
-              placeholder="Вкажіть власну роль"
-              value={customRole}
-              onChange={(e) => setCustomRole(e.target.value)}
+              type="file"
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleAvatarChange(file);
+              }}
+            />
+          </div>
+
+          {/* Рейтинг */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', marginTop: 8 }}>
+            <RatingStars value={ratingAvg} />
+            <span style={{ fontSize: 13, color: '#6b7280' }}>{ratingAvg.toFixed(1)} / 10 · {ratingCount} оцінок</span>
+          </div>
+
+          {/* Форма профілю */}
+          <div className="profile-form">
+            <input
+              placeholder="Ім’я або псевдонім"
+              value={profile.username}
+              onChange={(e) => setProfile({ ...profile, username: e.target.value })}
               className="input"
             />
-          )}
 
-          <textarea
-            placeholder="Опиши свої здібності..."
-            value={profile.description}
-            onChange={(e) => setProfile({ ...profile, description: e.target.value })}
-            className="input"
-          />
+            <select
+              value={profile.role}
+              onChange={(e) => setProfile({ ...profile, role: e.target.value })}
+              className="input"
+            >
+              <option value="">Оберіть роль</option>
+              {roles.map((role) => (
+                <option key={role} value={role}>{role}</option>
+              ))}
+            </select>
 
-          <input
-            placeholder="TRC20 гаманець або MetaMask"
-            value={profile.wallet}
-            onChange={(e) => setProfile({ ...profile, wallet: e.target.value })}
-            className="input"
-          />
-
-          <button onClick={connectMetamask} className="button">
-            {walletConnected ? '🟢 MetaMask підключено' : '🦊 Підключити MetaMask'}
-          </button>
-
-          <button onClick={() => setKycCompleted(true)} className="button">
-            {kycCompleted ? '✅ KYC пройдено' : '🛡 Пройти KYC'}
-          </button>
-
-          <button onClick={handleSaveProfile} className="button">💾 Зберегти профіль</button>
-        </div>
-
-        {/* Драфти сценаріїв */}
-        <div className="scenario-form">
-          <h2>Створити сценарій</h2>
-          <textarea
-            placeholder="Опис сценарію"
-            value={newScenarioDescription}
-            onChange={(e) => setNewScenarioDescription(e.target.value)}
-            className="input"
-          />
-          <input
-            type="number"
-            placeholder="Ціна в USDT"
-            value={newScenarioPrice}
-            onChange={(e) => setNewScenarioPrice(e.target.value)}
-            className="input"
-          />
-          <button onClick={handleAddScenario} className="button">Зберегти сценарій</button>
-        </div>
-
-        <div className="scenario-archive">
-          <h2>📝 Твої сценарії</h2>
-          <div className="scenarios-grid">
-            {scenarios.filter((s) => !s.hidden).map((s) => (
-              <div key={s.id} className="scenario-card">
-                <div className="scenario-content">
-                  <p>{s.description}</p>
-                  <span>{s.price} USDT</span>
-                </div>
-                <div className="scenario-actions">
-                  <button onClick={() => handleHideScenario(s.id)}>🙈</button>
-                  <button onClick={() => handleDeleteScenario(s.id)}>🗑️</button>
-                </div>
-              </div>
-            ))}
-            {scenarios.filter((s) => !s.hidden).length === 0 && (
-              <p>📝 Немає сценаріїв</p>
+            {profile.role === 'Інше' && (
+              <input
+                type="text"
+                placeholder="Вкажіть власну роль"
+                value={customRole}
+                onChange={(e) => setCustomRole(e.target.value)}
+                className="input"
+              />
             )}
+
+            <textarea
+              placeholder="Опиши свої здібності..."
+              value={profile.description}
+              onChange={(e) => setProfile({ ...profile, description: e.target.value })}
+              className="input"
+            />
+
+            <input
+              placeholder="TRC20 гаманець або MetaMask"
+              value={profile.wallet}
+              onChange={(e) => setProfile({ ...profile, wallet: e.target.value })}
+              className="input"
+            />
+
+            <button onClick={connectMetamask} className="button">
+              {walletConnected ? '🟢 MetaMask підключено' : '🦊 Підключити MetaMask'}
+            </button>
+
+            <button onClick={() => setKycCompleted(true)} className="button">
+              {kycCompleted ? '✅ KYC пройдено' : '🛡 Пройти KYC'}
+            </button>
+
+            <button onClick={handleSaveProfile} className="button">💾 Зберегти профіль</button>
+          </div>
+
+          {/* Драфти сценаріїв */}
+          <div className="scenario-form">
+            <h2>Створити сценарій</h2>
+            <textarea
+              placeholder="Опис сценарію"
+              value={newScenarioDescription}
+              onChange={(e) => setNewScenarioDescription(e.target.value)}
+              className="input"
+            />
+            <input
+              type="number"
+              placeholder="Ціна в USDT"
+              value={newScenarioPrice}
+              onChange={(e) => setNewScenarioPrice(e.target.value)}
+              className="input"
+            />
+            <button onClick={handleAddScenario} className="button">Зберегти сценарій</button>
+          </div>
+
+          <div className="scenario-archive">
+            <h2>📝 Твої сценарії</h2>
+            <div className="scenarios-grid">
+              {scenarios.filter((s) => !s.hidden).map((s) => (
+                <div key={s.id} className="scenario-card">
+                  <div className="scenario-content">
+                    <p>{s.description}</p>
+                    <span>{s.price} USDT</span>
+                  </div>
+                  <div className="scenario-actions">
+                    <button onClick={() => handleHideScenario(s.id)}>🙈</button>
+                    <button onClick={() => handleDeleteScenario(s.id)}>🗑️</button>
+                  </div>
+                </div>
+              ))}
+              {scenarios.filter((s) => !s.hidden).length === 0 && (
+                <p>📝 Немає сценаріїв</p>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      </main>
     </ProfileAuthGate>
   );
 }
