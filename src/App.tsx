@@ -9,7 +9,7 @@ import Register        from './components/Register';
 import Profile         from './components/Profile';
 import AuthCallback    from './components/AuthCallback';
 import A2HS            from './components/A2HS';
-import AuthAutoCapture from './components/AuthAutoCapture'; // лишаємо
+import AuthAutoCapture from './components/AuthAutoCapture';
 
 import useViewportVH        from './lib/useViewportVH';
 import useGlobalImageHints  from './lib/useGlobalImageHints';
@@ -31,24 +31,32 @@ class ErrorBoundary extends React.Component<any, { error: any | null }> {
   constructor(props: any) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(error: any) { return { error }; }
   componentDidCatch(error: any, info: any) { console.error('[Render Error]', error, info); }
-  render() { return this.state.error
-    ? <div style={{ padding: 16, color: '#b91c1c', fontWeight: 600 }}>Помилка рендеру: {String((this.state.error as any)?.message ?? this.state.error)}</div>
-    : this.props.children; }
+  render() {
+    if (this.state.error) {
+      const msg = String((this.state.error as any)?.message ?? this.state.error);
+      return (
+        <div style={{ padding: 16, color: '#b91c1c', fontWeight: 600 }}>
+          Помилка рендеру: {msg}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
-// ⬇️ НОВЕ: якщо вже автентифікований — не показувати /register, а одразу на /profile
+/** Якщо користувач уже залогінений — не показуємо /register, а відразу ведемо в /profile */
 function RedirectIfAuthed({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const [ready, setReady] = useState(false);
-  const [isAuthed, setIsAuthed] = useState(false);
+  const [ready, setReady]   = useState(false);
+  const [isAuthed, setAuthed] = useState(false);
 
   useEffect(() => {
     let unsub: undefined | (() => void);
     (async () => {
       const { data } = await supabase.auth.getSession();
-      setIsAuthed(!!data.session);
+      setAuthed(!!data.session);
       const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-        setIsAuthed(!!session);
+        setAuthed(!!session);
       });
       unsub = () => sub.subscription.unsubscribe();
       setReady(true);
@@ -61,23 +69,44 @@ function RedirectIfAuthed({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Терплячий guard: чекає подію SIGNED_IN або невеликий таймаут, щоб не кидало на /register під час обміну коду на сесію */
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [checking, setChecking] = useState(true);
-  const [isAuthed, setIsAuthed] = useState(false);
+  const [isAuthed, setAuthed]   = useState(false);
 
   useEffect(() => {
     let unsub: undefined | (() => void);
+    let timeoutId: any;
+
     (async () => {
+      // 1) Миттєва перевірка
       const { data } = await supabase.auth.getSession();
-      setIsAuthed(!!data.session);
-      const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-        setIsAuthed(!!session);
+      if (data.session) {
+        setAuthed(true);
+        setChecking(false);
+        return;
+      }
+
+      // 2) Чекаємо подію логіну
+      const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          setAuthed(!!session);
+          setChecking(false);
+        } else if (event === 'SIGNED_OUT') {
+          setAuthed(false);
+        }
       });
       unsub = () => sub.subscription.unsubscribe();
-      setChecking(false);
+
+      // 3) Fallback — даємо до 2.5с на появу сесії
+      timeoutId = setTimeout(() => setChecking(false), 2500);
     })();
-    return () => { if (unsub) unsub(); };
+
+    return () => {
+      if (unsub) unsub();
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, []);
 
   if (checking) return <Loader />;
@@ -92,11 +121,13 @@ export default function App() {
   return (
     <>
       <NavigationBar />
-      <AuthAutoCapture /> {/* ловить ?code=... навіть якщо лінк відкрив не /auth/callback */}
+      {/* ловить ?code=... навіть якщо відкрили не /auth/callback */}
+      <AuthAutoCapture />
 
       <ErrorBoundary>
         <Suspense fallback={<Loader />}>
           <Routes>
+            {/* Рут → карта */}
             <Route path="/" element={<Navigate to="/map" replace />} />
 
             {/* Публічні */}
@@ -118,11 +149,12 @@ export default function App() {
             <Route path="/received"     element={<RequireAuth><ReceivedScenarios /></RequireAuth>} />
             <Route path="/manifest"     element={<RequireAuth><Manifest /></RequireAuth>} />
 
-            {/* Форма сценарію */}
+            {/* Форми сценаріїв */}
             <Route path="/scenario/new"       element={<RequireAuth><ScenarioForm /></RequireAuth>} />
             <Route path="/scenario/location"  element={<RequireAuth><ScenarioLocation /></RequireAuth>} />
             <Route path="/select-location"    element={<RequireAuth><ScenarioLocation /></RequireAuth>} />
 
+            {/* 404 */}
             <Route path="*" element={<div style={{ padding: 16 }}>Сторінку не знайдено</div>} />
           </Routes>
         </Suspense>
