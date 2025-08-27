@@ -1,98 +1,76 @@
-/* --- контейнер відео має бути відносним для оверлеїв --- */
-.shorts-video-wrapper {
-  position: relative;
+/* Проста колонка — скролиться сторінка, нічого не блокуємо */
+.shorts-container{
+  width:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:24px;
+  padding:12px 0 48px;
+  background:#fff;
 }
 
-/* Авторський чіп (кружечок) — ПОВЕРХ відео */
-.shorts-author-chip {
-  position: absolute;
-  left: 10px;
-  bottom: 10px;
-  width: 44px;
-  height: 44px;
-  border-radius: 9999px;
-  border: 2px solid #fff;
-  box-shadow: 0 4px 12px rgba(0,0,0,.25);
-  overflow: hidden;
-  background: #eee;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 2147483000; /* дуже високо, щоб ніщо не перекрило */
+/* Картка-елемент */
+.shorts-item{
+  width:360px;
+  max-width:min(90vw, 460px);
 }
 
-/* fallback-літера всередині чіпа (видна якщо немає/не завантажився аватар) */
-.shorts-author-fallback {
-  font-weight: 800;
-  color: #111;
-  font-size: 12px;
-  letter-spacing: .5px;
-  user-select: none;
+/* Відео-обгортка 9:16 */
+.shorts-video-wrapper{
+  position:relative;
+  width:100%;
+  aspect-ratio:9/16;
+  background:#000;
+  border-radius:16px;
+  overflow:hidden;
+  box-shadow:0 6px 24px rgba(0,0,0,.08);
 }
 
-/* зображення автора (накриває fallback, якщо завантажилось) */
-.shorts-author-img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
+/* Відео */
+.shorts-video{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
 }
 
-/* плашка з текстом */
-.shorts-caption {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  right: 48px;
-  padding: 8px 10px;
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,.25));
-  color: #fff;
-  font-size: 14px;
-  line-height: 1.25;
-  max-height: 120px;
-  overflow: hidden;
-  text-shadow: 0 1px 2px rgba(0,0,0,.6);
+/* Клікабельний аватар автора (в профіль) */
+.shorts-author-avatar{
+  position:absolute;
+  bottom:10px; left:10px;
+  width:50px; height:50px;
+  border-radius:50%;
+  object-fit:cover;
+  border:2px solid #fff;
+  z-index:3;
+  cursor:pointer;
+  background:#111;
 }
 
-.shorts-caption-title { font-weight: 700; margin-bottom: 4px; }
-.shorts-caption-text { opacity: .95; }
-
-/* плашка “Голосування завершено” */
-.vote-closed-pill {
-  position: absolute;
-  bottom: 60px;
-  left: 8px;
-  background: #fff;
-  border-radius: 999px;
-  padding: 8px 12px;
-  font-weight: 700;
-  box-shadow: 0 2px 8px rgba(0,0,0,.15);
-  z-index: 2147483000;
+/* Кнопки реакцій/шерінгу (праворуч угорі) */
+.shorts-buttons-panel{
+  position:absolute;
+  top:10px; right:10px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  z-index:4;
+}
+.shorts-buttons-panel button{
+  display:flex; align-items:center; justify-content:center;
+  width:38px; height:38px; border-radius:50%;
+  border:none; cursor:pointer;
+  background:#ffffffe6;
+  box-shadow:0 2px 8px rgba(0,0,0,.15);
+  font-size:18px;
+}
+.shorts-buttons-panel span{
+  position:absolute; top:40px;
+  font-size:12px; color:#333;
 }
 
-/* ряд кнопок голосування — зсунуто правіше, щоб не їхати на чіп */
-.vote-buttons-row {
-  position: absolute;
-  bottom: 8px;
-  left: 64px; /* ← місце під чіп автора */
-  right: 8px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  z-index: 2147483000;
+/* Адаптив-мобайл: тягнемо на всю ширину */
+@media (max-width: 420px){
+  .shorts-item{ width:100%; max-width:100%; border-radius:0; }
+  .shorts-video-wrapper{ border-radius:0; }
 }
-
-.vote-btn {
-  border: none;
-  border-radius: 999px;
-  padding: 10px 12px;
-  background: #ffffffd0;
-  backdrop-filter: blur(4px);
-  box-shadow: 0 2px 8px rgba(0,0,0,.15);
-  font-weight: 600;
-}
-.vote-btn:disabled { cursor: not-allowed; opacity: .7; }
