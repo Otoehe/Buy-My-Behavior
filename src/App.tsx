@@ -3,21 +3,23 @@ import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 
-import AuthAutoCapture from './components/AuthAutoCapture';
 import BehaviorsFeed   from './components/BehaviorsFeed';
 import NavigationBar   from './components/NavigationBar';
 import Register        from './components/Register';
 import Profile         from './components/Profile';
 import AuthCallback    from './components/AuthCallback';
 import A2HS            from './components/A2HS';
-
+import AuthAutoCapture from './components/AuthAutoCapture';
 
 import useViewportVH        from './lib/useViewportVH';
 import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 
-const MapView           = lazy(() => import('./components/MapView'));
+const MapView           = lazy(() => import('./components/MapView')); 
+// 🔧 ДЛЯ ШВИДКОГО ТЕСТУ /map РОЗКОМЕНТУЙ НА 1–2 ХВИЛИНИ:
+// const MapView = lazy(() => import('./components/__MapSmoke'));
+
 const MyOrders          = lazy(() => import('./components/MyOrders'));
 const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
 const Manifest          = lazy(() => import('./components/Manifest'));
@@ -35,29 +37,25 @@ class ErrorBoundary extends React.Component<any, { error: any | null }> {
   render() {
     if (this.state.error) {
       const msg = String((this.state.error as any)?.message ?? this.state.error);
-      return (
-        <div style={{ padding: 16, color: '#b91c1c', fontWeight: 600 }}>
-          Помилка рендеру: {msg}
-        </div>
-      );
+      return <div style={{ padding: 16, color: '#b91c1c', fontWeight: 600 }}>Помилка рендеру: {msg}</div>;
     }
     return this.props.children;
   }
 }
 
-/** Якщо користувач уже залогінений — не показуємо /register, а відразу ведемо в /profile */
+// ⬇️ якщо юзер вже авторизований — не показуємо /register (крім dev-варіанту ?force=1)
 function RedirectIfAuthed({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const [ready, setReady]   = useState(false);
-  const [isAuthed, setAuthed] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [isAuthed, setIsAuthed] = useState(false);
 
   useEffect(() => {
     let unsub: undefined | (() => void);
     (async () => {
       const { data } = await supabase.auth.getSession();
-      setAuthed(!!data.session);
+      setIsAuthed(!!data.session);
       const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-        setAuthed(!!session);
+        setIsAuthed(!!session);
       });
       unsub = () => sub.subscription.unsubscribe();
       setReady(true);
@@ -66,48 +64,31 @@ function RedirectIfAuthed({ children }: { children: React.ReactNode }) {
   }, []);
 
   if (!ready) return <Loader />;
-  if (isAuthed) return <Navigate to="/profile" replace state={{ from: location }} />;
+
+  // ✅ дозволяємо /register навіть коли залогінений, якщо явно додано ?force=1
+  const force = new URLSearchParams(location.search).get('force');
+  if (isAuthed && !force) return <Navigate to="/profile" replace state={{ from: location }} />;
+
   return <>{children}</>;
 }
 
-/** Терплячий guard: чекає подію SIGNED_IN або невеликий таймаут, щоб не кидало на /register під час обміну коду на сесію */
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [checking, setChecking] = useState(true);
-  const [isAuthed, setAuthed]   = useState(false);
+  const [isAuthed, setIsAuthed] = useState(false);
 
   useEffect(() => {
     let unsub: undefined | (() => void);
-    let timeoutId: any;
-
     (async () => {
-      // 1) Миттєва перевірка
       const { data } = await supabase.auth.getSession();
-      if (data.session) {
-        setAuthed(true);
-        setChecking(false);
-        return;
-      }
-
-      // 2) Чекаємо подію логіну
-      const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-          setAuthed(!!session);
-          setChecking(false);
-        } else if (event === 'SIGNED_OUT') {
-          setAuthed(false);
-        }
+      setIsAuthed(!!data.session);
+      const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+        setIsAuthed(!!session);
       });
       unsub = () => sub.subscription.unsubscribe();
-
-      // 3) Fallback — даємо до 2.5с на появу сесії
-      timeoutId = setTimeout(() => setChecking(false), 2500);
+      setChecking(false);
     })();
-
-    return () => {
-      if (unsub) unsub();
-      if (timeoutId) clearTimeout(timeoutId);
-    };
+    return () => { if (unsub) unsub(); };
   }, []);
 
   if (checking) return <Loader />;
@@ -122,13 +103,12 @@ export default function App() {
   return (
     <>
       <NavigationBar />
-      {/* ловить ?code=... навіть якщо відкрили не /auth/callback */}
-      <AuthAutoCapture />
+      <AuthAutoCapture /> {/* перехоплення повернення з маг-лінка тільки за наявності code/токенів */}
 
       <ErrorBoundary>
         <Suspense fallback={<Loader />}>
           <Routes>
-            {/* Рут → карта */}
+            {/* Домашній редірект на карту */}
             <Route path="/" element={<Navigate to="/map" replace />} />
 
             {/* Публічні */}
@@ -150,7 +130,7 @@ export default function App() {
             <Route path="/received"     element={<RequireAuth><ReceivedScenarios /></RequireAuth>} />
             <Route path="/manifest"     element={<RequireAuth><Manifest /></RequireAuth>} />
 
-            {/* Форми сценаріїв */}
+            {/* Форма сценарію */}
             <Route path="/scenario/new"       element={<RequireAuth><ScenarioForm /></RequireAuth>} />
             <Route path="/scenario/location"  element={<RequireAuth><ScenarioLocation /></RequireAuth>} />
             <Route path="/select-location"    element={<RequireAuth><ScenarioLocation /></RequireAuth>} />
