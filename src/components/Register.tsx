@@ -79,11 +79,15 @@ export default function Register() {
     [email]
   );
 
-  // куди редіректити після маглінка
-  const base =
+  // ====== REDIRECTS (ОНОВЛЕНО) ======
+  const siteUrl =
     (import.meta.env.VITE_PUBLIC_APP_URL as string) ||
     (typeof window !== 'undefined' ? window.location.origin : '');
-  const redirectTo = `${base}/auth/callback?next=${encodeURIComponent('/profile')}`;
+
+  // новий користувач → після підтвердження на /profile
+  const redirectToSignup = `${siteUrl}/auth/callback?next=${encodeURIComponent('/profile')}`;
+  // існуючий користувач → після входу на /map
+  const redirectToLogin  = `${siteUrl}/auth/callback?next=${encodeURIComponent('/map')}`;
 
   // ====== HANDLERS ======
   // Реєстрація з реф-кодом
@@ -121,11 +125,14 @@ export default function Register() {
       // збережемо контекст до колбеку
       localStorage.setItem('referred_by', data.user_id);
       localStorage.setItem('referrer_wallet', data.wallet || '');
-      localStorage.setItem('post_auth_next', '/profile');
+      localStorage.setItem('post_auth_next', '/profile'); // ОНОВЛЕНО
 
       const { error: sErr } = await supabase.auth.signInWithOtp({
         email: email.trim(),
-        options: { emailRedirectTo: redirectTo },
+        options: {
+          emailRedirectTo: redirectToSignup,      // ОНОВЛЕНО
+          shouldCreateUser: true,                 // ОНОВЛЕНО (явно)
+        },
       });
       if (sErr) throw sErr;
 
@@ -152,13 +159,13 @@ export default function Register() {
     startFlight();
 
     try {
-      localStorage.setItem('post_auth_next', '/profile');
+      localStorage.setItem('post_auth_next', '/map'); // ОНОВЛЕНО
 
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
         options: {
-          emailRedirectTo: redirectTo,
-          shouldCreateUser: false, // тільки вхід
+          emailRedirectTo: redirectToLogin,       // ОНОВЛЕНО
+          shouldCreateUser: false,                // тільки вхід
         },
       });
       if (error) throw error;

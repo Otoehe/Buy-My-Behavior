@@ -1,49 +1,49 @@
 // src/components/AuthCallback.tsx
 import { useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
 export default function AuthCallback() {
   const navigate = useNavigate();
-  const loc = useLocation();
 
   useEffect(() => {
     (async () => {
-      try {
-        const qs = new URLSearchParams(loc.search);
-        const code = qs.get('code');
-        const next = qs.get('next') || localStorage.getItem('post_auth_next') || '/profile';
+      const href = window.location.href;
 
-        if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
+      try {
+        // Чи є хоч якісь auth-параметри в URL
+        const hasAuth =
+          /[?&](code|token_hash|error|error_description)=/.test(href) ||
+          href.includes('#access_token');
+
+        if (hasAuth) {
+          // Обмін лінка на сесію (працює для code, token_hash і hash)
+          const { error } = await supabase.auth.exchangeCodeForSession(href);
           if (error) throw error;
-        } else {
-          const hash = window.location.hash || '';
-          if (hash.includes('access_token') || hash.includes('refresh_token')) {
-            // @ts-ignore
-            const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
-            if (error) throw error;
-          }
         }
 
-        // дочекаємось сесію
+        // дочекаємося появи сесії
         for (let i = 0; i < 20; i++) {
           const { data } = await supabase.auth.getSession();
           if (data.session) break;
           await new Promise(r => setTimeout(r, 100));
         }
 
+        // куди далі
+        const sp = new URLSearchParams(window.location.search);
+        const next =
+          sp.get('next') ||
+          localStorage.getItem('post_auth_next') ||
+          '/map';
         try { localStorage.removeItem('post_auth_next'); } catch {}
 
-        // красиво чистимо URL
-        try { window.history.replaceState(null, '', next); } catch {}
         navigate(next, { replace: true });
       } catch (e) {
-        console.error('Auth callback error', e);
+        console.error('[AuthCallback]', e);
         navigate('/register', { replace: true });
       }
     })();
-  }, [loc.search, navigate]);
+  }, [navigate]);
 
   return null;
 }
