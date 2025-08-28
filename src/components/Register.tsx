@@ -35,16 +35,12 @@ export default function Register() {
                 await supabase.from('profiles').upsert(payload, { onConflict: 'user_id' });
               }
             }
-          } catch {
-            // ignore
-          }
+          } catch { /* ignore */ }
 
           navigate('/profile', { replace: true });
           return;
         }
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
 
       // якщо сесія з'явиться — одразу злітаємо з /register
       const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
@@ -71,8 +67,9 @@ export default function Register() {
   const startFlight = (ms = 2400) => { inFlightRef.current = true; setCooldownUntil(Date.now() + ms); };
   const endFlight   = () => { inFlightRef.current = false; };
 
-  // модалка «реєстрація лише за реф-кодом»
+  // модалки
   const [showRefModal, setShowRefModal] = useState(false);
+  const [showEmailSentModal, setShowEmailSentModal] = useState(false); // ← нова модалка
 
   const isEmailValid = useMemo(
     () => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
@@ -131,7 +128,8 @@ export default function Register() {
       });
       if (sErr) throw sErr;
 
-      alert('Лист надіслано. Перевірте пошту.');
+      // ✅ замість alert — корпоративна модалка
+      setShowEmailSentModal(true);
     } catch (err: any) {
       alert('Помилка реєстрації: ' + (err?.message || 'невідома'));
     } finally {
@@ -165,7 +163,8 @@ export default function Register() {
       });
       if (error) throw error;
 
-      alert('Лист для входу надіслано. Перевірте пошту.');
+      // ✅ та ж корпоративна модалка
+      setShowEmailSentModal(true);
     } catch (err: any) {
       alert('Помилка входу: ' + (err?.message || 'невідома'));
     } finally {
@@ -236,6 +235,31 @@ export default function Register() {
             Якщо коду немає — зверніться до амбасадора BMB.
           </p>
           <button type="button" className="bmb-btn-black" onClick={() => setShowRefModal(false)}>
+            Добре
+          </button>
+        </div>
+      </div>
+
+      {/* === BMB MODAL: “Перейдіть на пошту — ми надіслали посилання” (для signup & login) === */}
+      <div
+        className="bmb-modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bmb-mail-modal-title"
+        style={{ display: showEmailSentModal ? 'flex' : 'none' }}
+        onClick={(e) => { if (e.target === e.currentTarget) setShowEmailSentModal(false); }}
+        onKeyDown={(e) => { if (e.key === 'Escape') setShowEmailSentModal(false); }}
+      >
+        <div className="bmb-modal-card bmb-pink-bubbles">
+          <div className="bmb-modal-icon">📧</div>
+          <h3 id="bmb-mail-modal-title">Перейдіть на пошту — ми надіслали посилання</h3>
+          <p>
+            Відкрийте лист і натисніть кнопку входу. Якщо листа немає — перевірте “Спам”.
+            <br />
+            <strong>Порада:</strong> якщо сторінка відкрилася в застосунку пошти,
+            виберіть «Відкрити в Chrome/Safari», щоб продовжити у чистому браузері.
+          </p>
+          <button type="button" className="bmb-btn-black" onClick={() => setShowEmailSentModal(false)}>
             Добре
           </button>
         </div>
