@@ -89,7 +89,7 @@
   border-radius: 50%;
   object-fit: cover;
   background: #fff;
-  border: 2px solid #fff;                 /* тільки біла обводка */
+  border: 1px solid #fff;                 /* тільки біла обводка */
   box-shadow: 0 4px 10px rgba(0,0,0,.35); /* м'яка тінь */
   cursor: pointer;
   z-index: 4;
