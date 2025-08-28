@@ -11,8 +11,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 // ========= Canvas REST config (для LIVE у канві — опційно) =========
-const SUPABASE_URL = '' as string; // напр.: 'https://xyz.supabase.co'
-const SUPABASE_ANON_KEY = '' as string; // напр.: 'eyJhbGciOi...'
+// читати з env, якщо вони задані на Vercel/локально
+// @ts-ignore
+const SUPABASE_URL = (typeof process !== 'undefined' && (process.env as any)?.NEXT_PUBLIC_SUPABASE_URL) || '' as string; // напр.: 'https://xyz.supabase.co'
+// @ts-ignore
+const SUPABASE_ANON_KEY = (typeof process !== 'undefined' && (process.env as any)?.NEXT_PUBLIC_SUPABASE_ANON_KEY) || '' as string; // напр.: 'eyJhbGciOi...'
 const hasLiveCreds = !!SUPABASE_URL && !!SUPABASE_ANON_KEY;
 async function restGet(pathAndQuery: string) {
   const res = await fetch(`${SUPABASE_URL}${pathAndQuery}`, {
@@ -76,7 +79,11 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
       if (!v) return;
       const play = id === activeId;
       v.muted = mutedMap[id] ?? true;
-      play ? v.play().catch(() => {}) : v.pause();
+      if (play) {
+        v.play().catch(() => {});
+      } else {
+        v.pause();
+      }
     });
   }, [activeId, mutedMap]);
 
@@ -196,7 +203,7 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
               <button style={moreBtn} title="меню">⋯</button>
 
               {it.authorAvatarUrl && (
-                <div style={avatar} onClick={()=> it.authorId && onOpenAuthor?.(it.authorId)} title="Профіль автора">
+                <div style={avatar} onClick={()=> { try { if(it.authorId) onOpenAuthor?.(it.authorId); } catch { /* noop */ } }} title="Профіль автора">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={it.authorAvatarUrl} alt="author" style={{ width:'100%',height:'100%',objectFit:'cover' }} onError={(e)=>((e.currentTarget as HTMLImageElement).style.display='none')} />
                 </div>
@@ -210,14 +217,14 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
               <div style={actions}>
                 {hasDispute ? (
                   <>
-                    <button style={{...btn, background:'#111', color:'#fff'}} onClick={()=> onVote?.(it.disputeId!, 'performer')}>підтримати виконавця ({perf})</button>
-                    <button style={{...btn, background:'#9ca3af', color:'#fff'}} onClick={()=> onVote?.(it.disputeId!, 'customer')}>підтримати замовника ({cust})</button>
+                    <button style={{...btn, background:'#111', color:'#fff'}} onClick={async()=>{ try { await onVote?.(it.disputeId!, 'performer'); } catch { /* noop */ } }}>підтримати виконавця ({perf})</button>
+                    <button style={{...btn, background:'#9ca3af', color:'#fff'}} onClick={async()=>{ try { await onVote?.(it.disputeId!, 'customer'); } catch { /* noop */ } }}>підтримати замовника ({cust})</button>
                     {/* За потреби: <button style={btn} onClick={()=> onViewDispute?.(it.id)}>деталі спору</button> */}
                   </>
                 ) : (
                   <>
-                    <button style={{...btn, background:'#e5e7eb'}} onClick={()=> onOpenAuthor && it.authorId && onOpenAuthor(it.authorId)}>профіль автора</button>
-                    <button style={{...btn, background:'#e5e7eb'}} onClick={()=> onShare?.(it.id)}>поділитись</button>
+                    <button style={{...btn, background:'#e5e7eb'}} onClick={()=>{ try { if (it.authorId) onOpenAuthor?.(it.authorId); } catch { /* noop */ } }}>профіль автора</button>
+                    <button style={{...btn, background:'#e5e7eb'}} onClick={()=>{ try { onShare?.(it.id); } catch { /* noop */ } }}>поділитись</button>
                   </>
                 )}
               </div>
@@ -240,13 +247,15 @@ export function BehaviorsFeedLiveFromSupabase() {
       // тягнемо відео прямо з behaviors
       const select = 'id,ipfs_cid,file_url,thumbnail_url,title,description,created_at,dispute_id,author_id,is_dispute_evidence,profiles:author_id(id,avatar_url)';
       const rows = await restGet(`/rest/v1/behaviors?select=${encodeURIComponent(select)}&order=created_at.desc&limit=100`);
-      const base: BehaviorItem[] = (rows||[]).map((b:any)=>({
-        id:b.id, title:b.title, description:b.description, authorId:b.author_id??null,
-        authorAvatarUrl:b?.profiles?.avatar_url??null,
-        mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url??null),
-        posterUrl:b.thumbnail_url??null, createdAt:b.created_at??null,
-        isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
-      }));
+      const base: BehaviorItem[] = (rows||[]).map((b:any)=>(
+        {
+          id:b.id, title:b.title, description:b.description, authorId:b.author_id??null,
+          authorAvatarUrl:b?.profiles?.avatar_url??null,
+          mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url??null),
+          posterUrl:b.thumbnail_url??null, createdAt:b.created_at??null,
+          isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
+        }
+      ));
       // dispute status + counts
       const dispIds = Array.from(new Set(base.map(x=>x.disputeId).filter(Boolean))) as string[];
       let statusMap:any = {}, countsMap:any = {};
@@ -263,22 +272,26 @@ export function BehaviorsFeedLiveFromSupabase() {
 
   if (!hasLiveCreds) return <div style={{padding:16}}>Додай <code>SUPABASE_URL</code> і <code>SUPABASE_ANON_KEY</code> для LIVE у канві.</div>;
   if (err) return <div style={{padding:16,color:'#b91c1c'}}>Помилка: {err}</div>;
-  return <BehaviorsFeedFullScreen items={items} onShare={(id)=>{ try{navigator.share?.({title:'Buy My Behavior', url: location.href});}catch{}}} />;
+  return <BehaviorsFeedFullScreen items={items} onShare={(id)=>{ try{navigator.share?.({title:'Buy My Behavior', url: location.href});}catch{ /* noop */ } }} />;
 }
 
 // ============================== Preview (демо) =============================
 export function BehaviorsFeedPreview(){
   const demo:BehaviorItem[] = [
-    { id:1, title:'Video evidence', description:'Завантажено з StoryBar', mediaUrl:null, isEvidence:true, disputeId:'d1', disputeStatus:'open', disputeStats:{ performer:12, customer:8 }, authorId:'u1', authorAvatarUrl:null },
-    { id:2, title:'Класичний біхейворс', description:'Без спору', mediaUrl:null, isEvidence:false, authorId:'u2', authorAvatarUrl:null },
+    { id:101, title:'Video evidence', description:'Завантажено з StoryBar', mediaUrl:'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4', isEvidence:true, disputeId:'demo1', disputeStatus:'open', disputeStats:{ performer:12, customer:8 }, authorId:'u1', authorAvatarUrl:'https://i.pravatar.cc/100?img=12' },
+    { id:102, title:'Класичний біхейворс', description:'Без спору', mediaUrl:'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4', isEvidence:false, authorId:'u2', authorAvatarUrl:'https://i.pravatar.cc/100?img=32' },
   ];
   return <BehaviorsFeedFullScreen items={demo}/>;
 }
 
 // ============================ Default export ============================
 export default function BehaviorsFeedEntry({ supabase: supabaseClient, loader }: { supabase?: any; loader?: () => Promise<BehaviorItem[]> } = {}){
-  // Можна передати supabase ззовні або залишити автопошук через window.supabase
-  return <BehaviorsFeedProd supabase={supabaseClient} loader={loader}/>;
+  // Порядок: якщо є REST env і немає переданого клієнта — показати live через REST;
+  // якщо є клієнт/лоадер — прод‑варіант; інакше — превʼю з демо‑відео, щоб було видно в канві.
+  const sb = supabaseClient || (typeof window !== 'undefined' ? (window as any).supabase : undefined);
+  if (hasLiveCreds && !sb && !loader) return <BehaviorsFeedLiveFromSupabase/>;
+  if (sb || loader) return <BehaviorsFeedProd supabase={sb} loader={loader}/>;
+  return <BehaviorsFeedPreview/>;
 }
 
 // =============================== PROD Loader ===============================
@@ -294,22 +307,26 @@ export function BehaviorsFeedProd({ loader, supabase: sbFromProp }: { loader?: (
   useEffect(()=>{ let alive=true; (async()=>{
     try{
       let list:BehaviorItem[]|null=null;
-      if (typeof loader==='function') list = await loader();
-      else if (typeof window!=='undefined' && typeof window.__bmb_load_behaviors==='function') list = await window.__bmb_load_behaviors();
-      else if (sb && sb.from){
+      if (typeof loader==='function') {
+        list = await loader();
+      } else if (typeof window!=='undefined' && typeof window.__bmb_load_behaviors==='function') {
+        list = await window.__bmb_load_behaviors();
+      } else if (sb && sb.from){
         const { data, error } = await sb.from('behaviors').select(`
           id, ipfs_cid, file_url, thumbnail_url, title, description, created_at,
           dispute_id, author_id, is_dispute_evidence,
           profiles:author_id(id, avatar_url)
         `).order('created_at',{ascending:false}).limit(100);
         if (error) throw error;
-        const base:BehaviorItem[] = (data||[]).map((b:any)=>({
-          id:b.id, title:b.title, description:b.description, authorId:b.author_id??null,
-          authorAvatarUrl:b?.profiles?.avatar_url??null,
-          mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url??null),
-          posterUrl:b.thumbnail_url??null, createdAt:b.created_at??null,
-          isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
-        }));
+        const base:BehaviorItem[] = (data||[]).map((b:any)=>(
+          {
+            id:b.id, title:b.title, description:b.description, authorId:b.author_id??null,
+            authorAvatarUrl:b?.profiles?.avatar_url??null,
+            mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url??null),
+            posterUrl:b.thumbnail_url??null, createdAt:b.created_at??null,
+            isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
+          }
+        ));
         const dispIds = Array.from(new Set(base.map(x=>x.disputeId).filter(Boolean))) as string[];
         let statusMap:any={}, countsMap:any={}, myMap:any={};
         if (dispIds.length){
@@ -325,26 +342,65 @@ export function BehaviorsFeedProd({ loader, supabase: sbFromProp }: { loader?: (
           }
         }
         list = base.map((r)=>({ ...r, disputeStatus: statusMap[r.disputeId||'']??null, disputeStats: countsMap[r.disputeId||'']??null, myVote: myMap[r.disputeId||'']??null }));
-      } else list = [];
+      } else if (hasLiveCreds) {
+        // Fallback через REST (працює без window.supabase) — production friendly
+        const select = 'id,ipfs_cid,file_url,thumbnail_url,title,description,created_at,dispute_id,author_id,is_dispute_evidence,profiles:author_id(id,avatar_url)';
+        const rows = await restGet(`/rest/v1/behaviors?select=${encodeURIComponent(select)}&order=created_at.desc&limit=100`);
+        const base: BehaviorItem[] = (rows||[]).map((b:any)=>(
+          {
+            id:b.id, title:b.title, description:b.description, authorId:b.author_id??null,
+            authorAvatarUrl:b?.profiles?.avatar_url??null,
+            mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url??null),
+            posterUrl:b.thumbnail_url??null, createdAt:b.created_at??null,
+            isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
+          }
+        ));
+        const dispIds = Array.from(new Set(base.map(x=>x.disputeId).filter(Boolean))) as string[];
+        let statusMap:any={}, countsMap:any={};
+        if (dispIds.length){
+          const ds = await restGet(`/rest/v1/disputes?select=id,status&in.id=(${encodeURIComponent(dispIds.join(','))})`);
+          (ds||[]).forEach((d:any)=> statusMap[d.id]=d.status);
+          const cnt = await restGet(`/rest/v1/dispute_vote_counts?select=dispute_id,performer_votes,customer_votes&in.dispute_id=(${encodeURIComponent(dispIds.join(','))})`);
+          (cnt||[]).forEach((c:any)=> countsMap[c.dispute_id]={ performer:c.performer_votes||0, customer:c.customer_votes||0 });
+        }
+        list = base.map((r)=>({ ...r, disputeStatus: statusMap[r.disputeId||'']??null, disputeStats: countsMap[r.disputeId||'']??null }));
+      } else {
+        list = [];
+      }
       if (alive) setItems(list||[]);
-    }catch(e){ console.error('BehaviorsFeedProd load:', e); if(alive) setItems([]); }
+    }catch(e){
+      console.error('BehaviorsFeedProd load:', e);
+      if(alive) setItems([]);
+    }
   })(); return ()=>{alive=false}; }, [loader, sb]);
 
   const cast = async (disputeId:string, choice:VoteChoice)=>{
-    if (!sb) return;
-    const { data: auth } = await sb.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid){ alert('Увійдіть, щоб голосувати'); return; }
-    // upsert по унікальному ключу (dispute_id,user_id)
-    const { error } = await sb.from('dispute_votes').upsert({ dispute_id: disputeId, user_id: uid, choice }, { onConflict: 'dispute_id,user_id' });
-    if (error){ alert(error.message); return; }
-    // оновити лічильники
-    const { data: cnt } = await sb.from('dispute_vote_counts').select('dispute_id, performer_votes, customer_votes').eq('dispute_id', disputeId).maybeSingle();
-    setItems((prev)=> prev.map((it)=> it.disputeId===disputeId ? ({ ...it, myVote: choice, disputeStats: { performer: cnt?.performer_votes||0, customer: cnt?.customer_votes||0 }}) : it));
+    try{
+      if (!sb) { alert('Голосування доступне після входу в застосунок'); return; }
+      const { data: auth } = await sb.auth.getUser();
+      const uid = auth?.user?.id;
+      if (!uid){ alert('Увійдіть, щоб голосувати'); return; }
+      // upsert по унікальному ключу (dispute_id,user_id)
+      const { error } = await sb.from('dispute_votes').upsert({ dispute_id: disputeId, user_id: uid, choice }, { onConflict: 'dispute_id,user_id' });
+      if (error){ alert(error.message); return; }
+      // оновити лічильники
+      const { data: cnt } = await sb.from('dispute_vote_counts').select('dispute_id, performer_votes, customer_votes').eq('dispute_id', disputeId).maybeSingle();
+      setItems((prev)=> prev.map((it)=> it.disputeId===disputeId ? ({ ...it, myVote: choice, disputeStats: { performer: cnt?.performer_votes||0, customer: cnt?.customer_votes||0 }}) : it));
+    }catch(err){
+      console.error('vote error', err);
+    }
   };
 
-  if (!sb && !loader && typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-    console.warn('[BMB] supabase client не знайдено. Передай проп `supabase` або поклади інстанс у window.supabase');
+  if (!sb && !loader && !hasLiveCreds && typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+    console.warn('[BMB] supabase client не знайдено. Передай проп `supabase`, поклади інстанс у window.supabase або задай NEXT_PUBLIC_SUPABASE_URL/NEXT_PUBLIC_SUPABASE_ANON_KEY для REST‑fallback.');
   }
-  return <BehaviorsFeedFullScreen items={items} onVote={cast} onOpenAuthor={(aid)=>{ try{ if(aid) window.location.href=`/map?profile=${aid}` }catch{}}} onViewDispute={(id)=>{ try{ window.location.href=`/disputes/${id}` }catch{}}} onShare={()=>{ try{navigator.share?.({title:'Buy My Behavior', url: location.href});}catch{}}} />;
+  return (
+    <BehaviorsFeedFullScreen
+      items={items}
+      onVote={cast}
+      onOpenAuthor={(aid)=>{ try{ if(aid) window.location.href=`/map?profile=${aid}` }catch{ /* noop */ } }}
+      onViewDispute={(id)=>{ try{ window.location.href=`/disputes/${id}` }catch{ /* noop */ } }}
+      onShare={()=>{ try{navigator.share?.({title:'Buy My Behavior', url: location.href});}catch{ /* noop */ } }}
+    />
+  );
 }
