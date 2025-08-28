@@ -4,10 +4,9 @@
 // ✅ 1 картка = 1 екран (100vh), скрол по одному елементу
 // ✅ Текст сценарію зверху зліва у напівпрозорому рожевому блоці (читабельно на мобільному)
 // ✅ Кнопка «Поділитись» праворуч зверху, аватар власника знизу зліва (натиснув — перехід у профіль)
-// ✅ Кнопки вибору сторони (виконавець/замовник) — знизу (як на ескізі)
-// ✅ Музика/звук: якщо у айтема є відео — керуємо звуком відео; якщо є music_url — керуємо аудіо
+// ✅ Кнопки на картці: без спору — «обрати сторону…», зі спором — «підтримати сторону…» + бейдж ⚖️
+// ✅ Звук/музика лише в активному екрані (autoplay muted → toggle)
 // ⚠️ У РЕПО: НЕ експортуй PREVIEW як default. Використовуй `BehaviorsFeedFullScreen` з реальними даними.
-// ⚠️ Якщо бачиш демо‑тексти («Щоденна прогулянка…») — ти випадково підхопив PREVIEW у проді.
 
 import React, { useEffect, useRef, useState } from 'react'
 
@@ -22,6 +21,10 @@ export type BehaviorItem = {
   posterUrl?: string | null
   musicUrl?: string | null // опційно: окремий аудіотрек
   createdAt?: string | null
+  // ⚖️ спір
+  disputeId?: string | null
+  disputeStatus?: 'open' | 'closed' | 'resolved' | null
+  disputeStats?: { performer?: number; customer?: number } | null
 }
 
 export type BehaviorsFeedProps = {
@@ -30,10 +33,14 @@ export type BehaviorsFeedProps = {
   onPickCustomer?: (id: BehaviorItem['id']) => void
   onShare?: (id: BehaviorItem['id']) => void
   onOpenAuthor?: (authorId: string) => void
+  // спор
+  onViewDispute?: (id: BehaviorItem['id']) => void
+  onVotePerformer?: (id: BehaviorItem['id']) => void
+  onVoteCustomer?: (id: BehaviorItem['id']) => void
 }
 
 // ========================== Full‑screen Feed ===============================
-export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, onPickPerformer, onPickCustomer, onShare, onOpenAuthor }) => {
+export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, onPickPerformer, onPickCustomer, onShare, onOpenAuthor, onViewDispute, onVotePerformer, onVoteCustomer }) => {
   const [activeId, setActiveId] = useState<BehaviorItem['id'] | null>(items?.[0]?.id ?? null)
   const [mutedMap, setMutedMap] = useState<Record<string | number, boolean>>({})
 
@@ -125,18 +132,30 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
 
   const actionsWrap: React.CSSProperties = {
     position: 'absolute', left: 12, right: 12, bottom: 14,
-    display: 'flex', justifyContent: 'space-between', gap: 12
+    display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center'
   }
   const sideBtn: React.CSSProperties = {
     borderRadius: 999, padding: '10px 14px', fontWeight: 800,
     background: '#9ca3af', color: '#fff', border: 'none'
   }
+  const voteBtn: React.CSSProperties = { ...sideBtn, background: '#111', border: '1px solid #111' }
+
+  const chip: React.CSSProperties = {
+    position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+    background: '#fff', border: '1px solid #ffd6df', padding: '6px 10px', borderRadius: 999,
+    boxShadow: '0 4px 16px rgba(0,0,0,.08)', fontWeight: 800, display: 'flex', gap: 8, alignItems: 'center'
+  }
+
+  const statsPill: React.CSSProperties = {
+    display: 'inline-grid', gridTemplateColumns: '1fr 1fr', gap: 6,
+    background: '#fff', border: '1px solid #eee', borderRadius: 999, padding: '4px 8px', fontSize: 12
+  }
 
   const fmt = (v?: string | null) => (v ? v : '')
 
   const handleShare = (it: BehaviorItem) => {
-    const url = it.mediaUrl || window.location.href
-    if (navigator.share) navigator.share({ title: it.title || 'Buy My Behavior', url }).catch(()=>{})
+    const url = it.mediaUrl || (typeof window !== 'undefined' ? window.location.href : '')
+    if (typeof navigator !== 'undefined' && navigator.share) navigator.share({ title: it.title || 'Buy My Behavior', url }).catch(()=>{})
     else onShare?.(it.id)
   }
 
@@ -147,6 +166,9 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
       {items.map((it) => {
         const id = String(it.id)
         const muted = !!mutedMap[id]
+        const hasDispute = !!it.disputeId
+        const perf = it.disputeStats?.performer ?? 0
+        const cust = it.disputeStats?.customer ?? 0
         return (
           <section key={id} data-id={id} ref={(el) => (wrapRefs.current[id] = el)} style={section}>
             {/* VIDEO (if present) */}
@@ -173,6 +195,17 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
               <div style={captionWrap}>
                 {it.title && <div style={titleStyle}>{fmt(it.title)}</div>}
                 {it.description && <div style={descStyle}>{fmt(it.description)}</div>}
+              </div>
+            )}
+
+            {/* DISPUTE CHIP (top‑center) */}
+            {hasDispute && (
+              <div style={chip}>
+                <span>⚖️ Спір</span>
+                {(perf > 0 || cust > 0) && (
+                  <span style={statsPill}><span>👷 {perf}</span><span>🧑‍💼 {cust}</span></span>
+                )}
+                {it.disputeStatus === 'open' && <span style={{ fontSize: 12, color: '#ef4444', fontWeight: 800 }}>open</span>}
               </div>
             )}
 
@@ -203,8 +236,22 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
 
             {/* ACTIONS (bottom) */}
             <div style={actionsWrap}>
-              <button style={sideBtn} onClick={() => onPickPerformer?.(it.id)}>обрати сторону виконавця</button>
-              <button style={sideBtn} onClick={() => onPickCustomer?.(it.id)}>обрати сторону замовника</button>
+              {hasDispute && it.disputeStatus === 'open' ? (
+                <>
+                  <button style={voteBtn} onClick={() => onVotePerformer?.(it.id)}>підтримати виконавця</button>
+                  <button style={voteBtn} onClick={() => onVoteCustomer?.(it.id)}>підтримати замовника</button>
+                  <button style={sideBtn} onClick={() => onViewDispute?.(it.id)}>деталі спору</button>
+                </>
+              ) : hasDispute ? (
+                <>
+                  <button style={sideBtn} onClick={() => onViewDispute?.(it.id)}>результат спору</button>
+                </>
+              ) : (
+                <>
+                  <button style={sideBtn} onClick={() => onPickPerformer?.(it.id)}>обрати сторону виконавця</button>
+                  <button style={sideBtn} onClick={() => onPickCustomer?.(it.id)}>обрати сторону замовника</button>
+                </>
+              )}
             </div>
           </section>
         )
@@ -218,10 +265,10 @@ export default function BehaviorsFeedPreview() {
   const demo: BehaviorItem[] = [
     { id: 1, title: 'Щоденна прогулянка 10к кроків', description: 'Сценарій читається поверх, компактно й читабельно.', authorId: 'u1', authorAvatarUrl: null, mediaUrl: null, posterUrl: null },
     { id: 2, title: 'Вчасний сон 22:30', description: `М’який рожевий блок.
-Прев’ю у Canvas без зовнішніх ресурсів.`, authorId: 'u2', mediaUrl: null, posterUrl: null },
+Прев’ю у Canvas без зовнішніх ресурсів.`, authorId: 'u2', mediaUrl: null, posterUrl: null, disputeId: 'dsp_22', disputeStatus: 'open', disputeStats: { performer: 12, customer: 8 } },
     { id: 3, title: '30 хв читання', description: 'Кнопка поділитись праворуч. Аватар знизу ліворуч.', authorId: 'u3', mediaUrl: null, posterUrl: null },
     { id: 4, title: 'Довгий опис для перевірки переносу', description: `Це дуже довгий текст опису, який перевіряє перенос рядків,
-scroll‑snap між екранами і відображення напівпрозорого блоку.`, authorId: 'u4', mediaUrl: null, posterUrl: null },
+scroll‑snap між екранами і відображення напівпрозорого блоку.`, authorId: 'u4', mediaUrl: null, posterUrl: null, disputeId: 'dsp_44', disputeStatus: 'closed', disputeStats: { performer: 30, customer: 31 } },
   ]
 
   return (
@@ -231,26 +278,31 @@ scroll‑snap між екранами і відображення напівпр
       onPickCustomer={(id) => alert('Вибрано сторону замовника #' + id)}
       onShare={(id) => alert('Поділитись #' + id)}
       onOpenAuthor={(aid) => alert('Відкрити профіль: ' + aid)}
+      onViewDispute={(id) => alert('Відкрити спір #' + id)}
+      onVotePerformer={(id) => alert('Голос за виконавця #' + id)}
+      onVoteCustomer={(id) => alert('Голос за замовника #' + id)}
     />
   )
 }
 
 // =========================== Інтеграція у репо ============================
-// 1) У вашому файлі з реальними даними (де вже є `behaviors`, `scenarioTextByBehavior`, `navigate`, тощо)
-//    ЗАМІНИ return(...) на цей drop‑in (підставляє дані у стрічку):
+// 1) Drop‑in return(...) під реальні дані + спори:
 //
 // return (
 //   <BehaviorsFeedFullScreen
 //     items={behaviors.map((b) => ({
 //       id: b.id,
-//       title: (scenarioTextByBehavior[b.id]?.title) ?? undefined,
-//       description: (scenarioTextByBehavior[b.id]?.description) ?? (b.description ?? undefined),
+//       title: scenarioTextByBehavior[b.id]?.title ?? undefined,
+//       description: scenarioTextByBehavior[b.id]?.description ?? (b.description ?? undefined),
 //       authorId: b.author_id ?? null,
 //       authorAvatarUrl: b.author_avatar_url ?? null,
 //       mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url ?? null),
 //       posterUrl: b.thumbnail_url ?? null,
-//       musicUrl: null,
 //       createdAt: b.created_at ?? null,
+//       // ⚖️ додаємо спір
+//       disputeId: (disputeMap?.[b.id]) || b.dispute_id || null,
+//       disputeStatus: (disputeStatusMap?.[b.id]) || null,
+//       disputeStats: (disputeStatsMap?.[b.id]) || null,
 //     }))}
 //     onOpenAuthor={(aid) => navigate('/map', { state: { profile: aid } })}
 //     onShare={(id) => {
@@ -258,59 +310,34 @@ scroll‑snap між екранами і відображення напівпр
 //       const url = b?.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b?.file_url ?? window.location.href);
 //       if (navigator.share) navigator.share({ title: (scenarioTextByBehavior[b?.id||0]?.title) || 'Buy My Behavior', url }).catch(()=>{});
 //     }}
-//     onPickPerformer={(id) => console.log('pick performer', id)}
-//     onPickCustomer={(id) => console.log('pick customer', id)}
+//     // Голосування/деталі
+//     onViewDispute={(id) => console.log('open dispute', id)}
+//     onVotePerformer={(id) => console.log('vote performer', id)}
+//     onVoteCustomer={(id) => console.log('vote customer', id)}
 //   />
 // )
 //
-// 2) Якщо й далі порожньо — спершу застосуйте SAFE‑select без join (нижче), щоб прибрати 400.
-// 3) Після підтвердження FK `behaviors.author_id → profiles.id` перейдіть на join з `profiles!behaviors_author_id_fkey(...)`.
+// 2) Як отримати карти спорів (приклад):
+//    - disputeMap: { behavior_id -> dispute_id }
+//    - disputeStatusMap: { behavior_id -> 'open'|'closed' }
+//    - disputeStatsMap: { behavior_id -> { performer, customer } }
 //
-// --- SAFE Supabase load() для проду (хот‑фік 400) ---
-// const { data, error } = await supabase
-//   .from('behaviors')
-//   .select('id, ipfs_cid, file_url, thumbnail_url, description, created_at, author_id')
-//   .order('created_at', { ascending: false });
-// let rows = data ?? [];
-// if (error) {
-//   console.error('[behaviors.load] base select error:', error);
-//   const fb = await supabase
-//     .from('behaviors')
-//     .select('id, ipfs_cid, file_url, thumbnail_url, description, author_id')
-//     .limit(50);
-//   rows = fb.data ?? [];
-//   if (fb.error) console.error('[behaviors.load] fallback error:', fb.error);
-// }
-// const mapped = rows.map((b: any) => ({ ...b, author_avatar_url: null }));
-// setBehaviors(mapped);
-// if (mapped.length) setActiveId(mapped[0].id);
+// const ids = rows.map(r => r.id)
+// const { data: dByBeh } = await supabase
+//   .from('disputes')
+//   .select('id, behavior_id, status, performer_votes, customer_votes')
+//   .in('behavior_id', ids)
 //
-// --- ПОВЕРТАЄМО аватари (правильний join) ---
-// SQL FK: alter table behaviors add constraint behaviors_author_id_fkey foreign key (author_id) references profiles(id);
-// const { data, error } = await supabase
-//   .from('behaviors')
-//   .select(`
-//     id, ipfs_cid, file_url, thumbnail_url, description, created_at, author_id,
-//     profiles!behaviors_author_id_fkey( avatar_url )
-//   `)
-//   .order('created_at', { ascending: false });
-// const rows2 = (data ?? []).map((b: any) => ({ ...b, author_avatar_url: b?.profiles?.avatar_url ?? null }));
-// setBehaviors(rows2);
-// if (rows2.length) setActiveId(rows2[0].id);
-//
-// --- Хелпер мапінгу (якщо треба під цей компонент): ---
-// function toItem(b: any, st: any): BehaviorItem {
-//   return {
-//     id: b.id,
-//     title: st?.title ?? undefined,
-//     description: st?.description ?? (b.description ?? undefined),
-//     authorId: b.author_id ?? null,
-//     authorAvatarUrl: b.author_avatar_url ?? null,
-//     mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url ?? null),
-//     posterUrl: b.thumbnail_url ?? null,
-//     musicUrl: null,
-//     createdAt: b.created_at ?? null,
+// const disputeMap: Record<number,string> = {}
+// const disputeStatusMap: Record<number,'open'|'closed'|'resolved'> = {} as any
+// const disputeStatsMap: Record<number,{performer:number;customer:number}> = {}
+// ;(dByBeh||[]).forEach((d:any)=>{
+//   if (d.behavior_id) {
+//     disputeMap[d.behavior_id] = d.id
+//     disputeStatusMap[d.behavior_id] = d.status
+//     disputeStatsMap[d.behavior_id] = { performer: d.performer_votes||0, customer: d.customer_votes||0 }
 //   }
-// }
+// })
 //
-// Якщо behaviors у проді — це view (а не таблиця), напиши — дам селект без order()/range для view.
+// 3) Якщо у вас логіка спорів через scenario_id → беріть best‑диспут (open > latest) і проєктуйте на behavior_id,
+//    як ми робили раніше; просто запишіть результат у три мапи вище.
