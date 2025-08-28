@@ -1,89 +1,161 @@
-/* ізольовані класи, щоб не конфліктувати з попередніми стилями */
-.bmb-feed{
-  height: calc(var(--app-vh, 1vh) * 100);
+/* ====== BehaviorsFeed — вертикальні картки (9:16), автоскролл по одному ====== */
+
+/* контейнер стрічки */
+.shorts-scroll-container {
+  height: 100vh;
   overflow-y: auto;
   scroll-snap-type: y mandatory;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: contain;
-  background:#fff;
+  background: #000; /* фон під відео */
 }
 
-/* одна картка = один екран */
-.bmb-item{
-  height: calc(var(--app-vh, 1vh) * 100);
+/* один екран = один слайд */
+.shorts-scroll-item {
   scroll-snap-align: start;
-  scroll-snap-stop: always;
-  display:flex; justify-content:center; align-items:center;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 16px 0;
 }
 
-.bmb-card{
-  width: min(380px, 92vw);
-  border-radius: 16px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.08);
-  background: #fff;
-  overflow: hidden;
+/* внутрішній лейаут для центрування картки */
+.shorts-feed-layout {
+  width: 100%;
+  display: grid;
+  place-items: center;
 }
 
-/* відео */
-.bmb-video-wrap{
+/* ====== ВЕРТИКАЛЬНА КАРТКА (без змін у TSX) ======
+   Робимо .shorts-video-wrapper самою “карткою” 9:16 з округленням і тінню
+*/
+.shorts-video-wrapper {
   position: relative;
-  width:100%;
-  aspect-ratio: 9/16;
-  background:#000;
-}
-
-.bmb-video{
-  width:100%; height:100%;
-  object-fit: cover;
-  display:block;
-  border-radius: 16px;
-}
-
-/* текст сценарію (зверху зліва) */
-.bmb-caption{
-  position:absolute; top:8px; left:8px; right:60px;
-  padding:8px 10px;
-  border-radius:12px;
-  background: linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,.25));
-  color:#fff;
-  text-shadow: 0 1px 2px rgba(0,0,0,.5);
-  max-height: 140px;
+  width: min(92vw, 480px);         /* мобайл-фьорст, на десктопі не ширше 480 */
+  aspect-ratio: 9 / 16;
+  background: #000;
+  border-radius: 18px;
   overflow: hidden;
-}
-.bmb-caption-title{ font-weight:700; margin-bottom:4px; font-size:14px }
-.bmb-caption-text{ font-size:13px; line-height:1.25; opacity:.95 }
-
-/* поділитись (зверху справа) */
-.bmb-share{
-  position:absolute; top:10px; right:10px;
-  border:none; background:#ffffffdd; backdrop-filter: blur(4px);
-  padding:8px 10px; border-radius:12px; cursor:pointer;
-  box-shadow: 0 2px 8px rgba(0,0,0,.15);
+  box-shadow:
+    0 6px 24px rgba(0,0,0,.45),
+    0 1px 0 rgba(255,255,255,.06) inset;
+  border: 1px solid rgba(255, 205, 214, 0.25); /* легкий рожевий кант під бренд BMB */
 }
 
-/* аватар автора (знизу зліва) */
-.bmb-author{
-  position:absolute; left:10px; bottom:10px; width:50px; height:50px;
-  border-radius:999px; overflow:hidden; border:2px solid #fff;
-  box-shadow:0 4px 12px rgba(0,0,0,.25); cursor:pointer;
-}
-.bmb-author img{ width:100%; height:100%; object-fit:cover; display:block; }
-.bmb-author-fallback{
-  width:100%; height:100%; display:flex; align-items:center; justify-content:center;
-  background:#111; color:#fff; font-weight:700; font-size:18px;
+/* постер/відео всередині картки */
+.shorts-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
 }
 
-/* звук (знизу справа) */
-.bmb-sound{
-  position:absolute; right:10px; bottom:10px;
-  border:none; background:#ffffffdd; backdrop-filter: blur(4px);
-  width:42px; height:42px; border-radius:999px; cursor:pointer;
-  display:flex; align-items:center; justify-content:center;
-  box-shadow: 0 2px 8px rgba(0,0,0,.15);
-  font-size:16px;
+/* заголовок/опис (оверлей зверху) */
+.sr-title-box {
+  position: absolute;
+  top: 8px; left: 8px; right: 48px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,.25));
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.25;
+  max-height: 120px;
+  overflow: hidden;
+  text-shadow: 0 1px 2px rgba(0,0,0,.6);
 }
 
-/* блок голосування під відео */
-.bmb-vote{
-  padding:10px 12px 14px;
+/* кнопка "поділитись" у правому верхньому куті картки */
+.share-button {
+  display: inline-grid;
+  place-items: center;
+  width: 38px; height: 38px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255,255,255,.9);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  cursor: pointer;
+}
+.share-button i {
+  font-size: 16px;
+}
+
+/* права панель кнопок (лайк тощо) */
+.shorts-buttons-panel {
+  display: grid;
+  gap: 10px;
+}
+.shorts-buttons-panel button {
+  display: grid;
+  place-items: center;
+  width: 44px; height: 44px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255,255,255,.92);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  cursor: pointer;
+}
+.shorts-buttons-panel i {
+  font-size: 18px;
+}
+.reaction-count.white-thin {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,.45);
+}
+
+/* ====== АВАТАР АВТОРА — маленький кружечок знизу зліва ====== */
+.shorts-author-avatar {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #fff;
+  border: 2px solid #fff;
+  box-shadow: 0 4px 10px rgba(0,0,0,.35);
+  cursor: pointer;
+  z-index: 4;
+}
+
+/* адаптив: дуже вузькі екрани */
+@media (max-width: 360px) {
+  .shorts-video-wrapper {
+    width: 94vw;
+    border-radius: 16px;
+  }
+  .shorts-author-avatar {
+    width: 40px; height: 40px;
+  }
+}
+
+/* адаптив: ширші екрани */
+@media (min-width: 768px) {
+  .shorts-video-wrapper {
+    width: min(420px, 56vh);
+  }
+}
+
+/* якщо хочеш стек з кількох аватарів (на майбутнє) */
+.shorts-author-avatars {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: flex;
+  gap: 6px;
+  z-index: 4;
+}
+.shorts-author-avatars img {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 4px 10px rgba(0,0,0,.35);
+  object-fit: cover;
+  background: #fff;
 }
