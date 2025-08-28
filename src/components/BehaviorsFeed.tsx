@@ -6,9 +6,10 @@
 // ✅ Кнопка «Поділитись» праворуч зверху, аватар власника знизу зліва (натиснув — перехід у профіль)
 // ✅ Кнопки вибору сторони (виконавець/замовник) — знизу (як на ескізі)
 // ✅ Музика/звук: якщо у айтема є відео — керуємо звуком відео; якщо є music_url — керуємо аудіо
-// ⚙️ У вашому репо можна вставити лише розмітку return(...) + стилі, не змінюючи існуючу логіку завантаження з Supabase
+// ⚠️ У РЕПО: НЕ експортуй PREVIEW як default. Використовуй `BehaviorsFeedFullScreen` з реальними даними.
+// ⚠️ Якщо бачиш демо‑тексти («Щоденна прогулянка…») — ти випадково підхопив PREVIEW у проді.
 
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 
 // ================================ Types ====================================
 export type BehaviorItem = {
@@ -235,9 +236,81 @@ scroll‑snap між екранами і відображення напівпр
 }
 
 // =========================== Інтеграція у репо ============================
-// 1) Не чіпаючи вашу логіку з Supabase, просто ЗАМІНІТЬ JSX у return(...) вашого BehaviorsFeed
-//    на розмітку цієї версії (контейнер зі scroll‑snap, секції 100vh і оверлеї).
-//    Ваша логіка load()/IntersectionObserver/mute збережеться — API сумісний.
-// 2) Додайте опційно поле music_url в тип Behavior та мапінг у load(): якщо у вас є окремий аудіотрек.
-// 3) Для аватарки використовуйте ваш author_avatar_url → authorAvatarUrl, а author_id → authorId.
-// 4) Якщо хочете — винесіть стилі в CSS; тут усе inline, щоб працювало зразу.
+// 1) У вашому файлі з реальними даними (де вже є `behaviors`, `scenarioTextByBehavior`, `navigate`, тощо)
+//    ЗАМІНИ return(...) на цей drop‑in (підставляє дані у стрічку):
+//
+// return (
+//   <BehaviorsFeedFullScreen
+//     items={behaviors.map((b) => ({
+//       id: b.id,
+//       title: (scenarioTextByBehavior[b.id]?.title) ?? undefined,
+//       description: (scenarioTextByBehavior[b.id]?.description) ?? (b.description ?? undefined),
+//       authorId: b.author_id ?? null,
+//       authorAvatarUrl: b.author_avatar_url ?? null,
+//       mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url ?? null),
+//       posterUrl: b.thumbnail_url ?? null,
+//       musicUrl: null,
+//       createdAt: b.created_at ?? null,
+//     }))}
+//     onOpenAuthor={(aid) => navigate('/map', { state: { profile: aid } })}
+//     onShare={(id) => {
+//       const b = behaviors.find(x => String(x.id) === String(id));
+//       const url = b?.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b?.file_url ?? window.location.href);
+//       if (navigator.share) navigator.share({ title: (scenarioTextByBehavior[b?.id||0]?.title) || 'Buy My Behavior', url }).catch(()=>{});
+//     }}
+//     onPickPerformer={(id) => console.log('pick performer', id)}
+//     onPickCustomer={(id) => console.log('pick customer', id)}
+//   />
+// )
+//
+// 2) Якщо й далі порожньо — спершу застосуйте SAFE‑select без join (нижче), щоб прибрати 400.
+// 3) Після підтвердження FK `behaviors.author_id → profiles.id` перейдіть на join з `profiles!behaviors_author_id_fkey(...)`.
+//
+// --- SAFE Supabase load() для проду (хот‑фік 400) ---
+// const { data, error } = await supabase
+//   .from('behaviors')
+//   .select('id, ipfs_cid, file_url, thumbnail_url, description, created_at, author_id')
+//   .order('created_at', { ascending: false });
+// let rows = data ?? [];
+// if (error) {
+//   console.error('[behaviors.load] base select error:', error);
+//   const fb = await supabase
+//     .from('behaviors')
+//     .select('id, ipfs_cid, file_url, thumbnail_url, description, author_id')
+//     .limit(50);
+//   rows = fb.data ?? [];
+//   if (fb.error) console.error('[behaviors.load] fallback error:', fb.error);
+// }
+// const mapped = rows.map((b: any) => ({ ...b, author_avatar_url: null }));
+// setBehaviors(mapped);
+// if (mapped.length) setActiveId(mapped[0].id);
+//
+// --- ПОВЕРТАЄМО аватари (правильний join) ---
+// SQL FK: alter table behaviors add constraint behaviors_author_id_fkey foreign key (author_id) references profiles(id);
+// const { data, error } = await supabase
+//   .from('behaviors')
+//   .select(`
+//     id, ipfs_cid, file_url, thumbnail_url, description, created_at, author_id,
+//     profiles!behaviors_author_id_fkey( avatar_url )
+//   `)
+//   .order('created_at', { ascending: false });
+// const rows2 = (data ?? []).map((b: any) => ({ ...b, author_avatar_url: b?.profiles?.avatar_url ?? null }));
+// setBehaviors(rows2);
+// if (rows2.length) setActiveId(rows2[0].id);
+//
+// --- Хелпер мапінгу (якщо треба під цей компонент): ---
+// function toItem(b: any, st: any): BehaviorItem {
+//   return {
+//     id: b.id,
+//     title: st?.title ?? undefined,
+//     description: st?.description ?? (b.description ?? undefined),
+//     authorId: b.author_id ?? null,
+//     authorAvatarUrl: b.author_avatar_url ?? null,
+//     mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url ?? null),
+//     posterUrl: b.thumbnail_url ?? null,
+//     musicUrl: null,
+//     createdAt: b.created_at ?? null,
+//   }
+// }
+//
+// Якщо behaviors у проді — це view (а не таблиця), напиши — дам селект без order()/range для view.
