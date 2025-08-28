@@ -1,4 +1,4 @@
-/* ====== BehaviorsFeed — вертикальні картки (9:16), автоскролл по одному ====== */
+/* ===== BehaviorsFeed — вертикальні картки 9:16 з автоскролом по одній ===== */
 
 /* контейнер стрічки */
 .shorts-scroll-container {
@@ -6,7 +6,7 @@
   overflow-y: auto;
   scroll-snap-type: y mandatory;
   -webkit-overflow-scrolling: touch;
-  background: #000; /* фон під відео */
+  background: #000; /* темний фон під відео */
 }
 
 /* один екран = один слайд */
@@ -25,12 +25,11 @@
   place-items: center;
 }
 
-/* ====== ВЕРТИКАЛЬНА КАРТКА (без змін у TSX) ======
-   Робимо .shorts-video-wrapper самою “карткою” 9:16 з округленням і тінню
-*/
+/* ===== ВЕРТИКАЛЬНА КАРТКА =====
+   робимо .shorts-video-wrapper самою “карткою” 9:16 */
 .shorts-video-wrapper {
   position: relative;
-  width: min(92vw, 480px);         /* мобайл-фьорст, на десктопі не ширше 480 */
+  width: min(92vw, 480px);     /* мобайл-фьорст; на десктопі не ширше 480 */
   aspect-ratio: 9 / 16;
   background: #000;
   border-radius: 18px;
@@ -38,10 +37,10 @@
   box-shadow:
     0 6px 24px rgba(0,0,0,.45),
     0 1px 0 rgba(255,255,255,.06) inset;
-  border: 1px solid rgba(255, 205, 214, 0.25); /* легкий рожевий кант під бренд BMB */
+  border: 1px solid rgba(255, 205, 214, 0.25); /* легкий рожевий кант під бренд BMB (#ffcdd6) */
 }
 
-/* постер/відео всередині картки */
+/* відео всередині картки */
 .shorts-video {
   width: 100%;
   height: 100%;
@@ -49,7 +48,7 @@
   background: #000;
 }
 
-/* заголовок/опис (оверлей зверху) */
+/* оверлей заголовка/опису */
 .sr-title-box {
   position: absolute;
   top: 8px; left: 8px; right: 48px;
@@ -64,23 +63,26 @@
   text-shadow: 0 1px 2px rgba(0,0,0,.6);
 }
 
-/* кнопка "поділитись" у правому верхньому куті картки */
+/* бейдж спору */
+.badge-dispute {
+  user-select: none;
+}
+
+/* кнопка Поділитись (правий верхній кут картки) */
 .share-button {
   display: inline-grid;
   place-items: center;
   width: 38px; height: 38px;
   border-radius: 999px;
   border: none;
-  background: rgba(255,255,255,.9);
+  background: rgba(255,255,255,.92);
   backdrop-filter: blur(4px);
   box-shadow: 0 2px 8px rgba(0,0,0,.2);
   cursor: pointer;
 }
-.share-button i {
-  font-size: 16px;
-}
+.share-button i { font-size: 16px; }
 
-/* права панель кнопок (лайк тощо) */
+/* права панель кнопок (лайк + mute) */
 .shorts-buttons-panel {
   display: grid;
   gap: 10px;
@@ -96,9 +98,8 @@
   box-shadow: 0 2px 8px rgba(0,0,0,.2);
   cursor: pointer;
 }
-.shorts-buttons-panel i {
-  font-size: 18px;
-}
+.shorts-buttons-panel i { font-size: 18px; }
+
 .reaction-count.white-thin {
   display: block;
   margin-top: 6px;
@@ -107,7 +108,7 @@
   text-shadow: 0 1px 2px rgba(0,0,0,.45);
 }
 
-/* ====== АВАТАР АВТОРА — маленький кружечок знизу зліва ====== */
+/* аватар автора — маленький кружечок знизу зліва */
 .shorts-author-avatar {
   position: absolute;
   bottom: 12px;
@@ -129,9 +130,7 @@
     width: 94vw;
     border-radius: 16px;
   }
-  .shorts-author-avatar {
-    width: 40px; height: 40px;
-  }
+  .shorts-author-avatar { width: 40px; height: 40px; }
 }
 
 /* адаптив: ширші екрани */
@@ -141,7 +140,7 @@
   }
 }
 
-/* якщо хочеш стек з кількох аватарів (на майбутнє) */
+/* (опціонально) стек кількох аватарів */
 .shorts-author-avatars {
   position: absolute;
   bottom: 12px;
