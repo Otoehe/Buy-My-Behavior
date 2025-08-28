@@ -17,8 +17,8 @@ interface Behavior {
   created_at?: string | null;
   author_id?: string | null;
   author_avatar_url?: string | null;
-  likes_count: number;       // зберігаємо поле для сумісності, але UI не показуємо
-  dislikes_count: number;    // зберігаємо поле для сумісності, але UI не показуємо
+  likes_count: number;
+  dislikes_count: number;
   is_dispute_evidence?: boolean;
   dispute_id?: string | null;
 }
