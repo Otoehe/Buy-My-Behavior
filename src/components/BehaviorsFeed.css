@@ -6,7 +6,7 @@
   overflow-y: auto;
   scroll-snap-type: y mandatory;
   -webkit-overflow-scrolling: touch;
-  background: #000; /* темний фон під відео */
+  background: #fff; /* білий фон за ТЗ */
 }
 
 /* один екран = один слайд */
@@ -25,19 +25,18 @@
   place-items: center;
 }
 
-/* ===== ВЕРТИКАЛЬНА КАРТКА =====
-   робимо .shorts-video-wrapper самою “карткою” 9:16 */
+/* вертикальна картка 9:16 */
 .shorts-video-wrapper {
   position: relative;
-  width: min(92vw, 480px);     /* мобайл-фьорст; на десктопі не ширше 480 */
+  width: min(92vw, 480px);
   aspect-ratio: 9 / 16;
   background: #000;
   border-radius: 18px;
   overflow: hidden;
   box-shadow:
-    0 6px 24px rgba(0,0,0,.45),
+    0 6px 24px rgba(0,0,0,.18),
     0 1px 0 rgba(255,255,255,.06) inset;
-  border: 1px solid rgba(255, 205, 214, 0.25); /* легкий рожевий кант під бренд BMB (#ffcdd6) */
+  border: 1px solid rgba(255, 205, 214, 0.25); /* рожевий кант під бренд BMB (#ffcdd6) */
 }
 
 /* відео всередині картки */
@@ -82,7 +81,7 @@
 }
 .share-button i { font-size: 16px; }
 
-/* права панель кнопок (лайк + mute) */
+/* права панель кнопок (лише лайк) */
 .shorts-buttons-panel {
   display: grid;
   gap: 10px;
@@ -104,8 +103,8 @@
   display: block;
   margin-top: 6px;
   font-size: 12px;
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0,0,0,.45);
+  color: #111; /* на білому фоні краще темний текст */
+  text-shadow: 0 1px 2px rgba(255,255,255,.35);
 }
 
 /* аватар автора — маленький кружечок знизу зліва */
@@ -124,20 +123,30 @@
   z-index: 4;
 }
 
+/* підказка при забороні автоплею зі звуком */
+.tap-to-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,.25);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: .2px;
+  text-align: center;
+  padding: 0 12px;
+}
+
 /* адаптив: дуже вузькі екрани */
 @media (max-width: 360px) {
-  .shorts-video-wrapper {
-    width: 94vw;
-    border-radius: 16px;
-  }
+  .shorts-video-wrapper { width: 94vw; border-radius: 16px; }
   .shorts-author-avatar { width: 40px; height: 40px; }
 }
 
 /* адаптив: ширші екрани */
 @media (min-width: 768px) {
-  .shorts-video-wrapper {
-    width: min(420px, 56vh);
-  }
+  .shorts-video-wrapper { width: min(420px, 56vh); }
 }
 
 /* (опціонально) стек кількох аватарів */

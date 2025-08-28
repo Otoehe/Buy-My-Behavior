@@ -36,32 +36,14 @@ const BehaviorsFeed: React.FC = () => {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [activeVideoId, setActiveVideoId] = useState<number | null>(null);
 
-  // mute-прапорці per video (збереження у localStorage)
-  const [mutedById, setMutedById] = useState<Record<number, boolean>>({});
+  // Якщо браузер блокує автоплей зі звуком — покажемо підказку лише для активної картки
+  const [needsUserGestureFor, setNeedsUserGestureFor] = useState<number | null>(null);
 
   const videoRefs = useRef<Record<number, HTMLVideoElement | null>>({});
   const navigate = useNavigate();
 
-  // ---------- helpers ----------
   const getVideoSrc = (b: Behavior) =>
     b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url || '');
-
-  const loadMuteState = useCallback((ids: number[]) => {
-    const next: Record<number, boolean> = {};
-    ids.forEach((id) => {
-      const key = `bmb_muted_${id}`;
-      const stored = localStorage.getItem(key);
-      next[id] = stored === null ? true : stored === 'true';
-    });
-    setMutedById(next);
-  }, []);
-
-  const setMuteState = (id: number, muted: boolean) => {
-    localStorage.setItem(`bmb_muted_${id}`, String(muted));
-    setMutedById((prev) => ({ ...prev, [id]: muted }));
-    const v = videoRefs.current[id];
-    if (v) v.muted = muted;
-  };
 
   // ---------- FETCH ----------
   const fetchBehaviors = useCallback(async () => {
@@ -83,9 +65,8 @@ const BehaviorsFeed: React.FC = () => {
     }));
 
     setBehaviors(processed);
-    loadMuteState(processed.map((b) => b.id));
 
-    // ---- A) знайти disputeId для всіх, у кого або є dispute_id, або є запис у disputes.behavior_id
+    // ---- A) disputeId для behavior
     const behaviorIds = processed.map((b) => b.id);
 
     const { data: byBehavior } = await supabase
@@ -97,13 +78,11 @@ const BehaviorsFeed: React.FC = () => {
     (byBehavior || []).forEach((d) => {
       if (d?.behavior_id && d?.id) disputeIdByBehavior[d.behavior_id as number] = d.id as string;
     });
-    // доповнюємо з behaviors.dispute_id
     processed.forEach((b) => {
       if (b.dispute_id && !disputeIdByBehavior[b.id]) disputeIdByBehavior[b.id] = b.dispute_id!;
     });
 
-    // ---- B) зібрати scenario_id:
-    //   1) для спорів — з таблиці disputes (id -> scenario_id)
+    // ---- B) scenario_id
     const disputeIds = Array.from(new Set(Object.values(disputeIdByBehavior)));
     let disputesRows: any[] = [];
     if (disputeIds.length) {
@@ -118,7 +97,6 @@ const BehaviorsFeed: React.FC = () => {
       if (d?.id && d?.scenario_id) scenarioIdByDispute[d.id] = d.scenario_id as string;
     });
 
-    //   2) для звичайних поведінок — через scenario_proofs
     const normalBehaviors = processed.filter((b) => !disputeIdByBehavior[b.id]);
     const { data: proofs } = await supabase
       .from('scenario_proofs')
@@ -160,13 +138,12 @@ const BehaviorsFeed: React.FC = () => {
         const dispId = disputeIdByBehavior[b.id];
         if (dispId && scenarioIdByDispute[dispId]) st = scenarioTextById[scenarioIdByDispute[dispId]];
         else if (scenarioIdByBehavior[b.id]) st = scenarioTextById[scenarioIdByBehavior[b.id]];
-        // fallback — берём з behaviors
         next[b.id] = st || { title: b.title || undefined, description: b.description || undefined };
       }
       return next;
     });
 
-    // ініціалізація спорів + асинхронне підтягування лічильників
+    // ініціалізація спорів + асинхронні лічильники
     setDisputeMeta((prev) => {
       const next = { ...prev };
       for (const b of processed) {
@@ -196,7 +173,7 @@ const BehaviorsFeed: React.FC = () => {
         // ignore
       }
     }
-  }, [loadMuteState]);
+  }, []);
 
   useEffect(() => {
     fetchBehaviors();
@@ -209,8 +186,7 @@ const BehaviorsFeed: React.FC = () => {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'behaviors' },
-        async (payload) => {
-          // простіше — перевантажити список (щоб підхопити зв’язки/аватар/рахунки)
+        async () => {
           await fetchBehaviors();
         }
       );
@@ -220,7 +196,7 @@ const BehaviorsFeed: React.FC = () => {
     };
   }, [fetchBehaviors]);
 
-  // ---------- auto play/pause ----------
+  // ---------- auto play/pause зі звуком ----------
   useEffect(() => {
     const obs = new IntersectionObserver(
       (entries) => {
@@ -238,28 +214,49 @@ const BehaviorsFeed: React.FC = () => {
     );
 
     Object.values(videoRefs.current).forEach((v) => v && obs.observe(v));
-
-    return () => {
-      obs.disconnect();
-    };
+    return () => { obs.disconnect(); };
   }, [behaviors]);
 
   useEffect(() => {
     Object.entries(videoRefs.current).forEach(([idStr, v]) => {
       const id = Number(idStr);
       if (!v) return;
-      const shouldBeActive = activeVideoId === id;
 
-      if (shouldBeActive) {
-        // поважаємо локальний mute-стан
-        const muted = mutedById[id] ?? true;
-        v.muted = muted;
-        v.play().catch(() => {});
+      if (activeVideoId === id) {
+        v.muted = false; // звук увімкнено одразу для активного
+        const playPromise = v.play();
+        if (playPromise && typeof playPromise.then === 'function') {
+          playPromise.catch(() => {
+            // браузер заблокував автоплей зі звуком -> попросимо клік
+            setNeedsUserGestureFor(id);
+          });
+        }
       } else {
         v.pause();
+        v.muted = true; // інші ролики — без звуку
       }
     });
-  }, [activeVideoId, mutedById]);
+  }, [activeVideoId]);
+
+  // один глобальний жест користувача — розблокувати відтворення звуку
+  useEffect(() => {
+    if (needsUserGestureFor == null) return;
+    const handler = () => {
+      const id = needsUserGestureFor!;
+      const v = videoRefs.current[id];
+      if (v) {
+        v.muted = false;
+        v.play().finally(() => setNeedsUserGestureFor(null));
+      } else {
+        setNeedsUserGestureFor(null);
+      }
+      window.removeEventListener('pointerdown', handler, { capture: true } as any);
+    };
+    window.addEventListener('pointerdown', handler, { capture: true } as any);
+    return () => {
+      window.removeEventListener('pointerdown', handler, { capture: true } as any);
+    };
+  }, [needsUserGestureFor]);
 
   // ---------- actions ----------
   const handleAuthorClick = (authorId?: string | null) => {
@@ -312,18 +309,6 @@ const BehaviorsFeed: React.FC = () => {
     }
   };
 
-  const toggleMute = (id: number) => {
-    const current = mutedById[id] ?? true;
-    setMuteState(id, !current);
-    if (activeVideoId === id) {
-      const v = videoRefs.current[id];
-      if (v) {
-        v.muted = !current;
-        if (!v.paused) v.play().catch(() => {});
-      }
-    }
-  };
-
   // ---------- render ----------
   return (
     <div className="shorts-scroll-container">
@@ -331,6 +316,9 @@ const BehaviorsFeed: React.FC = () => {
         const src = getVideoSrc(b);
         const st = scenarioTextByBehavior[b.id] || {};
         const dm = disputeMeta[b.id];
+
+        const isActive = activeVideoId === b.id;
+        const showTapOverlay = isActive && needsUserGestureFor === b.id;
 
         return (
           <div className="shorts-scroll-item" key={b.id}>
@@ -347,6 +335,11 @@ const BehaviorsFeed: React.FC = () => {
                   data-id={String(b.id)}
                   ref={(el) => (videoRefs.current[b.id] = el)}
                 />
+
+                {/* Підказка, якщо автоплей зі звуком заблокований (натисни будь-де) */}
+                {showTapOverlay && (
+                  <div className="tap-to-play">Торкнись, щоб відтворити зі звуком</div>
+                )}
 
                 {/* Бейдж спору */}
                 {(b.is_dispute_evidence || dm) && (
@@ -399,7 +392,7 @@ const BehaviorsFeed: React.FC = () => {
                   <i className="fa-solid fa-share-nodes"></i>
                 </button>
 
-                {/* Права панель кнопок (лайк + mute) */}
+                {/* Права панель кнопок (лайк) */}
                 <div
                   className="shorts-buttons-panel"
                   style={{ zIndex: 9999, position: 'absolute', top: '10%', right: '5%' }}
@@ -407,10 +400,6 @@ const BehaviorsFeed: React.FC = () => {
                   <button onClick={() => handleLike(b.id)} title="Подобається">
                     <i className="fa-regular fa-heart"></i>
                     {b.likes_count > 0 && <span className="reaction-count white-thin">{b.likes_count}</span>}
-                  </button>
-
-                  <button onClick={() => toggleMute(b.id)} title={mutedById[b.id] ? 'Увімкнути звук' : 'Вимкнути звук'}>
-                    <i className={mutedById[b.id] ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high'}></i>
                   </button>
                 </div>
 
