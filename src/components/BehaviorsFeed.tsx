@@ -1,510 +1,376 @@
-'use client';
+'use client'
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 /**
- * Behaviors Feed — YouTube Shorts style (clean)
- * ▸ Вертикальні картки 9:16, по одній на екран (scroll‑snap + smooth)
- * ▸ Автоплей лише активної картки; мʼют за замовчуванням (політика браузера)
- * ▸ Тягнемо відео з таблиці `behaviors`; якщо запис — evidence у спорі, показуємо кнопки голосування
- * ▸ Без правої «соціальної» рейки
- * ▸ NEW: клік по аватару відкриває шторку профілю; свайп/колесо — переходить рівно між картками і ПЕТЛЕЮ по колу
+ * Behaviors Feed — pulls rows from public.behaviors just like user's app code:
+ *  - SELECT `*, profiles:author_id(avatar_url)`
+ *  - ORDER BY created_at DESC
+ *  - Video src: ipfs_cid -> lighthouse gateway, else file_url
+ *  - Avatar (circle) opens owner profile sheet and routes to /map with {profile}
+ *  - Vertical 9:16 cards, one-per-view, smooth swipe + wheel snapping
+ *
+ * NOTE (Canvas): ми не імпортуємо ../lib/supabase, а читаємо window.supabase.
+ * У проді заміни getSupabase() на свій імпорт клієнта Supabase.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+// =============================== Types ===============================
+export type Behavior = {
+  id: number;
+  ipfs_cid: string | null;
+  file_url?: string | null;
+  thumbnail_url?: string | null;
+  title?: string | null;
+  description?: string | null;
+  created_at?: string | null;
+  author_id?: string | null;
+  author_avatar_url?: string | null;
+  likes_count?: number;
+  dislikes_count?: number;
+  is_dispute_evidence?: boolean;
+  dispute_id?: string | null;
+};
 
-// ========= Canvas REST config (для LIVE у канві — опційно) =========
-// @ts-ignore
-const SUPABASE_URL: string = (typeof process !== 'undefined' && (process.env as any)?.NEXT_PUBLIC_SUPABASE_URL) || '';
-// @ts-ignore
-const SUPABASE_ANON_KEY: string = (typeof process !== 'undefined' && (process.env as any)?.NEXT_PUBLIC_SUPABASE_ANON_KEY) || '';
-const hasLiveCreds = !!SUPABASE_URL && !!SUPABASE_ANON_KEY;
+type ScenarioText = { title?: string; description?: string };
+
+declare global {
+  interface Window {
+    supabase?: any;
+    openProfileSheet?: (id: string) => void;
+    router?: { push?: (u: string, opts?: any) => void };
+    bmb_refreshFeed?: () => Promise<void> | void;
+    // REST creds for Canvas (fallback when window.supabase is absent)
+    SUPABASE_URL?: string;
+    SUPABASE_ANON_KEY?: string;
+    bmb_setRestCreds?: (url: string, key: string) => void;
+  }
+}
+
+// ============================== Styles ===============================
+const page: React.CSSProperties = { display: 'grid', placeItems: 'start center', paddingTop: 8 };
+const container: React.CSSProperties = {
+  width: '100%',
+  maxWidth: 460,
+  height: 'calc(100vh - 64px)',
+  margin: '0 auto',
+  overflowY: 'auto',
+  scrollSnapType: 'y mandatory',
+  WebkitOverflowScrolling: 'touch',
+  scrollbarWidth: 'none' as any,
+};
+const itemWrap: React.CSSProperties = {
+  height: 'calc(100vh - 64px)',
+  display: 'grid',
+  placeItems: 'center',
+  scrollSnapAlign: 'start',
+};
+const card: React.CSSProperties = {
+  width: 'min(388px, 92vw)',
+  aspectRatio: '9 / 16',
+  background: '#000',
+  borderRadius: 18,
+  overflow: 'hidden',
+  position: 'relative',
+  boxShadow: '0 12px 36px rgba(0,0,0,.3)'
+};
+const captionTop: React.CSSProperties = {
+  position: 'absolute', left: 12, right: 12, top: 56,
+  background: 'rgba(0,0,0,.35)', color: '#fff',
+  borderRadius: 10, padding: '6px 10px', fontSize: 12,
+};
+const storyBadge: React.CSSProperties = {
+  position: 'absolute', left: 12, right: 12, top: 10,
+  background: 'linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,.25))',
+  color: '#fff', borderRadius: 12, padding: '8px 10px',
+  fontSize: 12, lineHeight: 1.25, textShadow: '0 1px 2px rgba(0,0,0,.6)'
+};
+const avatarBtn: React.CSSProperties = {
+  position: 'absolute', left: 16, bottom: 16,
+  width: 48, height: 48, borderRadius: 999,
+  border: '2px solid rgba(255,255,255,.9)',
+  overflow: 'hidden', display: 'grid', placeItems: 'center',
+  boxShadow: '0 4px 14px rgba(0,0,0,.35)', background: '#111', color: '#fff',
+  cursor: 'pointer',
+};
+const soundBtn: React.CSSProperties = {
+  position: 'absolute', right: 16, bottom: 16,
+  width: 44, height: 44, borderRadius: 999,
+  border: '1px solid rgba(17,17,17,.2)', background: '#fff',
+  display: 'grid', placeItems: 'center', fontWeight: 900, cursor: 'pointer'
+};
+
+function videoSrcOf(b: Behavior) {
+  if (b?.ipfs_cid) return `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}`;
+  if (b?.file_url) return b.file_url;
+  return '';
+}
+
+function getSupabase() {
+  return typeof window !== 'undefined' ? window.supabase : null;
+}
+
+// ====== REST fallback (Canvas / no SDK) ======
+function getRestCreds(){
+  const url = (typeof process!=='undefined' && (process.env as any)?.NEXT_PUBLIC_SUPABASE_URL) || (typeof window!=='undefined' ? (window.SUPABASE_URL||'') : '') || '';
+  const key = (typeof process!=='undefined' && (process.env as any)?.NEXT_PUBLIC_SUPABASE_ANON_KEY) || (typeof window!=='undefined' ? (window.SUPABASE_ANON_KEY||'') : '') || '';
+  return { url, key, ok: !!url && !!key } as const;
+}
 async function restGet(pathAndQuery: string) {
-  const res = await fetch(`${SUPABASE_URL}${pathAndQuery}`, {
-    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-  });
+  const { url, key, ok } = getRestCreds();
+  if (!ok) throw new Error('REST creds missing');
+  const res = await fetch(`${url}${pathAndQuery}`, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
   if (!res.ok) throw new Error(`REST ${res.status}: ${pathAndQuery}`);
   return res.json();
 }
+if (typeof window !== 'undefined') {
+  window.bmb_setRestCreds = (u: string, k: string) => {
+    window.SUPABASE_URL = u; window.SUPABASE_ANON_KEY = k;
+    try { window.bmb_refreshFeed?.(); } catch {}
+    location.reload();
+  };
+}
 
-// ============================== Types ===============================
-export type VoteChoice = 'performer' | 'customer';
-export type BehaviorItem = {
-  id: number | string;
-  title?: string | null;
-  description?: string | null;
-  authorId?: string | null;
-  authorAvatarUrl?: string | null;
-  mediaUrl?: string | null;
-  posterUrl?: string | null;
-  createdAt?: string | null;
-  isEvidence?: boolean; // behaviors.is_dispute_evidence
-  disputeId?: string | null;
-  disputeStatus?: 'open' | 'closed' | 'resolved' | null;
-  disputeStats?: { performer: number; customer: number } | null;
-  myVote?: VoteChoice | null;
-};
+// =============================== Component ===============================
+export default function BehaviorsFeedSupabasePath() {
+  const [behaviors, setBehaviors] = useState<Behavior[]>([]);
+  const [scenarioTextByBehavior, setScenarioTextByBehavior] = useState<Record<number, ScenarioText>>({});
+  const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
 
-export type BehaviorsFeedProps = {
-  items: BehaviorItem[];
-  onShare?: (id: BehaviorItem['id']) => void;
-  onOpenAuthor?: (authorId: string) => void;
-  onViewDispute?: (id: BehaviorItem['id']) => void;
-  onVote?: (disputeId: string, choice: VoteChoice) => Promise<void> | void;
-};
-
-declare global { interface Window { supabase?: any; __bmb_load_behaviors?: () => Promise<BehaviorItem[]>; openProfileSheet?: (id:string)=>void; router?: { push?: (u:string)=>void }; bmb_addBehaviorFromUrl?: (payload: { file_url: string; title?: string; description?: string; author_id?: string; user_id?: string; is_dispute_evidence?: boolean; dispute_id?: string; }) => Promise<boolean>; bmb_uploadAndAddBehavior?: (file: any, meta?: { title?: string; description?: string; author_id?: string; user_id?: string; is_dispute_evidence?: boolean; dispute_id?: string; }) => Promise<boolean>; } }
-
-// ========================= Презентаційний фід =========================
-export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, onShare, onOpenAuthor, onViewDispute, onVote }) => {
-  const [activeId, setActiveId] = useState<string>(items[0] ? String(items[0].id) : '');
-  const [mutedMap, setMutedMap] = useState<Record<string, boolean>>({});
-  const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
-  const wrapRefs = useRef<Record<string, HTMLElement | null>>({});
-  const isAnimatingRef = useRef(false);
+  const videoRefs = useRef<Record<number, HTMLVideoElement | null>>({});
+  const wrapRefs = useRef<Record<number, HTMLElement | null>>({});
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const wheelAccRef = useRef(0);
+  const isAnimatingRef = useRef(false);
   const touchStartY = useRef<number | null>(null);
   const touchDeltaY = useRef(0);
 
-  const idxOfActive = () => items.findIndex((it) => String(it.id) === activeId);
-  const goToIndex = (i: number) => {
-    if (!items.length) return;
-    const size = items.length;
-    const safe = ((i % size) + size) % size; // модуль по колу
-    const next = items[safe];
-    const el = wrapRefs.current[String(next.id)];
+  const fetchBehaviors = useCallback(async () => {
+    // 1) Спроба через SDK
+    const sb = getSupabase();
+    try {
+      if (sb) {
+        const { data, error } = await sb
+          .from('behaviors')
+          .select(`*, profiles:author_id(avatar_url)`)
+          .not('file_url','is',null)
+          .order('created_at', { ascending: false, nullsFirst: false })
+          .order('id', { ascending: false });
+        if (error) throw error;
+        const processed: Behavior[] = (data || [])
+          .filter((b: any) => b?.file_url || b?.ipfs_cid)
+          .map((b: any) => ({
+            ...b,
+            author_avatar_url: b?.profiles?.avatar_url || '',
+            likes_count: b?.likes_count || 0,
+            dislikes_count: b?.dislikes_count || 0,
+          }));
+        const stMap: Record<number, ScenarioText> = {};
+        processed.forEach((b) => { stMap[b.id] = { title: b.title || undefined, description: b.description || undefined }; });
+        setScenarioTextByBehavior(stMap);
+        setBehaviors(processed);
+        if (processed.length) return; // success
+      }
+    } catch (e) {
+      console.warn('SDK load failed, fallback to REST:', e);
+    }
+
+    // 2) Фолбек через REST (PostgREST)
+    try {
+      const { ok } = getRestCreds();
+      if (!ok) { setBehaviors([]); return; }
+      const q = `/rest/v1/behaviors?select=*,profiles:author_id(avatar_url)&file_url=is.not.null&order=created_at.desc.nullslast,id.desc&limit=100`;
+      const rows: any[] = await restGet(q);
+      const processed: Behavior[] = (rows || [])
+        .filter((b: any) => b?.file_url || b?.ipfs_cid)
+        .map((b: any) => ({
+          ...b,
+          author_avatar_url: b?.profiles?.avatar_url || '',
+          likes_count: b?.likes_count || 0,
+          dislikes_count: b?.dislikes_count || 0,
+        }));
+      const stMap: Record<number, ScenarioText> = {};
+      processed.forEach((b) => { stMap[b.id] = { title: b.title || undefined, description: b.description || undefined }; });
+      setScenarioTextByBehavior(stMap);
+      setBehaviors(processed);
+    } catch (e) {
+      console.error('REST load error:', e);
+      setBehaviors([]);
+    }
+  }, []);
+
+  useEffect(() => { window.bmb_refreshFeed = fetchBehaviors; fetchBehaviors(); }, [fetchBehaviors]);
+
+// realtime: підтягуємо нові/оновлені записи без перезавантаження
+useEffect(() => {
+  const sb = getSupabase();
+  if (!sb) return;
+  const ch = sb
+    .channel('bmb_behaviors_feed')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'behaviors' }, () => {
+      // перезавантажити список — простіше й стабільніше, ніж ручне злиття
+      fetchBehaviors();
+    })
+    .subscribe();
+  return () => { try { sb.removeChannel(ch); } catch {} };
+}, [fetchBehaviors]);
+
+  // ---------- auto play/pause by intersection ----------
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => entries.forEach((entry) => {
+        const target = entry.target as HTMLVideoElement;
+        const id = target.dataset.id;
+        if (id && entry.isIntersecting) setActiveVideoId(id);
+      }),
+      { threshold: 0.9 }
+    );
+    Object.values(videoRefs.current).forEach(v => v && observer.observe(v));
+    return () => observer.disconnect();
+  }, [behaviors]);
+
+  useEffect(() => {
+    Object.entries(videoRefs.current).forEach(([idStr, v]) => {
+      const id = idStr; // dataset.id is string
+      if (!v) return;
+      if (id === activeVideoId) { v.muted = false; v.play().catch(() => {}); }
+      else { v.pause(); v.muted = true; }
+    });
+  }, [activeVideoId]);
+
+  // ---------- smooth one-by-one scroll/swipe ----------
+  const goToIndex = (idx: number) => {
+    const n = behaviors.length;
+    if (!n) return;
+    const safe = ((idx % n) + n) % n;
+    const id = behaviors[safe]?.id;
+    const el = wrapRefs.current[id];
     if (el) {
       isAnimatingRef.current = true;
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      window.setTimeout(() => { isAnimatingRef.current = false; }, 450);
+      setTimeout(() => { isAnimatingRef.current = false; }, 360);
     }
   };
-  const goNext = () => goToIndex(idxOfActive() + 1);
-  const goPrev = () => goToIndex(idxOfActive() - 1);
+  const currIndex = useMemo(() => behaviors.findIndex(i => String(i.id) === activeVideoId), [behaviors, activeVideoId]);
+  const goNext = () => goToIndex(currIndex + 1);
+  const goPrev = () => goToIndex(currIndex - 1);
 
-  // Визначення активної картки
-  useEffect(() => {
-    const io = new IntersectionObserver((entries) => {
-      entries.forEach((ent) => {
-        const id = (ent.target as HTMLElement).dataset.id!;
-        if (ent.isIntersecting && ent.intersectionRatio >= 0.6) setActiveId(id);
-      });
-    }, { threshold: [0.6] });
-    Object.values(wrapRefs.current).forEach((el) => el && io.observe(el));
-    return () => io.disconnect();
-  }, [items.length]);
-
-  // Автоплей тільки активного відео
-  useEffect(() => {
-    Object.entries(videoRefs.current).forEach(([id, v]) => {
-      if (!v) return;
-      const play = id === activeId;
-      v.muted = mutedMap[id] ?? true;
-      if (play) { v.play().catch(() => {}); } else { v.pause(); }
-    });
-  }, [activeId, mutedMap]);
-
-  // Плавна навігація клавішами ↑/↓ (по колу)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!['ArrowDown','PageDown','ArrowUp','PageUp'].includes(e.key)) return;
-      e.preventDefault();
-      if (e.key === 'ArrowDown' || e.key === 'PageDown') goNext(); else goPrev();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [activeId, items]);
-
-  // Скрол/свайп — по одному елементу і по колу
-  const onWheel: React.WheelEventHandler<HTMLDivElement> = (e) => {
-    if (isAnimatingRef.current) return;
-    e.preventDefault();
-    wheelAccRef.current += e.deltaY;
-    const TH = 60; // поріг чутливості
-    if (Math.abs(wheelAccRef.current) > TH) {
-      wheelAccRef.current > 0 ? goNext() : goPrev();
-      wheelAccRef.current = 0;
-    }
-  };
   const onTouchStart: React.TouchEventHandler<HTMLDivElement> = (e) => { touchStartY.current = e.touches[0].clientY; touchDeltaY.current = 0; };
-  const onTouchMove: React.TouchEventHandler<HTMLDivElement> = (e) => { if (touchStartY.current!=null) touchDeltaY.current = e.touches[0].clientY - touchStartY.current; };
+  const onTouchMove: React.TouchEventHandler<HTMLDivElement> = (e) => { if (touchStartY.current != null) touchDeltaY.current = e.touches[0].clientY - touchStartY.current; };
   const onTouchEnd: React.TouchEventHandler<HTMLDivElement> = () => {
     const TH = 40;
-    if (Math.abs(touchDeltaY.current) > TH) {
-      touchDeltaY.current < 0 ? goNext() : goPrev();
-    } else {
-      const curr = wrapRefs.current[activeId];
-      curr?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (Math.abs(touchDeltaY.current) > TH) (touchDeltaY.current < 0 ? goNext() : goPrev());
+    else {
+      const id = behaviors[currIndex]?.id; wrapRefs.current[id]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     touchStartY.current = null; touchDeltaY.current = 0;
   };
 
-  // ===== Styles =====
-  const container: React.CSSProperties = {
-    minHeight: '100vh',
-    overflowY: 'auto',
-    background: '#fff',
-    padding: '16px 0 32px',
-    scrollSnapType: 'y mandatory',
-    scrollBehavior: 'smooth',
-    overscrollBehavior: 'contain',
-    touchAction: 'manipulation',
+  // wheel (non‑passive) to enable preventDefault-based snapping
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (ev: WheelEvent) => {
+      if (isAnimatingRef.current) return;
+      ev.preventDefault();
+      wheelAccRef.current += ev.deltaY;
+      const TH = 60;
+      if (Math.abs(wheelAccRef.current) > TH) {
+        wheelAccRef.current > 0 ? goNext() : goPrev();
+        wheelAccRef.current = 0;
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel as any);
+  }, [behaviors.length, currIndex]);
+
+  const onOpenAuthor = (authorId?: string | null) => {
+    if (!authorId) return;
+    // 1) open sheet (your app should provide window.openProfileSheet)
+    window.openProfileSheet?.(authorId);
+    // 2) route to /map with profile in state (react-router like)
+    try { window.router?.push?.('/map', { state: { profile: authorId } }); } catch {}
+    // fallback: query param for Next/other routers
+    try { window.router?.push?.(`/map?profile=${encodeURIComponent(authorId)}`); } catch {}
   };
-  const rowWrap: React.CSSProperties = {
-    display: 'flex',
-    justifyContent: 'center',
-    padding: '24px 0',
-    scrollSnapAlign: 'center',
-    scrollSnapStop: 'always',
-  };
-  const card: React.CSSProperties = {
-    position: 'relative',
-    width: 'min(420px, 92vw)',
-    aspectRatio: '9 / 16',
-    height: 'auto',
-    borderRadius: 20,
-    overflow: 'hidden',
-    border: '1px solid rgba(17,17,17,.12)',
-    boxShadow: '0 14px 32px rgba(17,17,17,.14)',
-    background: '#fff'
-  };
-  const media: React.CSSProperties = { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' };
-  const caption: React.CSSProperties = {
-    position: 'absolute',
-    top: 10,
-    left: 10,
-    right: 48,
-    padding: '8px 10px',
-    borderRadius: 12,
-    background: 'rgba(17,17,17,.5)',
-    color: '#fff',
-    fontSize: 13,
-    lineHeight: 1.2,
-    textShadow: '0 1px 2px rgba(0,0,0,.6)'
-  };
-  const chip: React.CSSProperties = {
-    position: 'absolute',
-    top: 10,
-    left: 12,
-    transform: 'none',
-    background: 'rgba(17,17,17,.55)',
-    color: '#fff',
-    border: '1px solid rgba(255,255,255,.15)',
-    borderRadius: 10,
-    padding: '6px 10px',
-    fontWeight: 700,
-    boxShadow: '0 4px 14px rgba(0,0,0,.15)'
-  };
-  const avatar: React.CSSProperties = { position: 'absolute', left: 10, bottom: 70, width: 56, height: 56, borderRadius: '50%', border: '2px solid #fff', overflow: 'hidden', boxShadow: '0 6px 20px rgba(0,0,0,.18)', cursor: 'pointer' };
-  const soundBtn: React.CSSProperties = { position: 'absolute', right: 70, bottom: 70, width: 44, height: 44, borderRadius: 999, border: '1px solid rgba(17,17,17,.2)', background: '#fff', display: 'grid', placeItems: 'center', fontWeight: 900, cursor: 'pointer' };
-  const moreBtn: React.CSSProperties = { position: 'absolute', top: 10, right: 10, width: 24, height: 24, borderRadius: 999, background: '#fff', border: '1px solid rgba(17,17,17,.12)', display: 'grid', placeItems: 'center', boxShadow: '0 2px 8px rgba(0,0,0,.12)', cursor: 'pointer' };
-  const actions: React.CSSProperties = { position: 'absolute', left: 10, right: 10, bottom: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 };
-  const btn: React.CSSProperties = { borderRadius: 999, padding: '10px 12px', fontWeight: 800, border: 'none', cursor: 'pointer' };
+
+  const empty = behaviors.length === 0;
 
   return (
-    <div
-      style={container}
-      onWheel={onWheel}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
-    >
-      {items.map((it) => {
-        const id = String(it.id);
-        const muted = mutedMap[id] ?? true;
-        const hasDispute = !!it.disputeId;
-        const perf = it.disputeStats?.performer ?? 0;
-        const cust = it.disputeStats?.customer ?? 0;
-        return (
-          <section key={id} style={rowWrap}>
-            <div data-id={id} ref={(el) => (wrapRefs.current[id] = el)} style={card}>
-              {it.mediaUrl ? (
-                <video
-                  ref={(v)=> (videoRefs.current[id]=v)}
-                  src={it.mediaUrl || undefined}
-                  poster={it.posterUrl || undefined}
-                  style={media}
-                  playsInline
-                  muted
-                  loop
-                  preload="metadata"
-                  autoPlay
-                />
-              ) : (
-                <div style={media} />
-              )}
-
-              {(it.title || it.description) && (
-                <div style={caption}>
-                  {it.title && <div style={{ fontWeight: 800, marginBottom: 4 }}>{it.title}</div>}
-                  {it.description && <div style={{ opacity: .95 }}>{it.description}</div>}
-                </div>
-              )}
-
-              {it.isEvidence && (
-                <div style={chip}>🎥 Video evidence<br/><span style={{opacity:.9,fontWeight:600,fontSize:12}}>Завантажено з StoryBar</span></div>
-              )}
-
-              <button style={moreBtn} title="меню">⋯</button>
-
-              {it.authorAvatarUrl && (
-                <div
-                  style={avatar}
-                  onClick={()=>{
-                    try{
-                      if (it.authorId) {
-                        if (window.openProfileSheet) window.openProfileSheet(it.authorId);
-                        else if (window.router?.push) window.router.push(`/map?profile=${it.authorId}`);
-                        else window.location.href = `/map?profile=${it.authorId}`;
-                        onOpenAuthor?.(it.authorId);
-                      }
-                    }catch{ /* noop */ }
-                  }}
-                  title="Профіль автора"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={it.authorAvatarUrl} alt="author" style={{ width:'100%',height:'100%',objectFit:'cover' }} onError={(e)=>((e.currentTarget as HTMLImageElement).style.display='none')} />
-                </div>
-              )}
-
-              {it.mediaUrl && (
-                <button style={soundBtn} aria-label={muted?'Увімкнути звук':'Вимкнути звук'} onClick={()=> setMutedMap((p)=> ({...p,[id]: !muted}))}>{muted?'🔇':'🔊'}</button>
-              )}
-
-              <div style={actions}>
-                {hasDispute ? (
-                  <>
-                    <button style={{...btn, background:'#111', color:'#fff'}} onClick={async()=>{ try { await onVote?.(it.disputeId!, 'performer'); } catch { /* noop */ } }}>підтримати виконавця ({perf})</button>
-                    <button style={{...btn, background:'#9ca3af', color:'#fff'}} onClick={async()=>{ try { await onVote?.(it.disputeId!, 'customer'); } catch { /* noop */ } }}>підтримати замовника ({cust})</button>
-                  </>
-                ) : (
-                  <>
-                    <button style={{...btn, background:'#e5e7eb'}} onClick={()=>{ try { if (it.authorId) onOpenAuthor?.(it.authorId); } catch { /* noop */ } }}>профіль автора</button>
-                    <button style={{...btn, background:'#e5e7eb'}} onClick={()=>{ try { onShare?.(it.id); } catch { /* noop */ } }}>поділитись</button>
-                  </>
-                )}
+    <div style={page}>
+      <div
+        ref={containerRef}
+        style={container}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+      >
+        {empty && (
+          // Якщо порожньо, у Canvas підкажемо як увімкнути REST без SDK:
+          <section style={itemWrap} data-id="0">
+            <div style={card}>
+              <div style={captionTop}>Немає відео для показу</div>
+              <div style={{color:'#fff',display:'grid',placeItems:'center',width:'100%',height:'100%',textAlign:'center',padding:16}}>
+                Додайте біхевіор через ваш сторібар. Стрічка підтягне його автоматично.
+                <div style={{marginTop:12, opacity:.85, fontSize:12}}>Canvas fallback: у консолі виконайте <code>bmb_setRestCreds('https://YOUR.supabase.co','YOUR_ANON_KEY')</code> і перезавантажте.</div>
               </div>
             </div>
           </section>
-        );
-      })}
+        )}
+
+        {behaviors.map((b) => {
+          const src = videoSrcOf(b);
+          return (
+            <section key={b.id} style={itemWrap} ref={(el) => (wrapRefs.current[b.id] = el)} data-id={String(b.id)}>
+              <div style={card}>
+                {/* верхній бейдж як у вашому макеті */}
+                <div style={storyBadge}>
+                  <div style={{ fontWeight: 700 }}>Video evidence</div>
+                  <div style={{ opacity: .95 }}>Завантажено з StoryBar</div>
+                </div>
+                {(b.title || b.description) && (
+                  <div style={captionTop}>
+                    {b.title && <div style={{ fontWeight: 700, marginBottom: 4 }}>{b.title}</div>}
+                    {b.description && <div style={{ opacity: .95 }}>{b.description}</div>}
+                  </div>
+                )}
+
+                {src ? (
+                  <video
+                    ref={(el) => (videoRefs.current[b.id] = el)}
+                    src={src}
+                    poster={b.thumbnail_url || undefined}
+                    className="shorts-video"
+                    playsInline muted autoPlay loop preload="metadata"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    data-id={String(b.id)}
+                    onLoadedMetadata={(e) => { if (String(b.id) === activeVideoId) e.currentTarget.play().catch(() => {}); }}
+                  />
+                ) : (
+                  <div style={{ color: '#fff', display: 'grid', placeItems: 'center', width: '100%', height: '100%' }}>No video</div>
+                )}
+
+                <button title="Власник" style={avatarBtn} onClick={() => onOpenAuthor(b.author_id || undefined)}>
+                  {b.author_avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={b.author_avatar_url} alt="owner" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                         onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />
+                  ) : (
+                    <span>{(b.author_id || 'U').slice(0, 1).toUpperCase()}</span>
+                  )}
+                </button>
+
+                <button title={'Звук'} style={soundBtn} onClick={() => {
+                  const el = videoRefs.current[b.id];
+                  if (!el) return;
+                  el.muted = !el.muted;
+                }}>
+                  🔊
+                </button>
+              </div>
+            </section>
+          );
+        })}
+      </div>
     </div>
-  );
-};
-
-// ============================ LIVE через REST (канва) ============================
-export function BehaviorsFeedLiveFromSupabase() {
-  const [items, setItems] = useState<BehaviorItem[]>([]);
-  const [err, setErr] = useState<string|null>(null);
-
-  useEffect(() => { let alive = true; (async()=>{
-    try {
-      if (!hasLiveCreds) throw new Error('Додай SUPABASE_URL/KEY у верхній частині файлу');
-      const select = 'id,ipfs_cid,file_url,thumbnail_url,title,description,created_at,dispute_id,author_id,is_dispute_evidence,profiles:author_id(id,avatar_url)';
-      const rows = await restGet(`/rest/v1/behaviors?select=${encodeURIComponent(select)}&file_url=is.not.null&order=created_at.desc.nullslast,id.desc&limit=500`);
-      const base: BehaviorItem[] = (rows||[]).map((b:any)=>(
-        {
-          id:b.id, title:b.title, description:b.description, authorId:b.author_id??null,
-          authorAvatarUrl:b?.profiles?.avatar_url??null,
-          mediaUrl: b.file_url ?? null,
-          posterUrl:b.thumbnail_url??null, createdAt:b.created_at??null,
-          isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
-        }
-      ));
-      const dispIds = Array.from(new Set(base.map(x=>x.disputeId).filter(Boolean))) as string[];
-      let statusMap:any = {}, countsMap:any = {};
-      if (dispIds.length) {
-        const ds = await restGet(`/rest/v1/disputes?select=id,status&in.id=(${encodeURIComponent(dispIds.join(','))})`);
-        (ds||[]).forEach((d:any)=> statusMap[d.id]=d.status);
-        const cnt = await restGet(`/rest/v1/dispute_vote_counts?select=dispute_id,performer_votes,customer_votes&in.dispute_id=(${encodeURIComponent(dispIds.join(','))})`);
-        (cnt||[]).forEach((c:any)=> countsMap[c.dispute_id]={ performer:c.performer_votes||0, customer:c.customer_votes||0 });
-      }
-      const mapped = base.map((r)=>({ ...r, disputeStatus: statusMap[r.disputeId||'']??null, disputeStats: countsMap[r.disputeId||'']??null }));
-      if (alive) setItems(mapped);
-    } catch(e:any) { if (alive) setErr(e.message||'load error'); }
-  })(); return ()=>{alive=false}; }, []);
-
-  if (!hasLiveCreds) return <div style={{padding:16}}>Додай <code>SUPABASE_URL</code> і <code>SUPABASE_ANON_KEY</code> для LIVE у канві.</div>;
-  if (err) return <div style={{padding:16,color:'#b91c1c'}}>Помилка: {err}</div>;
-  return <BehaviorsFeedFullScreen items={items} onShare={(id)=>{ try{navigator.share?.({title:'Buy My Behavior', url: location.href});}catch{ /* noop */ } }} />;
-}
-
-// ============================== Preview (демо) =============================
-export function BehaviorsFeedPreview(){
-  const demo:BehaviorItem[] = [
-    { id:101, title:'Video evidence', description:'Завантажено з StoryBar', mediaUrl:'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4', isEvidence:true, disputeId:'demo1', disputeStatus:'open', disputeStats:{ performer:12, customer:8 }, authorId:'u1', authorAvatarUrl:'https://i.pravatar.cc/100?img=12' },
-    { id:102, title:'Класичний біхейворс', description:'Без спору', mediaUrl:'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4', isEvidence:false, authorId:'u2', authorAvatarUrl:'https://i.pravatar.cc/100?img=32' },
-  ];
-  return <BehaviorsFeedFullScreen items={demo}/>;
-}
-
-// ============================ Default export ============================
-export default function BehaviorsFeedEntry({ supabase: supabaseClient, loader }: { supabase?: any; loader?: () => Promise<BehaviorItem[]> } = {}){
-  const sb = supabaseClient || (typeof window !== 'undefined' ? (window as any).supabase : undefined);
-  if (hasLiveCreds && !sb && !loader) return <BehaviorsFeedLiveFromSupabase/>;
-  if (sb || loader) return <BehaviorsFeedProd supabase={sb} loader={loader}/>;
-  return <BehaviorsFeedPreview/>;
-}
-
-// =============================== PROD Loader ===============================
-export function BehaviorsFeedProd({ loader, supabase: sbFromProp }: { loader?: () => Promise<BehaviorItem[]>; supabase?: any } = {}){
-  const [items,setItems] = useState<BehaviorItem[]>([]);
-  const sb = useMemo(()=> sbFromProp || (typeof window!=='undefined' ? (window as any).supabase : undefined), [sbFromProp]);
-
-  // ---- one place to (re)load feed ----
-  const fetchList = React.useCallback(async ()=>{
-    try{
-      let list:BehaviorItem[]|null=null;
-      if (typeof loader==='function') {
-        list = await loader();
-      } else if (typeof window!=='undefined' && typeof window.__bmb_load_behaviors==='function') {
-        list = await window.__bmb_load_behaviors();
-      } else if (sb && sb.from){
-        const { data, error } = await sb.from('behaviors').select(`
-          id, ipfs_cid, file_url, thumbnail_url, title, description, created_at,
-          dispute_id, author_id, user_id, is_dispute_evidence,
-          profiles:author_id(id, avatar_url),
-          author_profile:user_id(id, avatar_url)
-        `).not('file_url','is',null)
-          .order('created_at',{ ascending:false, nullsFirst:false })
-          .order('id',{ ascending:false })
-          .limit(500);
-        if (error) throw error;
-        const base:BehaviorItem[] = (data||[]).map((b:any)=>(
-          {
-            id:b.id, title:b.title, description:b.description,
-            authorId: (b.author_id??b.user_id)??null,
-            authorAvatarUrl: b?.profiles?.avatar_url??b?.author_profile?.avatar_url??null,
-            mediaUrl: b.file_url ?? null,
-            posterUrl:b.thumbnail_url??null, createdAt:b.created_at??null,
-            isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
-          }
-        ));
-        const dispIds = Array.from(new Set(base.map(x=>x.disputeId).filter(Boolean))) as string[];
-        let statusMap:any={}, countsMap:any={}, myMap:any={};
-        if (dispIds.length){
-          const { data: ds, error: e1 } = await sb.from('disputes').select('id,status').in('id', dispIds);
-          if (e1) throw e1; (ds||[]).forEach((d:any)=> statusMap[d.id]=d.status);
-          const { data: cnt, error: e2 } = await sb.from('dispute_vote_counts').select('dispute_id, performer_votes, customer_votes').in('dispute_id', dispIds);
-          if (e2) throw e2; (cnt||[]).forEach((c:any)=> countsMap[c.dispute_id]={ performer:c.performer_votes||0, customer:c.customer_votes||0 });
-          const { data: auth } = await sb.auth.getUser();
-          const uid = auth?.user?.id as string|undefined;
-          if (uid){
-            const { data: my, error: e3 } = await sb.from('dispute_votes').select('dispute_id, choice').in('dispute_id', dispIds).eq('user_id', uid);
-            if (!e3) (my||[]).forEach((m:any)=>{ myMap[m.dispute_id]=m.choice as VoteChoice; });
-          }
-        }
-        list = base.map((r)=>({ ...r, disputeStatus: statusMap[r.disputeId||'']??null, disputeStats: countsMap[r.disputeId||'']??null, myVote: myMap[r.disputeId||'']??null }));
-      } else if (hasLiveCreds) {
-        const select = 'id,ipfs_cid,file_url,thumbnail_url,title,description,created_at,dispute_id,author_id,user_id,is_dispute_evidence,profiles:author_id(id,avatar_url),author_profile:user_id(id,avatar_url)';
-        const rows = await restGet(`/rest/v1/behaviors?select=${encodeURIComponent(select)}&file_url=is.not.null&order=created_at.desc.nullslast,id.desc&limit=500`);
-        const base: BehaviorItem[] = (rows||[]).map((b:any)=>(
-          {
-            id:b.id, title:b.title, description:b.description,
-            authorId:(b.author_id??b.user_id)??null,
-            authorAvatarUrl:b?.profiles?.avatar_url??b?.author_profile?.avatar_url??null,
-            mediaUrl: b.file_url ?? null,
-            posterUrl:b.thumbnail_url??null, createdAt:b.created_at??null,
-            isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
-          }
-        ));
-        const dispIds = Array.from(new Set(base.map(x=>x.disputeId).filter(Boolean))) as string[];
-        let statusMap:any={}, countsMap:any={};
-        if (dispIds.length){
-          const ds = await restGet(`/rest/v1/disputes?select=id,status&in.id=(${encodeURIComponent(dispIds.join(','))})`);
-          (ds||[]).forEach((d:any)=> statusMap[d.id]=d.status);
-          const cnt = await restGet(`/rest/v1/dispute_vote_counts?select=dispute_id,performer_votes,customer_votes&in.dispute_id=(${encodeURIComponent(dispIds.join(','))})`);
-          (cnt||[]).forEach((c:any)=> countsMap[c.dispute_id]={ performer:c.performer_votes||0, customer:c.customer_votes||0 });
-        }
-        list = base.map((r)=>({ ...r, disputeStatus: statusMap[r.disputeId||'']??null, disputeStats: countsMap[r.disputeId||'']??null }));
-      } else {
-        list = [];
-      }
-      setItems(list||[]);
-    }catch(e){
-      console.error('BehaviorsFeedProd load:', e);
-      setItems([]);
-    }
-  }, [loader, sb]);
-
-  // initial load
-  useEffect(()=>{ fetchList(); }, [fetchList]);
-
-  // realtime (if enabled) + periodic poll as a fallback
-  useEffect(()=>{
-    if (!sb) return;
-    let ch: any | null = null;
-    try{
-      if (sb.channel) {
-        ch = sb.channel('bmb_behaviors_feed')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'behaviors' }, ()=>{ fetchList(); })
-          .subscribe();
-      }
-    }catch{ /* noop */ }
-    const iv = window.setInterval(()=>{ if (document.visibilityState==='visible') fetchList(); }, 30000);
-    (window as any).bmb_refreshFeed = fetchList;
-    return ()=>{ if(ch) sb.removeChannel(ch); window.clearInterval(iv); delete (window as any).bmb_refreshFeed; };
-  }, [sb, fetchList]);
-
-  const cast = async (disputeId:string, choice:VoteChoice)=>{
-    try{
-      if (!sb) { alert('Голосування доступне після входу в застосунок'); return; }
-      const { data: auth } = await sb.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid){ alert('Увійдіть, щоб голосувати'); return; }
-      const { error } = await sb.from('dispute_votes').upsert({ dispute_id: disputeId, user_id: uid, choice }, { onConflict: 'dispute_id,user_id' });
-      if (error){ alert(error.message); return; }
-      const { data: cnt } = await sb.from('dispute_vote_counts').select('dispute_id, performer_votes, customer_votes').eq('dispute_id', disputeId).maybeSingle();
-      setItems((prev)=> prev.map((it)=> it.disputeId===disputeId ? ({ ...it, myVote: choice, disputeStats: { performer: cnt?.performer_votes||0, customer: cnt?.customer_votes||0 }}) : it));
-    }catch(err){ console.error('vote error', err); }
-  };
-
-    // expose minimal creation helpers on window (do not affect UI)
-  useEffect(()=>{
-    if (!sb) return;
-    (window as any).bmb_addBehaviorFromUrl = async (payload: { file_url: string; title?: string; description?: string; author_id?: string; user_id?: string; is_dispute_evidence?: boolean; dispute_id?: string; }) => {
-      try{
-        if (!payload?.file_url) throw new Error('file_url required');
-        const { data: auth } = await sb.auth.getUser();
-        const uid = payload.user_id || payload.author_id || auth?.user?.id || null;
-        const row:any = {
-          file_url: payload.file_url,
-          title: payload.title ?? null,
-          description: payload.description ?? null,
-          user_id: uid,
-          author_id: payload.author_id ?? null,
-          is_dispute_evidence: !!payload.is_dispute_evidence,
-          dispute_id: payload.dispute_id ?? null
-        };
-        const { error } = await sb.from('behaviors').insert(row);
-        if (error) throw error;
-        await fetchList();
-        return true;
-      }catch(e){ console.error('bmb_addBehaviorFromUrl', e); return false; }
-    };
-    (window as any).bmb_uploadAndAddBehavior = async (file:any, meta:any={}) => {
-      try{
-        if (!file) throw new Error('file required');
-        const { data: auth } = await sb.auth.getUser();
-        const uid = meta.user_id || meta.author_id || auth?.user?.id || 'anon';
-        const path = `${uid}/${Date.now()}-${(file as any).name || 'video.mp4'}`;
-        const up = await sb.storage.from('behaviors').upload(path, file, { cacheControl: '3600', upsert: false, contentType: (file as any).type || 'video/mp4' });
-        if ((up as any).error) throw (up as any).error;
-        const pub = sb.storage.from('behaviors').getPublicUrl(path);
-        const file_url = pub?.data?.publicUrl as string;
-        if (!file_url) throw new Error('publicUrl not generated');
-        const ok = await (window as any).bmb_addBehaviorFromUrl({ ...meta, file_url, user_id: uid });
-        return ok;
-      }catch(e){ console.error('bmb_uploadAndAddBehavior', e); return false; }
-    };
-    return ()=>{ delete (window as any).bmb_addBehaviorFromUrl; delete (window as any).bmb_uploadAndAddBehavior; };
-  }, [sb, fetchList]);
-
-  return (
-    <BehaviorsFeedFullScreen
-      items={items}
-      onVote={cast}
-      onOpenAuthor={(aid)=>{ try{ if(aid){ if (window.openProfileSheet) window.openProfileSheet(aid); else if (window.router?.push) window.router.push(`/map?profile=${aid}`); else window.location.href=`/map?profile=${aid}`; } }catch{ /* noop */ } }}
-      onViewDispute={(id)=>{ try{ window.location.href=`/disputes/${id}` }catch{ /* noop */ } }}
-      onShare={()=>{ try{navigator.share?.({title:'Buy My Behavior', url: location.href});}catch{ /* noop */ } }}
-    />
   );
 }
