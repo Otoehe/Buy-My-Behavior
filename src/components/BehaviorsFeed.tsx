@@ -17,8 +17,8 @@ interface Behavior {
   created_at?: string | null;
   author_id?: string | null;
   author_avatar_url?: string | null;
-  likes_count: number;
-  dislikes_count: number;
+  likes_count: number;       // лишаю для сумісності з БД (UI не показуємо)
+  dislikes_count: number;    // лишаю для сумісності з БД (UI не показуємо)
   is_dispute_evidence?: boolean;
   dispute_id?: string | null;
 }
@@ -34,8 +34,6 @@ const BehaviorsFeed: React.FC = () => {
   >({});
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [activeVideoId, setActiveVideoId] = useState<number | null>(null);
-
-  // Якщо браузер блокує автоплей зі звуком — покажемо підказку лише для активної картки
   const [needsUserGestureFor, setNeedsUserGestureFor] = useState<number | null>(null);
 
   const videoRefs = useRef<Record<number, HTMLVideoElement | null>>({});
@@ -234,7 +232,6 @@ const BehaviorsFeed: React.FC = () => {
     });
   }, [activeVideoId]);
 
-  // один жест користувача — розблокувати відтворення звуку
   useEffect(() => {
     if (needsUserGestureFor == null) return;
     const handler = () => {
