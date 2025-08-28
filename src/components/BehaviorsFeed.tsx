@@ -1,12 +1,11 @@
 'use client';
 
 /**
- * Behaviors Feed — YouTube Shorts style
- * ▸ Центровані вертикальні картки 9:16, автоплей тільки активної
- * ▸ Показує відео з таблиці behaviors: як звичайні, так і `is_dispute_evidence = true`
- * ▸ Якщо запис є відео‑доказом і прив'язаний до спору — показує кнопки голосування
- * ▸ Без абсолютних імпортів, щоб збірка у Canvas не падала. У проді використовуйте
- *   <BehaviorsFeedProd supabase={supabase}> або передайте `loader()`.
+ * Behaviors Feed — YouTube Shorts style (clean)
+ * ▸ Вертикальні картки 9:16, по одному на екран (scroll-snap + smooth)
+ * ▸ Автоплей тільки активної картки
+ * ▸ Тягнемо відео з таблиці behaviors; якщо запис — video evidence у спорі, показуємо кнопки голосування
+ * ▸ Без правої «соціальної» рейки (прибрана)
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -40,8 +39,6 @@ export type BehaviorItem = {
   disputeStatus?: 'open' | 'closed' | 'resolved' | null;
   disputeStats?: { performer: number; customer: number } | null;
   myVote?: VoteChoice | null;
-  // соціальні лічильники (для правої рейки)
-  social?: { likes?: number; dislikes?: number; comments?: number; shares?: number; views?: number } | null;
 };
 
 export type BehaviorsFeedProps = {
@@ -61,6 +58,7 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const wrapRefs = useRef<Record<string, HTMLElement | null>>({});
 
+  // Визначення активної картки
   useEffect(() => {
     const io = new IntersectionObserver((entries) => {
       entries.forEach((ent) => {
@@ -72,6 +70,7 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
     return () => io.disconnect();
   }, [items.length]);
 
+  // Автоплей тільки активного відео
   useEffect(() => {
     Object.entries(videoRefs.current).forEach(([id, v]) => {
       if (!v) return;
@@ -81,30 +80,79 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
     });
   }, [activeId, mutedMap]);
 
-  const container: React.CSSProperties = { minHeight: '100vh', overflowY: 'auto', background: '#f8f5f6', padding: '16px 0 32px' };
-  const rowWrap: React.CSSProperties = { display: 'flex', justifyContent: 'center', padding: '28px 0' };
-  const card: React.CSSProperties = { position: 'relative', width: 'min(480px, 92vw)', height: 'min(86vh, 760px)', borderRadius: 20, overflow: 'hidden', boxShadow: '0 18px 40px rgba(17,17,17,.18)', background: '#fff' };
+  // Плавна навігація клавішами ↑/↓
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!['ArrowDown','PageDown','ArrowUp','PageUp'].includes(e.key)) return;
+      e.preventDefault();
+      const idx = items.findIndex((it) => String(it.id) === activeId);
+      const nextIdx = (e.key === 'ArrowDown' || e.key === 'PageDown') ? Math.min(idx + 1, items.length - 1) : Math.max(idx - 1, 0);
+      const next = items[nextIdx];
+      if (next) wrapRefs.current[String(next.id)]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeId, items]);
+
+  // ===== Styles =====
+  const container: React.CSSProperties = {
+    minHeight: '100vh',
+    overflowY: 'auto',
+    background: '#fff',
+    padding: '16px 0 32px',
+    scrollSnapType: 'y mandatory',
+    scrollBehavior: 'smooth',
+  };
+  const rowWrap: React.CSSProperties = {
+    display: 'flex',
+    justifyContent: 'center',
+    padding: '24px 0',
+    scrollSnapAlign: 'center',
+    scrollSnapStop: 'always',
+  };
+  const card: React.CSSProperties = {
+    position: 'relative',
+    width: 'min(420px, 92vw)',
+    aspectRatio: '9 / 16',
+    height: 'auto',
+    borderRadius: 20,
+    overflow: 'hidden',
+    border: '1px solid rgba(17,17,17,.12)',
+    boxShadow: '0 14px 32px rgba(17,17,17,.14)',
+    background: '#fff'
+  };
   const media: React.CSSProperties = { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' };
-  const caption: React.CSSProperties = { position: 'absolute', top: 10, left: 10, right: 56, padding: '10px 12px', borderRadius: 12, background: 'linear-gradient(180deg,rgba(0,0,0,.6),rgba(0,0,0,.2))', color: '#fff', fontSize: 14, lineHeight: 1.25, textShadow: '0 1px 2px rgba(0,0,0,.6)' };
-  const chip: React.CSSProperties = { position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', background: '#fff', border: '1px solid #eee', borderRadius: 999, padding: '6px 10px', fontWeight: 800, boxShadow: '0 4px 16px rgba(0,0,0,.08)' };
-  const railWrap: React.CSSProperties = { position: 'absolute', right: 6, top: 60, bottom: 70, width: 64, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, pointerEvents: 'none' };
-  const railItem: React.CSSProperties = { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, pointerEvents: 'auto' };
-  const railBtn: React.CSSProperties = { width: 48, height: 48, borderRadius: 999, background: '#fff', border: '1px solid rgba(17,17,17,.08)', display: 'grid', placeItems: 'center', boxShadow: '0 6px 20px rgba(0,0,0,.18)', cursor: 'pointer', fontSize: 18 };
-  const railCount: React.CSSProperties = { fontSize: 12, color: '#111', fontWeight: 700 };
+  const caption: React.CSSProperties = {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    right: 48,
+    padding: '8px 10px',
+    borderRadius: 12,
+    background: 'rgba(17,17,17,.5)',
+    color: '#fff',
+    fontSize: 13,
+    lineHeight: 1.2,
+    textShadow: '0 1px 2px rgba(0,0,0,.6)'
+  };
+  const chip: React.CSSProperties = {
+    position: 'absolute',
+    top: 10,
+    left: 12,
+    transform: 'none',
+    background: 'rgba(17,17,17,.55)',
+    color: '#fff',
+    border: '1px solid rgba(255,255,255,.15)',
+    borderRadius: 10,
+    padding: '6px 10px',
+    fontWeight: 700,
+    boxShadow: '0 4px 14px rgba(0,0,0,.15)'
+  };
   const avatar: React.CSSProperties = { position: 'absolute', left: 10, bottom: 70, width: 56, height: 56, borderRadius: '50%', border: '2px solid #fff', overflow: 'hidden', boxShadow: '0 6px 20px rgba(0,0,0,.18)', cursor: 'pointer' };
   const soundBtn: React.CSSProperties = { position: 'absolute', right: 70, bottom: 70, width: 44, height: 44, borderRadius: 999, border: '1px solid rgba(17,17,17,.2)', background: '#fff', display: 'grid', placeItems: 'center', fontWeight: 900, cursor: 'pointer' };
+  const moreBtn: React.CSSProperties = { position: 'absolute', top: 10, right: 10, width: 24, height: 24, borderRadius: 999, background: '#fff', border: '1px solid rgba(17,17,17,.12)', display: 'grid', placeItems: 'center', boxShadow: '0 2px 8px rgba(0,0,0,.12)', cursor: 'pointer' };
   const actions: React.CSSProperties = { position: 'absolute', left: 10, right: 10, bottom: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 };
   const btn: React.CSSProperties = { borderRadius: 999, padding: '10px 12px', fontWeight: 800, border: 'none', cursor: 'pointer' };
-
-  // локальні лічильники для правої рейки (демо)
-  const [social, setSocial] = useState<Record<string, { likes: number; dislikes: number; comments: number; shares: number; views: number }>>({});
-  useEffect(() => {
-    const m: any = {};
-    items.forEach((it) => { const s = it.social || {}; m[String(it.id)] = { likes: s.likes||0, dislikes: s.dislikes||0, comments: s.comments||0, shares: s.shares||0, views: s.views||0 }; });
-    setSocial(m);
-  }, [items]);
-  const bump = (id: string, k: keyof typeof social[string]) => setSocial((p) => ({ ...p, [id]: { ...p[id], [k]: (p[id]?.[k]||0) + 1 } }));
-  const fmtN = (n: number) => (n>=1_000_000?`${(n/1_000_000).toFixed(1)} млн`:n>=1_000?`${(n/1_000).toFixed(1)} тис.`:`${n}`);
 
   return (
     <div style={container}>
@@ -118,7 +166,17 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
           <section key={id} style={rowWrap}>
             <div data-id={id} ref={(el) => (wrapRefs.current[id] = el)} style={card}>
               {it.mediaUrl ? (
-                <video ref={(v)=> (videoRefs.current[id]=v)} src={it.mediaUrl||undefined} poster={it.posterUrl||undefined} style={media} playsInline muted loop preload="metadata" autoPlay />
+                <video
+                  ref={(v)=> (videoRefs.current[id]=v)}
+                  src={it.mediaUrl || undefined}
+                  poster={it.posterUrl || undefined}
+                  style={media}
+                  playsInline
+                  muted
+                  loop
+                  preload="metadata"
+                  autoPlay
+                />
               ) : (
                 <div style={media} />
               )}
@@ -131,19 +189,12 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
               )}
 
               {it.isEvidence && (
-                <div style={chip}>🎥 Video evidence</div>
-              )}
+                <div style={chip}>🎥 Video evidence<br/><span style={{opacity:.9,fontWeight:600,fontSize:12}}>Завантажено з StoryBar</span></div>
+              )} 
 
-              {/* права рейка — YouTube‑like */}
-              <div style={railWrap}>
-                <div style={railItem}><button style={railBtn} title="Меню">⋮</button></div>
-                <div style={railItem}><button style={railBtn} onClick={()=>bump(id,'likes')}>👍</button><div style={railCount}>{fmtN(social[id]?.likes||0)}</div></div>
-                <div style={railItem}><button style={railBtn} onClick={()=>bump(id,'dislikes')}>👎</button><div style={railCount}>{fmtN(social[id]?.dislikes||0)}</div></div>
-                <div style={railItem}><button style={railBtn} onClick={()=>bump(id,'comments')}>💬</button><div style={railCount}>{fmtN(social[id]?.comments||0)}</div></div>
-                <div style={railItem}><button style={railBtn} onClick={()=>{ onShare?.(it.id); bump(id,'shares'); }}>↗</button><div style={railCount}>{fmtN(social[id]?.shares||0)}</div></div>
-              </div>
+              {/* праворуч зверху — меню (іконка) */}
+              <button style={moreBtn} title="меню">⋯</button>
 
-              {/* аватар автора */}
               {it.authorAvatarUrl && (
                 <div style={avatar} onClick={()=> it.authorId && onOpenAuthor?.(it.authorId)} title="Профіль автора">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -151,7 +202,7 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
                 </div>
               )}
 
-              {(it.mediaUrl) && (
+              {it.mediaUrl && (
                 <button style={soundBtn} aria-label={muted?'Увімкнути звук':'Вимкнути звук'} onClick={()=> setMutedMap((p)=> ({...p,[id]: !muted}))}>{muted?'🔇':'🔊'}</button>
               )}
 
@@ -161,9 +212,7 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
                   <>
                     <button style={{...btn, background:'#111', color:'#fff'}} onClick={()=> onVote?.(it.disputeId!, 'performer')}>підтримати виконавця ({perf})</button>
                     <button style={{...btn, background:'#9ca3af', color:'#fff'}} onClick={()=> onVote?.(it.disputeId!, 'customer')}>підтримати замовника ({cust})</button>
-                    {/*
-                      За бажанням можна показати <button style={btn} onClick={()=> onViewDispute?.(it.id)}>деталі спору</button>
-                    */}
+                    {/* За потреби: <button style={btn} onClick={()=> onViewDispute?.(it.id)}>деталі спору</button> */}
                   </>
                 ) : (
                   <>
@@ -188,6 +237,7 @@ export function BehaviorsFeedLiveFromSupabase() {
   useEffect(() => { let alive = true; (async()=>{
     try {
       if (!hasLiveCreds) throw new Error('Додай SUPABASE_URL/KEY у верхній частині файлу');
+      // тягнемо відео прямо з behaviors
       const select = 'id,ipfs_cid,file_url,thumbnail_url,title,description,created_at,dispute_id,author_id,is_dispute_evidence,profiles:author_id(id,avatar_url)';
       const rows = await restGet(`/rest/v1/behaviors?select=${encodeURIComponent(select)}&order=created_at.desc&limit=100`);
       const base: BehaviorItem[] = (rows||[]).map((b:any)=>({
@@ -227,7 +277,9 @@ export function BehaviorsFeedPreview(){
 
 // ============================ Default export ============================
 export default function BehaviorsFeedEntry(){
-  return hasLiveCreds ? <BehaviorsFeedLiveFromSupabase/> : <BehaviorsFeedPreview/>;
+  // Завжди тягнемо реальні відео з таблиці `behaviors` через прод‑лоадер.
+  // (Превʼю й REST‑режим для канви залишені нижче, але тут не використовуються)
+  return <BehaviorsFeedProd/>;
 }
 
 // =============================== PROD Loader ===============================
