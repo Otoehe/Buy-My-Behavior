@@ -17,8 +17,8 @@ interface Behavior {
   created_at?: string | null;
   author_id?: string | null;
   author_avatar_url?: string | null;
-  likes_count: number;
-  dislikes_count: number;
+  likes_count: number;       // зберігаємо поле для сумісності, але UI не показуємо
+  dislikes_count: number;    // зберігаємо поле для сумісності, але UI не показуємо
   is_dispute_evidence?: boolean;
   dispute_id?: string | null;
 }
@@ -32,7 +32,6 @@ const BehaviorsFeed: React.FC = () => {
   const [disputeMeta, setDisputeMeta] = useState<
     Record<number, { disputeId: string; counts: Counts; myVote: VoteChoice | null }>
   >({});
-  const [likedIds, setLikedIds] = useState<number[]>([]);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [activeVideoId, setActiveVideoId] = useState<number | null>(null);
 
@@ -205,14 +204,11 @@ const BehaviorsFeed: React.FC = () => {
           const idStr = target.dataset.id;
           const id = idStr ? Number(idStr) : NaN;
           if (!Number.isFinite(id)) return;
-          if (entry.isIntersecting && entry.intersectionRatio >= 0.9) {
-            setActiveVideoId(id);
-          }
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.9) setActiveVideoId(id);
         });
       },
       { threshold: [0, 0.5, 0.9] }
     );
-
     Object.values(videoRefs.current).forEach((v) => v && obs.observe(v));
     return () => { obs.disconnect(); };
   }, [behaviors]);
@@ -223,11 +219,11 @@ const BehaviorsFeed: React.FC = () => {
       if (!v) return;
 
       if (activeVideoId === id) {
-        v.muted = false; // звук увімкнено одразу для активного
+        v.muted = false; // звук одразу для активного
         const playPromise = v.play();
         if (playPromise && typeof playPromise.then === 'function') {
           playPromise.catch(() => {
-            // браузер заблокував автоплей зі звуком -> попросимо клік
+            // браузер блокує автоплей зі звуком → просимо жест
             setNeedsUserGestureFor(id);
           });
         }
@@ -238,7 +234,7 @@ const BehaviorsFeed: React.FC = () => {
     });
   }, [activeVideoId]);
 
-  // один глобальний жест користувача — розблокувати відтворення звуку
+  // один жест користувача — розблокувати відтворення звуку
   useEffect(() => {
     if (needsUserGestureFor == null) return;
     const handler = () => {
@@ -261,37 +257,6 @@ const BehaviorsFeed: React.FC = () => {
   // ---------- actions ----------
   const handleAuthorClick = (authorId?: string | null) => {
     if (authorId) navigate('/map', { state: { profile: authorId } });
-  };
-
-  const handleLike = async (behaviorId: number) => {
-    if (likedIds.includes(behaviorId)) return;
-    setLikedIds((s) => [...s, behaviorId]);
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user?.id) return alert('Потрібно увійти');
-
-    const { data: existingLike } = await supabase
-      .from('likes')
-      .select('*')
-      .eq('behavior_id', behaviorId)
-      .eq('user_id', user.id)
-      .maybeSingle();
-    if (existingLike) return;
-
-    const { error } = await supabase.from('likes').insert({
-      behavior_id: behaviorId,
-      user_id: user.id,
-      is_like: true,
-    });
-    if (error) {
-      console.error('Помилка лайку:', error.message);
-    } else {
-      setBehaviors((prev) =>
-        prev.map((b) =>
-          b.id === behaviorId ? { ...b, likes_count: (b.likes_count || 0) + 1 } : b
-        )
-      );
-    }
   };
 
   const handleVote = async (behaviorId: number, choice: VoteChoice) => {
@@ -371,7 +336,7 @@ const BehaviorsFeed: React.FC = () => {
                   </div>
                 )}
 
-                {/* Аватар автора — кружечок знизу зліва */}
+                {/* Аватар автора — кружечок знизу ліворуч (бренд-обводка) */}
                 {!!b.author_avatar_url && (
                   <img
                     className="shorts-author-avatar"
@@ -391,17 +356,6 @@ const BehaviorsFeed: React.FC = () => {
                 >
                   <i className="fa-solid fa-share-nodes"></i>
                 </button>
-
-                {/* Права панель кнопок (лайк) */}
-                <div
-                  className="shorts-buttons-panel"
-                  style={{ zIndex: 9999, position: 'absolute', top: '10%', right: '5%' }}
-                >
-                  <button onClick={() => handleLike(b.id)} title="Подобається">
-                    <i className="fa-regular fa-heart"></i>
-                    {b.likes_count > 0 && <span className="reaction-count white-thin">{b.likes_count}</span>}
-                  </button>
-                </div>
 
                 {/* Кнопки голосування при спорі */}
                 {dm && (

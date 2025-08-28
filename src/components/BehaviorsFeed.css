@@ -1,12 +1,12 @@
 /* ===== BehaviorsFeed — вертикальні картки 9:16 з автоскролом по одній ===== */
 
-/* контейнер стрічки */
+/* контейнер стрічки — білий фон */
 .shorts-scroll-container {
   height: 100vh;
   overflow-y: auto;
   scroll-snap-type: y mandatory;
   -webkit-overflow-scrolling: touch;
-  background: #fff; /* білий фон за ТЗ */
+  background: #fff;
 }
 
 /* один екран = один слайд */
@@ -36,7 +36,7 @@
   box-shadow:
     0 6px 24px rgba(0,0,0,.18),
     0 1px 0 rgba(255,255,255,.06) inset;
-  border: 1px solid rgba(255, 205, 214, 0.25); /* рожевий кант під бренд BMB (#ffcdd6) */
+  border: 1px solid rgba(255, 205, 214, 0.25); /* рожевий кант (#ffcdd6) */
 }
 
 /* відео всередині картки */
@@ -63,9 +63,7 @@
 }
 
 /* бейдж спору */
-.badge-dispute {
-  user-select: none;
-}
+.badge-dispute { user-select: none; }
 
 /* кнопка Поділитись (правий верхній кут картки) */
 .share-button {
@@ -81,33 +79,7 @@
 }
 .share-button i { font-size: 16px; }
 
-/* права панель кнопок (лише лайк) */
-.shorts-buttons-panel {
-  display: grid;
-  gap: 10px;
-}
-.shorts-buttons-panel button {
-  display: grid;
-  place-items: center;
-  width: 44px; height: 44px;
-  border-radius: 999px;
-  border: none;
-  background: rgba(255,255,255,.92);
-  backdrop-filter: blur(4px);
-  box-shadow: 0 2px 8px rgba(0,0,0,.2);
-  cursor: pointer;
-}
-.shorts-buttons-panel i { font-size: 18px; }
-
-.reaction-count.white-thin {
-  display: block;
-  margin-top: 6px;
-  font-size: 12px;
-  color: #111; /* на білому фоні краще темний текст */
-  text-shadow: 0 1px 2px rgba(255,255,255,.35);
-}
-
-/* аватар автора — маленький кружечок знизу зліва */
+/* аватар автора — кружечок знизу ліворуч у бренд-стилі */
 .shorts-author-avatar {
   position: absolute;
   bottom: 12px;
@@ -117,8 +89,11 @@
   border-radius: 50%;
   object-fit: cover;
   background: #fff;
+  /* подвійна обводка: біла + рожеве кільце бренду */
   border: 2px solid #fff;
-  box-shadow: 0 4px 10px rgba(0,0,0,.35);
+  box-shadow:
+    0 0 0 3px #ffcdd6,     /* зовнішнє рожеве кільце бренду */
+    0 4px 10px rgba(0,0,0,.35);
   cursor: pointer;
   z-index: 4;
 }
@@ -147,23 +122,4 @@
 /* адаптив: ширші екрани */
 @media (min-width: 768px) {
   .shorts-video-wrapper { width: min(420px, 56vh); }
-}
-
-/* (опціонально) стек кількох аватарів */
-.shorts-author-avatars {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
-  display: flex;
-  gap: 6px;
-  z-index: 4;
-}
-.shorts-author-avatars img {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: 2px solid #fff;
-  box-shadow: 0 4px 10px rgba(0,0,0,.35);
-  object-fit: cover;
-  background: #fff;
 }
