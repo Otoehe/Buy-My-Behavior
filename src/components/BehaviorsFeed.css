@@ -92,7 +92,7 @@
   /* подвійна обводка: біла + рожеве кільце бренду */
   border: 2px solid #fff;
   box-shadow:
-    0 0 0 3px #ffcdd6,     /* зовнішнє рожеве кільце бренду */
+    0 0 0 3px #fff;
     0 4px 10px rgba(0,0,0,.35);
   cursor: pointer;
   z-index: 4;
