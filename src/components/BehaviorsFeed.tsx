@@ -51,7 +51,7 @@ export type BehaviorsFeedProps = {
   onVote?: (disputeId: string, choice: VoteChoice) => Promise<void> | void;
 };
 
-declare global { interface Window { supabase?: any; __bmb_load_behaviors?: () => Promise<BehaviorItem[]>; openProfileSheet?: (id:string)=>void; router?: { push?: (u:string)=>void } } }
+declare global { interface Window { supabase?: any; __bmb_load_behaviors?: () => Promise<BehaviorItem[]>; openProfileSheet?: (id:string)=>void; router?: { push?: (u:string)=>void }; bmb_addBehaviorFromUrl?: (payload: { file_url: string; title?: string; description?: string; author_id?: string; user_id?: string; is_dispute_evidence?: boolean; dispute_id?: string; }) => Promise<boolean>; bmb_uploadAndAddBehavior?: (file: any, meta?: { title?: string; description?: string; author_id?: string; user_id?: string; is_dispute_evidence?: boolean; dispute_id?: string; }) => Promise<boolean>; } }
 
 // ========================= Презентаційний фід =========================
 export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, onShare, onOpenAuthor, onViewDispute, onVote }) => {
@@ -299,12 +299,12 @@ export function BehaviorsFeedLiveFromSupabase() {
     try {
       if (!hasLiveCreds) throw new Error('Додай SUPABASE_URL/KEY у верхній частині файлу');
       const select = 'id,ipfs_cid,file_url,thumbnail_url,title,description,created_at,dispute_id,author_id,is_dispute_evidence,profiles:author_id(id,avatar_url)';
-      const rows = await restGet(`/rest/v1/behaviors?select=${encodeURIComponent(select)}&order=created_at.desc&limit=100`);
+      const rows = await restGet(`/rest/v1/behaviors?select=${encodeURIComponent(select)}&file_url=is.not.null&order=created_at.desc.nullslast,id.desc&limit=500`);
       const base: BehaviorItem[] = (rows||[]).map((b:any)=>(
         {
           id:b.id, title:b.title, description:b.description, authorId:b.author_id??null,
           authorAvatarUrl:b?.profiles?.avatar_url??null,
-          mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url??null),
+          mediaUrl: b.file_url ?? null,
           posterUrl:b.thumbnail_url??null, createdAt:b.created_at??null,
           isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
         }
@@ -363,14 +363,17 @@ export function BehaviorsFeedProd({ loader, supabase: sbFromProp }: { loader?: (
           dispute_id, author_id, user_id, is_dispute_evidence,
           profiles:author_id(id, avatar_url),
           author_profile:user_id(id, avatar_url)
-        `).order('created_at',{ascending:false}).limit(200);
+        `).not('file_url','is',null)
+          .order('created_at',{ ascending:false, nullsFirst:false })
+          .order('id',{ ascending:false })
+          .limit(500);
         if (error) throw error;
         const base:BehaviorItem[] = (data||[]).map((b:any)=>(
           {
             id:b.id, title:b.title, description:b.description,
             authorId: (b.author_id??b.user_id)??null,
             authorAvatarUrl: b?.profiles?.avatar_url??b?.author_profile?.avatar_url??null,
-            mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url??null),
+            mediaUrl: b.file_url ?? null,
             posterUrl:b.thumbnail_url??null, createdAt:b.created_at??null,
             isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
           }
@@ -392,13 +395,13 @@ export function BehaviorsFeedProd({ loader, supabase: sbFromProp }: { loader?: (
         list = base.map((r)=>({ ...r, disputeStatus: statusMap[r.disputeId||'']??null, disputeStats: countsMap[r.disputeId||'']??null, myVote: myMap[r.disputeId||'']??null }));
       } else if (hasLiveCreds) {
         const select = 'id,ipfs_cid,file_url,thumbnail_url,title,description,created_at,dispute_id,author_id,user_id,is_dispute_evidence,profiles:author_id(id,avatar_url),author_profile:user_id(id,avatar_url)';
-        const rows = await restGet(`/rest/v1/behaviors?select=${encodeURIComponent(select)}&order=created_at.desc&limit=200`);
+        const rows = await restGet(`/rest/v1/behaviors?select=${encodeURIComponent(select)}&file_url=is.not.null&order=created_at.desc.nullslast,id.desc&limit=500`);
         const base: BehaviorItem[] = (rows||[]).map((b:any)=>(
           {
             id:b.id, title:b.title, description:b.description,
             authorId:(b.author_id??b.user_id)??null,
             authorAvatarUrl:b?.profiles?.avatar_url??b?.author_profile?.avatar_url??null,
-            mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url??null),
+            mediaUrl: b.file_url ?? null,
             posterUrl:b.thumbnail_url??null, createdAt:b.created_at??null,
             isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
           }
@@ -453,6 +456,47 @@ export function BehaviorsFeedProd({ loader, supabase: sbFromProp }: { loader?: (
       setItems((prev)=> prev.map((it)=> it.disputeId===disputeId ? ({ ...it, myVote: choice, disputeStats: { performer: cnt?.performer_votes||0, customer: cnt?.customer_votes||0 }}) : it));
     }catch(err){ console.error('vote error', err); }
   };
+
+    // expose minimal creation helpers on window (do not affect UI)
+  useEffect(()=>{
+    if (!sb) return;
+    (window as any).bmb_addBehaviorFromUrl = async (payload: { file_url: string; title?: string; description?: string; author_id?: string; user_id?: string; is_dispute_evidence?: boolean; dispute_id?: string; }) => {
+      try{
+        if (!payload?.file_url) throw new Error('file_url required');
+        const { data: auth } = await sb.auth.getUser();
+        const uid = payload.user_id || payload.author_id || auth?.user?.id || null;
+        const row:any = {
+          file_url: payload.file_url,
+          title: payload.title ?? null,
+          description: payload.description ?? null,
+          user_id: uid,
+          author_id: payload.author_id ?? null,
+          is_dispute_evidence: !!payload.is_dispute_evidence,
+          dispute_id: payload.dispute_id ?? null
+        };
+        const { error } = await sb.from('behaviors').insert(row);
+        if (error) throw error;
+        await fetchList();
+        return true;
+      }catch(e){ console.error('bmb_addBehaviorFromUrl', e); return false; }
+    };
+    (window as any).bmb_uploadAndAddBehavior = async (file:any, meta:any={}) => {
+      try{
+        if (!file) throw new Error('file required');
+        const { data: auth } = await sb.auth.getUser();
+        const uid = meta.user_id || meta.author_id || auth?.user?.id || 'anon';
+        const path = `${uid}/${Date.now()}-${(file as any).name || 'video.mp4'}`;
+        const up = await sb.storage.from('behaviors').upload(path, file, { cacheControl: '3600', upsert: false, contentType: (file as any).type || 'video/mp4' });
+        if ((up as any).error) throw (up as any).error;
+        const pub = sb.storage.from('behaviors').getPublicUrl(path);
+        const file_url = pub?.data?.publicUrl as string;
+        if (!file_url) throw new Error('publicUrl not generated');
+        const ok = await (window as any).bmb_addBehaviorFromUrl({ ...meta, file_url, user_id: uid });
+        return ok;
+      }catch(e){ console.error('bmb_uploadAndAddBehavior', e); return false; }
+    };
+    return ()=>{ delete (window as any).bmb_addBehaviorFromUrl; delete (window as any).bmb_uploadAndAddBehavior; };
+  }, [sb, fetchList]);
 
   return (
     <BehaviorsFeedFullScreen
