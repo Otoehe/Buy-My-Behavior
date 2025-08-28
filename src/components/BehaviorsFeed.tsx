@@ -2,20 +2,20 @@
 
 /**
  * Behaviors Feed — YouTube Shorts style (clean)
- * ▸ Вертикальні картки 9:16, по одному на екран (scroll-snap + smooth)
- * ▸ Автоплей тільки активної картки
- * ▸ Тягнемо відео з таблиці behaviors; якщо запис — video evidence у спорі, показуємо кнопки голосування
- * ▸ Без правої «соціальної» рейки (прибрана)
+ * ▸ Вертикальні картки 9:16, по одній на екран (scroll‑snap + smooth)
+ * ▸ Автоплей лише активної картки; мʼют за замовчуванням (політика браузера)
+ * ▸ Тягнемо відео з таблиці `behaviors`; якщо запис — evidence у спорі, показуємо кнопки голосування
+ * ▸ Без правої «соціальної» рейки
+ * ▸ NEW: клік по аватару відкриває шторку профілю; свайп/колесо — переходить рівно між картками і ПЕТЛЕЮ по колу
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 // ========= Canvas REST config (для LIVE у канві — опційно) =========
-// читати з env, якщо вони задані на Vercel/локально
 // @ts-ignore
-const SUPABASE_URL = (typeof process !== 'undefined' && (process.env as any)?.NEXT_PUBLIC_SUPABASE_URL) || '' as string; // напр.: 'https://xyz.supabase.co'
+const SUPABASE_URL: string = (typeof process !== 'undefined' && (process.env as any)?.NEXT_PUBLIC_SUPABASE_URL) || '';
 // @ts-ignore
-const SUPABASE_ANON_KEY = (typeof process !== 'undefined' && (process.env as any)?.NEXT_PUBLIC_SUPABASE_ANON_KEY) || '' as string; // напр.: 'eyJhbGciOi...'
+const SUPABASE_ANON_KEY: string = (typeof process !== 'undefined' && (process.env as any)?.NEXT_PUBLIC_SUPABASE_ANON_KEY) || '';
 const hasLiveCreds = !!SUPABASE_URL && !!SUPABASE_ANON_KEY;
 async function restGet(pathAndQuery: string) {
   const res = await fetch(`${SUPABASE_URL}${pathAndQuery}`, {
@@ -37,7 +37,6 @@ export type BehaviorItem = {
   posterUrl?: string | null;
   createdAt?: string | null;
   isEvidence?: boolean; // behaviors.is_dispute_evidence
-  // dispute meta
   disputeId?: string | null;
   disputeStatus?: 'open' | 'closed' | 'resolved' | null;
   disputeStats?: { performer: number; customer: number } | null;
@@ -52,7 +51,7 @@ export type BehaviorsFeedProps = {
   onVote?: (disputeId: string, choice: VoteChoice) => Promise<void> | void;
 };
 
-declare global { interface Window { supabase?: any; __bmb_load_behaviors?: () => Promise<BehaviorItem[]> } }
+declare global { interface Window { supabase?: any; __bmb_load_behaviors?: () => Promise<BehaviorItem[]>; openProfileSheet?: (id:string)=>void; router?: { push?: (u:string)=>void } } }
 
 // ========================= Презентаційний фід =========================
 export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, onShare, onOpenAuthor, onViewDispute, onVote }) => {
@@ -60,6 +59,26 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
   const [mutedMap, setMutedMap] = useState<Record<string, boolean>>({});
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const wrapRefs = useRef<Record<string, HTMLElement | null>>({});
+  const isAnimatingRef = useRef(false);
+  const wheelAccRef = useRef(0);
+  const touchStartY = useRef<number | null>(null);
+  const touchDeltaY = useRef(0);
+
+  const idxOfActive = () => items.findIndex((it) => String(it.id) === activeId);
+  const goToIndex = (i: number) => {
+    if (!items.length) return;
+    const size = items.length;
+    const safe = ((i % size) + size) % size; // модуль по колу
+    const next = items[safe];
+    const el = wrapRefs.current[String(next.id)];
+    if (el) {
+      isAnimatingRef.current = true;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      window.setTimeout(() => { isAnimatingRef.current = false; }, 450);
+    }
+  };
+  const goNext = () => goToIndex(idxOfActive() + 1);
+  const goPrev = () => goToIndex(idxOfActive() - 1);
 
   // Визначення активної картки
   useEffect(() => {
@@ -79,27 +98,44 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
       if (!v) return;
       const play = id === activeId;
       v.muted = mutedMap[id] ?? true;
-      if (play) {
-        v.play().catch(() => {});
-      } else {
-        v.pause();
-      }
+      if (play) { v.play().catch(() => {}); } else { v.pause(); }
     });
   }, [activeId, mutedMap]);
 
-  // Плавна навігація клавішами ↑/↓
+  // Плавна навігація клавішами ↑/↓ (по колу)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!['ArrowDown','PageDown','ArrowUp','PageUp'].includes(e.key)) return;
       e.preventDefault();
-      const idx = items.findIndex((it) => String(it.id) === activeId);
-      const nextIdx = (e.key === 'ArrowDown' || e.key === 'PageDown') ? Math.min(idx + 1, items.length - 1) : Math.max(idx - 1, 0);
-      const next = items[nextIdx];
-      if (next) wrapRefs.current[String(next.id)]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (e.key === 'ArrowDown' || e.key === 'PageDown') goNext(); else goPrev();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [activeId, items]);
+
+  // Скрол/свайп — по одному елементу і по колу
+  const onWheel: React.WheelEventHandler<HTMLDivElement> = (e) => {
+    if (isAnimatingRef.current) return;
+    e.preventDefault();
+    wheelAccRef.current += e.deltaY;
+    const TH = 60; // поріг чутливості
+    if (Math.abs(wheelAccRef.current) > TH) {
+      wheelAccRef.current > 0 ? goNext() : goPrev();
+      wheelAccRef.current = 0;
+    }
+  };
+  const onTouchStart: React.TouchEventHandler<HTMLDivElement> = (e) => { touchStartY.current = e.touches[0].clientY; touchDeltaY.current = 0; };
+  const onTouchMove: React.TouchEventHandler<HTMLDivElement> = (e) => { if (touchStartY.current!=null) touchDeltaY.current = e.touches[0].clientY - touchStartY.current; };
+  const onTouchEnd: React.TouchEventHandler<HTMLDivElement> = () => {
+    const TH = 40;
+    if (Math.abs(touchDeltaY.current) > TH) {
+      touchDeltaY.current < 0 ? goNext() : goPrev();
+    } else {
+      const curr = wrapRefs.current[activeId];
+      curr?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    touchStartY.current = null; touchDeltaY.current = 0;
+  };
 
   // ===== Styles =====
   const container: React.CSSProperties = {
@@ -109,6 +145,8 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
     padding: '16px 0 32px',
     scrollSnapType: 'y mandatory',
     scrollBehavior: 'smooth',
+    overscrollBehavior: 'contain',
+    touchAction: 'manipulation',
   };
   const rowWrap: React.CSSProperties = {
     display: 'flex',
@@ -162,7 +200,13 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
   const btn: React.CSSProperties = { borderRadius: 999, padding: '10px 12px', fontWeight: 800, border: 'none', cursor: 'pointer' };
 
   return (
-    <div style={container}>
+    <div
+      style={container}
+      onWheel={onWheel}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+    >
       {items.map((it) => {
         const id = String(it.id);
         const muted = mutedMap[id] ?? true;
@@ -197,13 +241,25 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
 
               {it.isEvidence && (
                 <div style={chip}>🎥 Video evidence<br/><span style={{opacity:.9,fontWeight:600,fontSize:12}}>Завантажено з StoryBar</span></div>
-              )} 
+              )}
 
-              {/* праворуч зверху — меню (іконка) */}
               <button style={moreBtn} title="меню">⋯</button>
 
               {it.authorAvatarUrl && (
-                <div style={avatar} onClick={()=> { try { if(it.authorId) onOpenAuthor?.(it.authorId); } catch { /* noop */ } }} title="Профіль автора">
+                <div
+                  style={avatar}
+                  onClick={()=>{
+                    try{
+                      if (it.authorId) {
+                        if (window.openProfileSheet) window.openProfileSheet(it.authorId);
+                        else if (window.router?.push) window.router.push(`/map?profile=${it.authorId}`);
+                        else window.location.href = `/map?profile=${it.authorId}`;
+                        onOpenAuthor?.(it.authorId);
+                      }
+                    }catch{ /* noop */ }
+                  }}
+                  title="Профіль автора"
+                >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={it.authorAvatarUrl} alt="author" style={{ width:'100%',height:'100%',objectFit:'cover' }} onError={(e)=>((e.currentTarget as HTMLImageElement).style.display='none')} />
                 </div>
@@ -213,13 +269,11 @@ export const BehaviorsFeedFullScreen: React.FC<BehaviorsFeedProps> = ({ items, o
                 <button style={soundBtn} aria-label={muted?'Увімкнути звук':'Вимкнути звук'} onClick={()=> setMutedMap((p)=> ({...p,[id]: !muted}))}>{muted?'🔇':'🔊'}</button>
               )}
 
-              {/* низ — дії / голосування (видимі тільки якщо є спір) */}
               <div style={actions}>
                 {hasDispute ? (
                   <>
                     <button style={{...btn, background:'#111', color:'#fff'}} onClick={async()=>{ try { await onVote?.(it.disputeId!, 'performer'); } catch { /* noop */ } }}>підтримати виконавця ({perf})</button>
                     <button style={{...btn, background:'#9ca3af', color:'#fff'}} onClick={async()=>{ try { await onVote?.(it.disputeId!, 'customer'); } catch { /* noop */ } }}>підтримати замовника ({cust})</button>
-                    {/* За потреби: <button style={btn} onClick={()=> onViewDispute?.(it.id)}>деталі спору</button> */}
                   </>
                 ) : (
                   <>
@@ -244,7 +298,6 @@ export function BehaviorsFeedLiveFromSupabase() {
   useEffect(() => { let alive = true; (async()=>{
     try {
       if (!hasLiveCreds) throw new Error('Додай SUPABASE_URL/KEY у верхній частині файлу');
-      // тягнемо відео прямо з behaviors
       const select = 'id,ipfs_cid,file_url,thumbnail_url,title,description,created_at,dispute_id,author_id,is_dispute_evidence,profiles:author_id(id,avatar_url)';
       const rows = await restGet(`/rest/v1/behaviors?select=${encodeURIComponent(select)}&order=created_at.desc&limit=100`);
       const base: BehaviorItem[] = (rows||[]).map((b:any)=>(
@@ -256,7 +309,6 @@ export function BehaviorsFeedLiveFromSupabase() {
           isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
         }
       ));
-      // dispute status + counts
       const dispIds = Array.from(new Set(base.map(x=>x.disputeId).filter(Boolean))) as string[];
       let statusMap:any = {}, countsMap:any = {};
       if (dispIds.length) {
@@ -286,8 +338,6 @@ export function BehaviorsFeedPreview(){
 
 // ============================ Default export ============================
 export default function BehaviorsFeedEntry({ supabase: supabaseClient, loader }: { supabase?: any; loader?: () => Promise<BehaviorItem[]> } = {}){
-  // Порядок: якщо є REST env і немає переданого клієнта — показати live через REST;
-  // якщо є клієнт/лоадер — прод‑варіант; інакше — превʼю з демо‑відео, щоб було видно в канві.
   const sb = supabaseClient || (typeof window !== 'undefined' ? (window as any).supabase : undefined);
   if (hasLiveCreds && !sb && !loader) return <BehaviorsFeedLiveFromSupabase/>;
   if (sb || loader) return <BehaviorsFeedProd supabase={sb} loader={loader}/>;
@@ -295,11 +345,6 @@ export default function BehaviorsFeedEntry({ supabase: supabaseClient, loader }:
 }
 
 // =============================== PROD Loader ===============================
-/**
- * Прод‑варіант: підтягує реальні записи через переданий `supabase` або через `loader`.
- * ◂ Включає підрахунок голосів (таблиця/view `dispute_vote_counts`) і мій голос.
- * ◂ Дозволяє голосування через upsert у `dispute_votes` по (dispute_id,user_id).
- */
 export function BehaviorsFeedProd({ loader, supabase: sbFromProp }: { loader?: () => Promise<BehaviorItem[]>; supabase?: any } = {}){
   const [items,setItems] = useState<BehaviorItem[]>([]);
   const sb = useMemo(()=> sbFromProp || (typeof window!=='undefined' ? (window as any).supabase : undefined), [sbFromProp]);
@@ -343,7 +388,6 @@ export function BehaviorsFeedProd({ loader, supabase: sbFromProp }: { loader?: (
         }
         list = base.map((r)=>({ ...r, disputeStatus: statusMap[r.disputeId||'']??null, disputeStats: countsMap[r.disputeId||'']??null, myVote: myMap[r.disputeId||'']??null }));
       } else if (hasLiveCreds) {
-        // Fallback через REST (працює без window.supabase) — production friendly
         const select = 'id,ipfs_cid,file_url,thumbnail_url,title,description,created_at,dispute_id,author_id,is_dispute_evidence,profiles:author_id(id,avatar_url)';
         const rows = await restGet(`/rest/v1/behaviors?select=${encodeURIComponent(select)}&order=created_at.desc&limit=100`);
         const base: BehaviorItem[] = (rows||[]).map((b:any)=>(
@@ -380,25 +424,18 @@ export function BehaviorsFeedProd({ loader, supabase: sbFromProp }: { loader?: (
       const { data: auth } = await sb.auth.getUser();
       const uid = auth?.user?.id;
       if (!uid){ alert('Увійдіть, щоб голосувати'); return; }
-      // upsert по унікальному ключу (dispute_id,user_id)
       const { error } = await sb.from('dispute_votes').upsert({ dispute_id: disputeId, user_id: uid, choice }, { onConflict: 'dispute_id,user_id' });
       if (error){ alert(error.message); return; }
-      // оновити лічильники
       const { data: cnt } = await sb.from('dispute_vote_counts').select('dispute_id, performer_votes, customer_votes').eq('dispute_id', disputeId).maybeSingle();
       setItems((prev)=> prev.map((it)=> it.disputeId===disputeId ? ({ ...it, myVote: choice, disputeStats: { performer: cnt?.performer_votes||0, customer: cnt?.customer_votes||0 }}) : it));
-    }catch(err){
-      console.error('vote error', err);
-    }
+    }catch(err){ console.error('vote error', err); }
   };
 
-  if (!sb && !loader && !hasLiveCreds && typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-    console.warn('[BMB] supabase client не знайдено. Передай проп `supabase`, поклади інстанс у window.supabase або задай NEXT_PUBLIC_SUPABASE_URL/NEXT_PUBLIC_SUPABASE_ANON_KEY для REST‑fallback.');
-  }
   return (
     <BehaviorsFeedFullScreen
       items={items}
       onVote={cast}
-      onOpenAuthor={(aid)=>{ try{ if(aid) window.location.href=`/map?profile=${aid}` }catch{ /* noop */ } }}
+      onOpenAuthor={(aid)=>{ try{ if(aid){ if (window.openProfileSheet) window.openProfileSheet(aid); else if (window.router?.push) window.router.push(`/map?profile=${aid}`); else window.location.href=`/map?profile=${aid}`; } }catch{ /* noop */ } }}
       onViewDispute={(id)=>{ try{ window.location.href=`/disputes/${id}` }catch{ /* noop */ } }}
       onShare={()=>{ try{navigator.share?.({title:'Buy My Behavior', url: location.href});}catch{ /* noop */ } }}
     />
