@@ -36,7 +36,7 @@
   box-shadow:
     0 6px 24px rgba(0,0,0,.18),
     0 1px 0 rgba(255,255,255,.06) inset;
-  border: 1px solid rgba(255, 205, 214, 0.25); /* рожевий кант (#ffcdd6) */
+  border: 1px solid rgba(255, 205, 214, 0.25); /* легкий рожевий кант картки */
 }
 
 /* відео всередині картки */
@@ -79,7 +79,7 @@
 }
 .share-button i { font-size: 16px; }
 
-/* аватар автора — кружечок знизу ліворуч у бренд-стилі */
+/* аватар автора — кружечок знизу ліворуч (тільки біла обводка) */
 .shorts-author-avatar {
   position: absolute;
   bottom: 12px;
@@ -89,11 +89,8 @@
   border-radius: 50%;
   object-fit: cover;
   background: #fff;
-  /* подвійна обводка: біла + рожеве кільце бренду */
-  border: 2px solid #fff;
-  box-shadow:
-    0 0 0 3px #fff;
-    0 4px 10px rgba(0,0,0,.35);
+  border: 2px solid #fff;                 /* тільки біла обводка */
+  box-shadow: 0 4px 10px rgba(0,0,0,.35); /* м'яка тінь */
   cursor: pointer;
   z-index: 4;
 }
