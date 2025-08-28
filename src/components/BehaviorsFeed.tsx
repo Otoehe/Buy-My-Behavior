@@ -349,7 +349,8 @@ export function BehaviorsFeedProd({ loader, supabase: sbFromProp }: { loader?: (
   const [items,setItems] = useState<BehaviorItem[]>([]);
   const sb = useMemo(()=> sbFromProp || (typeof window!=='undefined' ? (window as any).supabase : undefined), [sbFromProp]);
 
-  useEffect(()=>{ let alive=true; (async()=>{
+  // ---- one place to (re)load feed ----
+  const fetchList = React.useCallback(async ()=>{
     try{
       let list:BehaviorItem[]|null=null;
       if (typeof loader==='function') {
@@ -359,14 +360,16 @@ export function BehaviorsFeedProd({ loader, supabase: sbFromProp }: { loader?: (
       } else if (sb && sb.from){
         const { data, error } = await sb.from('behaviors').select(`
           id, ipfs_cid, file_url, thumbnail_url, title, description, created_at,
-          dispute_id, author_id, is_dispute_evidence,
-          profiles:author_id(id, avatar_url)
-        `).order('created_at',{ascending:false}).limit(100);
+          dispute_id, author_id, user_id, is_dispute_evidence,
+          profiles:author_id(id, avatar_url),
+          author_profile:user_id(id, avatar_url)
+        `).order('created_at',{ascending:false}).limit(200);
         if (error) throw error;
         const base:BehaviorItem[] = (data||[]).map((b:any)=>(
           {
-            id:b.id, title:b.title, description:b.description, authorId:b.author_id??null,
-            authorAvatarUrl:b?.profiles?.avatar_url??null,
+            id:b.id, title:b.title, description:b.description,
+            authorId: (b.author_id??b.user_id)??null,
+            authorAvatarUrl: b?.profiles?.avatar_url??b?.author_profile?.avatar_url??null,
             mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url??null),
             posterUrl:b.thumbnail_url??null, createdAt:b.created_at??null,
             isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
@@ -388,12 +391,13 @@ export function BehaviorsFeedProd({ loader, supabase: sbFromProp }: { loader?: (
         }
         list = base.map((r)=>({ ...r, disputeStatus: statusMap[r.disputeId||'']??null, disputeStats: countsMap[r.disputeId||'']??null, myVote: myMap[r.disputeId||'']??null }));
       } else if (hasLiveCreds) {
-        const select = 'id,ipfs_cid,file_url,thumbnail_url,title,description,created_at,dispute_id,author_id,is_dispute_evidence,profiles:author_id(id,avatar_url)';
-        const rows = await restGet(`/rest/v1/behaviors?select=${encodeURIComponent(select)}&order=created_at.desc&limit=100`);
+        const select = 'id,ipfs_cid,file_url,thumbnail_url,title,description,created_at,dispute_id,author_id,user_id,is_dispute_evidence,profiles:author_id(id,avatar_url),author_profile:user_id(id,avatar_url)';
+        const rows = await restGet(`/rest/v1/behaviors?select=${encodeURIComponent(select)}&order=created_at.desc&limit=200`);
         const base: BehaviorItem[] = (rows||[]).map((b:any)=>(
           {
-            id:b.id, title:b.title, description:b.description, authorId:b.author_id??null,
-            authorAvatarUrl:b?.profiles?.avatar_url??null,
+            id:b.id, title:b.title, description:b.description,
+            authorId:(b.author_id??b.user_id)??null,
+            authorAvatarUrl:b?.profiles?.avatar_url??b?.author_profile?.avatar_url??null,
             mediaUrl: b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url??null),
             posterUrl:b.thumbnail_url??null, createdAt:b.created_at??null,
             isEvidence: !!b.is_dispute_evidence, disputeId:b.dispute_id??null,
@@ -411,12 +415,31 @@ export function BehaviorsFeedProd({ loader, supabase: sbFromProp }: { loader?: (
       } else {
         list = [];
       }
-      if (alive) setItems(list||[]);
+      setItems(list||[]);
     }catch(e){
       console.error('BehaviorsFeedProd load:', e);
-      if(alive) setItems([]);
+      setItems([]);
     }
-  })(); return ()=>{alive=false}; }, [loader, sb]);
+  }, [loader, sb]);
+
+  // initial load
+  useEffect(()=>{ fetchList(); }, [fetchList]);
+
+  // realtime (if enabled) + periodic poll as a fallback
+  useEffect(()=>{
+    if (!sb) return;
+    let ch: any | null = null;
+    try{
+      if (sb.channel) {
+        ch = sb.channel('bmb_behaviors_feed')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'behaviors' }, ()=>{ fetchList(); })
+          .subscribe();
+      }
+    }catch{ /* noop */ }
+    const iv = window.setInterval(()=>{ if (document.visibilityState==='visible') fetchList(); }, 30000);
+    (window as any).bmb_refreshFeed = fetchList;
+    return ()=>{ if(ch) sb.removeChannel(ch); window.clearInterval(iv); delete (window as any).bmb_refreshFeed; };
+  }, [sb, fetchList]);
 
   const cast = async (disputeId:string, choice:VoteChoice)=>{
     try{
