@@ -3,6 +3,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import './Register.css';
+import InAppOpenInBrowserBanner from './InAppOpenInBrowserBanner';
+// ...
+<InAppOpenInBrowserBanner />
+
 
 export default function Register() {
   const navigate = useNavigate();
