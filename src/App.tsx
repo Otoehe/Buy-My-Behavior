@@ -1,4 +1,4 @@
-// src/App.tsx
+// src/App.tsx — final wiring
 import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
@@ -42,7 +42,7 @@ class ErrorBoundary extends React.Component<any, { error: any | null }> {
       const msg = String((this.state.error as any)?.message ?? this.state.error);
       return <div style={{ padding: 16, color: '#b91c1c', fontWeight: 600 }}>Помилка рендеру: {msg}</div>;
     }
-    return this.props.children;
+    return this.props.children as any;
   }
 }
 
@@ -99,6 +99,19 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// ===== helpers: мобільне середовище / встановлена PWA =====
+function isMobileUA() {
+  // @ts-ignore
+  const uaDataMobile = navigator.userAgentData?.mobile === true;
+  return uaDataMobile || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+}
+function isStandalonePWA() {
+  if (window.matchMedia?.('(display-mode: standalone)').matches) return true;
+  // @ts-ignore iOS Safari
+  if (typeof (navigator as any).standalone === 'boolean' && (navigator as any).standalone) return true;
+  return false;
+}
+
 export default function App() {
   useViewportVH();
   useGlobalImageHints();
@@ -108,11 +121,11 @@ export default function App() {
       <NavigationBar />
       <AuthAutoCapture /> {/* перехоплення повернення з маг-лінка тільки за наявності code/токенів */}
 
-      {/* ⬇️ нове: гарантований старт на /map при запуску з ярлика PWA */}
+      {/* Гарантований старт на /map при запуску з ярлика PWA */}
       <PwaLaunchGuard />
 
-      {/* ⬇️ нове: банер “відкрити в Chrome/MetaMask” (показується лише у вбудованих вебв’ю) */}
-      <InAppOpenInBrowserBanner />
+      {/* Банер відкриття тільки на МОБІЛЬНИХ і не в установленій PWA */}
+      {isMobileUA() && !isStandalonePWA() && <InAppOpenInBrowserBanner />}
 
       <ErrorBoundary>
         <Suspense fallback={<Loader />}>
@@ -152,7 +165,9 @@ export default function App() {
 
       <NetworkToast />
       <SWUpdateToast />
-      <A2HS />
+
+      {/* Підказка «додати на головний екран» тільки на МОБІЛЬНИХ і не в установленій PWA */}
+      {isMobileUA() && !isStandalonePWA() && <A2HS />}
     </>
   );
 }
