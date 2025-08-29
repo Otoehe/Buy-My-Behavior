@@ -16,8 +16,11 @@ import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 
-const MapView           = lazy(() => import('./components/MapView')); 
-// 🔧 ДЛЯ ШВИДКОГО ТЕСТУ /map РОЗКОМЕНТУЙ НА 1–2 ХВИЛИНИ:
+// ⬇️ нові імпорти
+import PwaLaunchGuard from './components/PwaLaunchGuard';
+import InAppOpenInBrowserBanner from './components/InAppOpenInBrowserBanner';
+
+const MapView           = lazy(() => import('./components/MapView'));
 // const MapView = lazy(() => import('./components/__MapSmoke'));
 
 const MyOrders          = lazy(() => import('./components/MyOrders'));
@@ -104,6 +107,12 @@ export default function App() {
     <>
       <NavigationBar />
       <AuthAutoCapture /> {/* перехоплення повернення з маг-лінка тільки за наявності code/токенів */}
+
+      {/* ⬇️ нове: гарантований старт на /map при запуску з ярлика PWA */}
+      <PwaLaunchGuard />
+
+      {/* ⬇️ нове: банер “відкрити в Chrome/MetaMask” (показується лише у вбудованих вебв’ю) */}
+      <InAppOpenInBrowserBanner />
 
       <ErrorBoundary>
         <Suspense fallback={<Loader />}>
