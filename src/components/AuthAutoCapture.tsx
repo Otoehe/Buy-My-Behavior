@@ -1,42 +1,31 @@
 // src/components/AuthAutoCapture.tsx
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
 /**
- * Автоматично реагує на зміну стану авторизації:
- *  - після SIGNED_IN веде на /map (або на те, що лежить у localStorage.post_auth_next)
- *  - при першому рендері, якщо сесія вже існує, теж веде на /map
+ * Мінімізований авто-редірект:
+ *  • НЕ редіректимо під час першого рендера (щоб не було гонки з RequireAuth).
+ *  • Редіректимо ТІЛЬКИ на подію SIGNED_IN.
+ *  • Поважаємо post_auth_next (за замовчуванням /map).
  */
 export default function AuthAutoCapture() {
   const navigate = useNavigate();
   const location = useLocation();
+  const didRedirect = useRef(false);
 
   useEffect(() => {
-    let isMounted = true;
-
-    const goNext = () => {
-      const next = localStorage.getItem('post_auth_next') || '/map';
-      // уникаємо зайвих редіректів, якщо вже там
-      if (isMounted && location.pathname !== next) {
-        navigate(next, { replace: true });
-      }
-    };
-
-    // 1) якщо сесія вже є — перенаправляємо
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) goNext();
-    });
-
-    // 2) слухаємо зміни
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        goNext();
+      if (event === 'SIGNED_IN' && session && !didRedirect.current) {
+        didRedirect.current = true;
+        const next = localStorage.getItem('post_auth_next') || '/map';
+        if (location.pathname !== next) {
+          navigate(next, { replace: true });
+        }
       }
     });
 
     return () => {
-      isMounted = false;
       sub.subscription.unsubscribe();
     };
   }, [navigate, location.pathname]);
