@@ -1,164 +1,178 @@
-// src/components/Register.tsx
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import './Register.css';
-import InAppOpenInBrowserBanner from './InAppOpenInBrowserBanner';
+import './Register.mobile.css';
 
-export default function Register() {
-  const [email, setEmail] = useState('');
-  const [referral_code, setReferralCode] = useState('');
+const APP_URL = (import.meta.env.VITE_PUBLIC_APP_URL || 'https://www.buymybehavior.com').replace(/\/+$/, '');
+const AUTH_CALLBACK = `${APP_URL}/auth/callback`;
 
-  const [loadingSignup, setLoadingSignup] = useState(false);
-  const [loadingLogin, setLoadingLogin] = useState(false);
-
-  const inFlightRef = useRef(false);
-  const [cooldownUntil, setCooldownUntil] = useState(0);
-  const blocked = () => inFlightRef.current || Date.now() < cooldownUntil;
-  const startFlight = (ms = 2400) => { inFlightRef.current = true; setCooldownUntil(Date.now() + ms); };
-  const endFlight   = () => { inFlightRef.current = false; };
-
-  const [showRefModal, setShowRefModal] = useState(false);
-  const [showEmailSentModal, setShowEmailSentModal] = useState(false);
-
-  const isEmailValid = useMemo(
-    () => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
-    [email]
-  );
-
-  const appBase =
-    (import.meta as any).env?.VITE_PUBLIC_APP_URL ||
-    (typeof window !== 'undefined' ? window.location.origin : '');
-
-  const redirectAfterSignup = `${appBase}/auth/callback?next=${encodeURIComponent('/profile')}`;
-  const redirectAfterLogin  = `${appBase}/auth/callback?next=${encodeURIComponent('/map')}`;
-
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isEmailValid || blocked()) { if (!isEmailValid) return; alert('Зачекайте…'); return; }
-
-    if (!referral_code.trim()) { setShowRefModal(true); return; }
-
-    setLoadingSignup(true); startFlight();
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('user_id, wallet')
-        .eq('referral_code', referral_code.trim())
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) { alert('Невірний реф-код'); return; }
-
-      localStorage.setItem('referred_by', data.user_id);
-      localStorage.setItem('referrer_wallet', data.wallet || '');
-      localStorage.setItem('post_auth_next', '/profile');
-
-      const { error: sErr } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: { emailRedirectTo: redirectAfterSignup },
-      });
-      if (sErr) throw sErr;
-
-      setShowEmailSentModal(true);
-    } catch (err: any) {
-      alert('Помилка реєстрації: ' + (err?.message || 'невідома'));
-    } finally { setLoadingSignup(false); endFlight(); }
-  };
-
-  const handleLogin = async (e: React.MouseEvent<HTMLButtonElement>) => {
-    e.preventDefault(); e.stopPropagation();
-    if (!isEmailValid || blocked()) { if (!isEmailValid) return; alert('Зачекайте…'); return; }
-
-    setLoadingLogin(true); startFlight();
-    try {
-      localStorage.setItem('post_auth_next', '/map');
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: { emailRedirectTo: redirectAfterLogin, shouldCreateUser: false },
-      });
-      if (error) throw error;
-      setShowEmailSentModal(true);
-    } catch (err: any) {
-      alert('Помилка входу: ' + (err?.message || 'невідома'));
-    } finally { setLoadingLogin(false); endFlight(); }
-  };
-
+/** Проста модалка всередині одного файлу (щоб не чіпати інші компоненти) */
+function Modal({
+  open, title, onClose, children,
+}: { open: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
+  if (!open) return null;
   return (
-    <div className="register-page">
-      <InAppOpenInBrowserBanner />
-
-      <form className="register-container" onSubmit={handleSignup}>
-        <h2>Реєстрація з реферальним словом</h2>
-
-        <input
-          type="email"
-          placeholder="Email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          autoComplete="email"
-          inputMode="email"
-        />
-
-        <input
-          type="text"
-          placeholder="Реферальний код"
-          value={referral_code}
-          onChange={(e) => setReferralCode(e.target.value)}
-        />
-
-        <button
-          className="bmb-btn-black"
-          type="submit"
-          disabled={!isEmailValid || loadingSignup || loadingLogin || blocked()}
-        >
-          {loadingSignup ? 'Відправляю…' : 'Зареєструватися'}
-        </button>
-
-        <button
-          className="bmb-btn-black"
-          type="button"
-          onClick={handleLogin}
-          disabled={!isEmailValid || loadingSignup || loadingLogin || blocked()}
-          style={{ marginTop: 8 }}
-        >
-          {loadingLogin ? 'Відправляю…' : 'Увійти'}
-        </button>
-      </form>
-
-      {/* Модалки */}
-      <div
-        className="bmb-modal-overlay"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="bmb-ref-modal-title"
-        style={{ display: showRefModal ? 'flex' : 'none' }}
-        onClick={(e) => { if (e.target === e.currentTarget) setShowRefModal(false); }}
-        onKeyDown={(e) => { if (e.key === 'Escape') setShowRefModal(false); }}
-      >
-        <div className="bmb-modal-card bmb-pink-bubbles">
-          <div className="bmb-modal-icon">🔑</div>
-          <h3 id="bmb-ref-modal-title">Реєстрація лише за реферальним словом</h3>
-          <p>Введіть реферальне слово амбасадора, щоб продовжити.</p>
-          <button type="button" className="bmb-btn-black" onClick={() => setShowRefModal(false)}>Добре</button>
-        </div>
-      </div>
-
-      <div
-        className="bmb-modal-overlay"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="bmb-mail-modal-title"
-        style={{ display: showEmailSentModal ? 'flex' : 'none' }}
-        onClick={(e) => { if (e.target === e.currentTarget) setShowEmailSentModal(false); }}
-        onKeyDown={(e) => { if (e.key === 'Escape') setShowEmailSentModal(false); }}
-      >
-        <div className="bmb-modal-card bmb-pink-bubbles">
-          <div className="bmb-modal-icon">📧</div>
-          <h3 id="bmb-mail-modal-title">Перейдіть на пошту — ми надіслали посилання</h3>
-          <p>Відкрийте лист і натисніть кнопку входу. Якщо листа немає — перевірте “Спам”.</p>
-          <button type="button" className="bmb-btn-black" onClick={() => setShowEmailSentModal(false)}>Добре</button>
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+      display: 'grid', placeItems: 'center', zIndex: 9999
+    }}>
+      <div style={{
+        width: 'min(520px, 92vw)', background: '#fff', borderRadius: 16,
+        boxShadow: '0 10px 30px rgba(0,0,0,0.2)', padding: 20
+      }}>
+        <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>{title}</div>
+        <div style={{ fontSize: 14, lineHeight: 1.5 }}>{children}</div>
+        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '10px 14px', borderRadius: 10, border: 0, background: '#eee' }}>
+            Закрити
+          </button>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Register() {
+  const [email, setEmail] = useState('');
+  const [refCode, setRefCode] = useState('');
+  const [sending, setSending] = useState<null | 'reg' | 'login'>(null);
+  const [hint, setHint] = useState<string | null>(null);
+
+  // Модалка-попередження
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState('Повідомлення');
+  const [modalBody, setModalBody] = useState<React.ReactNode>(null);
+
+  const isInApp = useMemo(
+    () => /(FBAN|FBAV|Instagram|Line|WeChat|Twitter|WhatsApp|Telegram)/i.test(navigator.userAgent || ''),
+    []
+  );
+
+  // Після входу — разово підчепити реферал у БД
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const referred_by = localStorage.getItem('referred_by');
+        const referrer_wallet = localStorage.getItem('referrer_wallet');
+        if (!referred_by && !referrer_wallet) return;
+
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('user_id,referred_by,referrer_wallet')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (prof && (prof.referred_by || prof.referrer_wallet)) return;
+
+        const payload: any = { user_id: user.id };
+        if (referred_by) payload.referred_by = referred_by;
+        if (referrer_wallet) payload.referrer_wallet = referrer_wallet;
+
+        await supabase.from('profiles').upsert(payload);
+        localStorage.removeItem('referred_by');
+        localStorage.removeItem('referrer_wallet');
+      } catch {/* no-op */}
+    })();
+  }, []);
+
+  function showModal(title: string, body: React.ReactNode) {
+    setModalTitle(title);
+    setModalBody(body);
+    setModalOpen(true);
+  }
+
+  async function sendOtp(shouldCreateUser: boolean) {
+    setHint(null);
+    setSending(shouldCreateUser ? 'reg' : 'login');
+
+    try {
+      if (refCode?.trim()) localStorage.setItem('referred_by', refCode.trim());
+
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: AUTH_CALLBACK,
+          shouldCreateUser,
+        },
+      });
+      if (error) throw error;
+
+      // Модалка з інструкціями
+      const extra = isInApp
+        ? 'Якщо відкриєш лист у додатку (Gmail/Instagram/FB), натисни “Відкрити в браузері”.'
+        : 'Відкрий посилання у зовнішньому браузері (Chrome/Safari).';
+
+      showModal('Магік-лінк надіслано', (
+        <>
+          <div>Перевір пошту <b>{email}</b>.</div>
+          <div style={{ marginTop: 6 }}>{extra}</div>
+          <div style={{ marginTop: 6 }}>
+            Після переходу має перекинути на <b>“Обрати виконавця”</b>.
+          </div>
+        </>
+      ));
+    } catch (e: any) {
+      setHint(e?.message || 'Не вдалося надіслати лист. Спробуй ще раз.');
+    } finally {
+      setSending(null);
+    }
+  }
+
+  return (
+    <>
+      <div className="register-page">
+        <form className="register-form" onSubmit={(e) => e.preventDefault()}>
+          <h1>Вхід / Реєстрація</h1>
+
+          <label htmlFor="email">Email</label>
+          <input
+            id="email"
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+
+          <label htmlFor="ref">Реферальний код (необов’язково)</label>
+          <input
+            id="ref"
+            type="text"
+            placeholder="friend123"
+            value={refCode}
+            onChange={(e) => setRefCode(e.target.value)}
+          />
+
+          <button
+            type="button"
+            disabled={sending !== null || !email}
+            onClick={() => sendOtp(true)}
+            style={{ marginTop: 12 }}
+          >
+            {sending === 'reg' ? 'Надсилаємо…' : 'Зареєструватися'}
+          </button>
+
+          <button
+            type="button"
+            disabled={sending !== null || !email}
+            onClick={() => sendOtp(false)}
+            style={{ marginTop: 8, background: '#ddd' }}
+          >
+            {sending === 'login' ? 'Надсилаємо…' : 'Увійти'}
+          </button>
+
+          {hint && <p className="hint" style={{ marginTop: 10 }}>{hint}</p>}
+        </form>
+      </div>
+
+      <Modal open={modalOpen} title={modalTitle} onClose={() => setModalOpen(false)}>
+        {modalBody}
+      </Modal>
+    </>
   );
 }
