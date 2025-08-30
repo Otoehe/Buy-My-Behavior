@@ -1,11 +1,9 @@
-// src/components/AuthCallback.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
 type Props = { next?: string };
 
-// читаємо next із query або hash
 function parseNextFromUrl(): string | null {
   try {
     const url = new URL(window.location.href);
@@ -13,9 +11,7 @@ function parseNextFromUrl(): string | null {
     if (qNext) return qNext;
     const hash = new URLSearchParams(url.hash.replace(/^#/, ''));
     return hash.get('next');
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 async function syncReferralOnce(userId: string) {
@@ -54,13 +50,22 @@ export default function AuthCallback({ next = '/map' }: Props) {
 
     (async () => {
       try {
-        const url = new URL(window.location.href);
+        // 0) Якщо вже є сесія — завершуємо одразу
+        let { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          await syncReferralOnce(session.user.id);
+          const dest = targetNext || '/map';
+          window.history.replaceState({}, document.title, dest);
+          finished = true;
+          navigate(dest, { replace: true });
+          return;
+        }
 
-        // 1) Підписуємося наперед і чекаємо саме SIGNED_IN
-        const waitSignedIn = new Promise<void>((resolve, reject) => {
-          const to = setTimeout(() => reject(new Error('timeout')), 8000);
-          const { data } = supabase.auth.onAuthStateChange((event, session) => {
-            if (event === 'SIGNED_IN' && session?.user) {
+        // 1) Чекаємо подію SIGNED_IN (макс 8с), підписуємося ЗАЗДАЛЕГІДЬ
+        const waitSignedIn = new Promise<void>((resolve) => {
+          const to = setTimeout(() => resolve(), 8000);
+          const { data } = supabase.auth.onAuthStateChange((event, s) => {
+            if (event === 'SIGNED_IN' && s?.user) {
               clearTimeout(to);
               data.subscription.unsubscribe();
               resolve();
@@ -69,47 +74,43 @@ export default function AuthCallback({ next = '/map' }: Props) {
           unsub = data.subscription;
         });
 
-        // 2) Якщо це OAuth/PKCE — у посиланні буде ?code=
-        const code = url.searchParams.get('code');
-        if (code) {
-          // новий API приймає сам code (не весь href)
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
+        // 2) Якщо це OAuth/PKCE — обміняти ?code= на сесію
+        const url = new URL(window.location.href);
+        if (url.searchParams.get('code')) {
+          // Для v2 працює з повним href
+          const { error } = await supabase.auth.exchangeCodeForSession(url.href);
           if (error) throw error;
         }
-        // Якщо magic-link (email) — detectSessionInUrl=true зробить усе сам,
-        // просто чекаємо події SIGNED_IN.
+        // Якщо email magic-link (токени у #hash) — detectSessionInUrl=true зробить все сама;
+        // ми просто чекаємо на SIGNED_IN.
 
-        // 3) Чекаємо фактичного входу
-        await waitSignedIn.catch(() => {}); // на випадок, якщо вже залогінені
+        await waitSignedIn;
 
-        // 4) Перевіряємо сесію і лише тоді редіректимо
-        const { data: { session } } = await supabase.auth.getSession();
+        // 3) Перевіряємо й завершуємо
+        ({ data: { session } } = await supabase.auth.getSession());
         if (!session?.user) throw new Error('no-session');
 
         await syncReferralOnce(session.user.id);
 
-        // чистимо URL від сміття (код/токени)
-        window.history.replaceState({}, document.title, targetNext || '/map');
-
+        const dest = targetNext || '/map';
+        window.history.replaceState({}, document.title, dest);
         finished = true;
-        navigate(targetNext || '/map', { replace: true });
+        navigate(dest, { replace: true });
       } catch (e) {
         if (!finished) {
-          console.error('[AuthCallback] verify error:', e);
+          console.error('[AuthCallback] error', e);
           setStatus('error');
           navigate('/register', { replace: true });
         }
       }
     })();
 
-    return () => {
-      unsub?.unsubscribe();
-    };
+    return () => { unsub?.unsubscribe(); };
   }, [navigate, targetNext]);
 
   return (
-    <div style={{ padding: '1rem' }}>
-      <h1>Входимо…</h1>
+    <div style={{ padding: 16 }}>
+      <h3>Входимо…</h3>
       <p>Будь ласка, зачекайте кілька секунд.</p>
       {status === 'error' && (
         <p style={{ color: 'crimson' }}>
