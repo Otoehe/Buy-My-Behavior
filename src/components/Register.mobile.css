@@ -1,0 +1,15 @@
+/* BMB mobile tweaks for Register (can be empty; required for Linux case-sensitive builds) */
+
+@media (max-width: 480px) {
+  .register-page {
+    padding: 16px;
+  }
+  .register-form {
+    max-width: 420px;
+    margin: 0 auto;
+  }
+  .register-form input,
+  .register-form button {
+    font-size: 16px;
+  }
+}
