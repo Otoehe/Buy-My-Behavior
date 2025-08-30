@@ -1,14 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+
+type Props = { next?: string };
 
 function parseNextFromUrl(): string | null {
   try {
     const url = new URL(window.location.href);
     const qNext = url.searchParams.get('next');
     if (qNext) return qNext;
-    const hashNext = new URLSearchParams(url.hash.replace(/^#/, '')).get('next');
-    return hashNext;
-  } catch { return null; }
+    const hash = new URLSearchParams(url.hash.replace(/^#/, ''));
+    return hash.get('next');
+  } catch {
+    return null;
+  }
 }
 
 async function syncReferralOnce(userId: string) {
@@ -29,10 +34,11 @@ async function syncReferralOnce(userId: string) {
       if (referrer_wallet) payload.referrer_wallet = referrer_wallet;
       await supabase.from('profiles').upsert(payload, { onConflict: 'user_id' });
     }
-  } catch {}
+  } catch {/* ignore */}
 }
 
-export default function AuthCallback({ next = '/map' }: { next?: string }) {
+export default function AuthCallback({ next = '/map' }: Props) {
+  const navigate = useNavigate();
   const [status, setStatus] = useState<'loading'|'ok'|'error'>('loading');
 
   const targetNext = useMemo(
@@ -43,76 +49,49 @@ export default function AuthCallback({ next = '/map' }: { next?: string }) {
   useEffect(() => {
     let alive = true;
 
-    const hardRedirect = (to: string) => {
-      try { window.history.replaceState({}, document.title, to); } catch {}
-      window.location.replace(to);
-    };
-
-    const finishIfSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        await syncReferralOnce(session.user.id);
-        if (!alive) return true;
-        setStatus('ok');
-        hardRedirect(targetNext || '/map');
-        return true;
-      }
-      return false;
-    };
-
     (async () => {
       try {
-        const url = new URL(window.location.href);
+        // 1) Перевіряємо чи вже є сесія
+        let { data: { session } } = await supabase.auth.getSession();
 
-        // Якщо це PKCE (OAuth) — міняємо code -> session
-        if (url.searchParams.has('code')) {
-          try {
-            const { error } = await supabase.auth.exchangeCodeForSession(url.href);
-            if (error) console.warn('[AuthCallback] exchange error:', error.message);
-          } catch (e) {
-            console.warn('[AuthCallback] exchange throw:', e);
-          }
+        // 2) Якщо немає — міняємо код на сесію (magic-link)
+        if (!session) {
+          await supabase.auth.exchangeCodeForSession(window.location.href);
+          ({ data: { session } } = await supabase.auth.getSession());
         }
 
-        // 1) пробуємо завершити одразу
-        if (await finishIfSession()) return;
+        if (!alive) return;
 
-        // 2) чекаємо подію (email magic-link підхопиться detectSessionInUrl)
-        const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-          if (!alive) return;
-          if (session?.user) {
-            finishIfSession();
-          }
-        });
+        if (session?.user) {
+          await syncReferralOnce(session.user.id);
+          setStatus('ok');
+          // очищаємо URL та йдемо на потрібний екран
+          const dest = targetNext || '/map';
+          window.history.replaceState({}, document.title, dest);
+          navigate(dest, { replace: true });
+          return;
+        }
 
-        // 3) підстраховка: повторна перевірка через 1200мс
-        const t = window.setTimeout(async () => {
-          if (!alive) return;
-          if (!(await finishIfSession())) {
-            setStatus('error');
-          }
-        }, 1200);
-
-        return () => {
-          sub.subscription.unsubscribe();
-          clearTimeout(t);
-        };
-      } catch (e) {
-        console.error('[AuthCallback] fatal:', e);
         setStatus('error');
+        navigate('/register', { replace: true });
+      } catch (e) {
+        console.error('[AuthCallback] exchange error', e);
+        if (!alive) return;
+        setStatus('error');
+        navigate('/register', { replace: true });
       }
     })();
 
     return () => { alive = false; };
-  }, [targetNext]);
+  }, [navigate, targetNext]);
 
   return (
-    <div style={{ padding: 16 }}>
-      <h3>Входимо…</h3>
+    <div style={{ padding: '1rem' }}>
+      <h1>Входимо…</h1>
       <p>Будь ласка, зачекайте кілька секунд.</p>
       {status === 'error' && (
-        <p style={{ color: 'crimson', marginTop: 12 }}>
-          Не вдалось підтвердити вхід. Спробуйте натиснути посилання з листа ще раз.
+        <p style={{ color: 'crimson' }}>
+          Не вдалося підтвердити вхід. Спробуйте натиснути посилання з листа ще раз.
         </p>
       )}
     </div>
