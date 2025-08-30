@@ -14,10 +14,7 @@ import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 
-// Не підключаємо автогарди/банери, щоб не вносили навігацію під час логіну
-// import PwaLaunchGuard from './components/PwaLaunchGuard';
-// import InAppOpenInBrowserBanner from './components/InAppOpenInBrowserBanner';
-
+// Ліниве завантаження великих екранів
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
 const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
@@ -29,17 +26,24 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 
   useEffect(() => {
     let alive = true;
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+
+    // 1) Миттєва одноразова перевірка поточної сесії
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       if (!alive) return;
-      if (event === 'INITIAL_SESSION') {
-        setStatus(session ? 'authed' : 'guest');
-      } else if (event === 'SIGNED_IN') {
-        setStatus('authed');
-      } else if (event === 'SIGNED_OUT') {
-        setStatus('guest');
-      }
+      setStatus(session ? 'authed' : 'guest');
+    })();
+
+    // 2) Живе слухання змін стану авторизації
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!alive) return;
+      setStatus(session ? 'authed' : 'guest');
     });
-    return () => { alive = false; sub.subscription.unsubscribe(); };
+
+    return () => {
+      alive = false;
+      sub?.subscription?.unsubscribe?.();
+    };
   }, []);
 
   if (status === 'checking') return <div style={{ padding: '1rem' }}>Завантаження…</div>;
@@ -53,9 +57,6 @@ export default function App() {
 
   return (
     <>
-      {/* <PwaLaunchGuard /> */}
-      {/* <InAppOpenInBrowserBanner /> */}
-
       <NavigationBar />
       <A2HS />
       <NetworkToast />
@@ -63,7 +64,7 @@ export default function App() {
 
       <Suspense fallback={<div style={{ padding: '1rem' }}>Завантаження…</div>}>
         <Routes>
-          {/* Колбек після Magic Link / OAuth */}
+          {/* Колбек після Magic Link / OAuth — опрацьовує обмін коду на сесію та редірект */}
           <Route path="/auth/callback" element={<AuthCallback next="/map" />} />
 
           {/* Публічні */}
@@ -71,12 +72,54 @@ export default function App() {
           <Route path="/behaviors" element={<BehaviorsFeed />} />
 
           {/* Захищені */}
-          <Route path="/map"            element={<RequireAuth><MapView /></RequireAuth>} />
-          <Route path="/profile"        element={<RequireAuth><Profile /></RequireAuth>} />
-          <Route path="/my-orders"      element={<RequireAuth><MyOrders /></RequireAuth>} />
-          <Route path="/received"       element={<RequireAuth><ReceivedScenarios /></RequireAuth>} />
-          <Route path="/scenario/new"   element={<RequireAuth><ScenarioForm /></RequireAuth>} />
-          <Route path="/manifest"       element={<RequireAuth><Manifest /></RequireAuth>} />
+          <Route
+            path="/map"
+            element={
+              <RequireAuth>
+                <MapView />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <RequireAuth>
+                <Profile />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/my-orders"
+            element={
+              <RequireAuth>
+                <MyOrders />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/received"
+            element={
+              <RequireAuth>
+                <ReceivedScenarios />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/scenario/new"
+            element={
+              <RequireAuth>
+                <ScenarioForm />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/manifest"
+            element={
+              <RequireAuth>
+                <Manifest />
+              </RequireAuth>
+            }
+          />
 
           {/* За замовчуванням */}
           <Route path="/" element={<Navigate to="/map" replace />} />
