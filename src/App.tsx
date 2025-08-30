@@ -1,4 +1,3 @@
-// src/App.tsx
 import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
@@ -14,7 +13,6 @@ import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 
-// Ліниве завантаження великих екранів
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
 const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
@@ -26,22 +24,54 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 
   useEffect(() => {
     let alive = true;
+    let decided = false;
+    let timer: number | undefined;
 
-    // 1) Миттєва одноразова перевірка поточної сесії
+    const hasSbToken = () =>
+      typeof window !== 'undefined' &&
+      Object.keys(localStorage).some((k) => k.startsWith('sb-') && k.endsWith('-auth-token'));
+
+    const decideAuthed = () => {
+      if (!alive || decided) return;
+      decided = true;
+      setStatus('authed');
+    };
+
+    const decideGuest = () => {
+      if (!alive || decided) return;
+      decided = true;
+      setStatus('guest');
+    };
+
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!alive) return;
-      setStatus(session ? 'authed' : 'guest');
+
+      if (session?.user) {
+        decideAuthed();
+      } else {
+        // Якщо є sb-* токен у storage — даємо довший grace
+        const grace = hasSbToken() ? 4000 : 1800;
+        timer = window.setTimeout(async () => {
+          const { data: { session: s2 } } = await supabase.auth.getSession();
+          if (!alive) return;
+          if (s2?.user) decideAuthed();
+          else decideGuest();
+        }, grace);
+      }
     })();
 
-    // 2) Живе слухання змін стану авторизації
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
       if (!alive) return;
-      setStatus(session ? 'authed' : 'guest');
+      if (session?.user) {
+        if (timer) clearTimeout(timer);
+        decideAuthed();
+      }
     });
 
     return () => {
       alive = false;
+      if (timer) clearTimeout(timer);
       sub?.subscription?.unsubscribe?.();
     };
   }, []);
@@ -64,7 +94,6 @@ export default function App() {
 
       <Suspense fallback={<div style={{ padding: '1rem' }}>Завантаження…</div>}>
         <Routes>
-          {/* Колбек після Magic Link / OAuth — опрацьовує обмін коду на сесію та редірект */}
           <Route path="/auth/callback" element={<AuthCallback next="/map" />} />
 
           {/* Публічні */}
@@ -72,54 +101,12 @@ export default function App() {
           <Route path="/behaviors" element={<BehaviorsFeed />} />
 
           {/* Захищені */}
-          <Route
-            path="/map"
-            element={
-              <RequireAuth>
-                <MapView />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/profile"
-            element={
-              <RequireAuth>
-                <Profile />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/my-orders"
-            element={
-              <RequireAuth>
-                <MyOrders />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/received"
-            element={
-              <RequireAuth>
-                <ReceivedScenarios />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/scenario/new"
-            element={
-              <RequireAuth>
-                <ScenarioForm />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/manifest"
-            element={
-              <RequireAuth>
-                <Manifest />
-              </RequireAuth>
-            }
-          />
+          <Route path="/map"            element={<RequireAuth><MapView /></RequireAuth>} />
+          <Route path="/profile"        element={<RequireAuth><Profile /></RequireAuth>} />
+          <Route path="/my-orders"      element={<RequireAuth><MyOrders /></RequireAuth>} />
+          <Route path="/received"       element={<RequireAuth><ReceivedScenarios /></RequireAuth>} />
+          <Route path="/scenario/new"   element={<RequireAuth><ScenarioForm /></RequireAuth>} />
+          <Route path="/manifest"       element={<RequireAuth><Manifest /></RequireAuth>} />
 
           {/* За замовчуванням */}
           <Route path="/" element={<Navigate to="/map" replace />} />

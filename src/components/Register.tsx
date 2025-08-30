@@ -1,4 +1,3 @@
-// src/components/Register.tsx
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -12,7 +11,6 @@ export default function Register() {
   useEffect(() => {
     let alive = true;
 
-    // 1) первинна перевірка поточної сесії
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!alive) return;
@@ -22,7 +20,6 @@ export default function Register() {
       }
     })();
 
-    // 2) підписка на будь-яку зміну стану — як тільки з’явилась сесія, ведемо на next
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         const next = localStorage.getItem('post_auth_next') || '/map';

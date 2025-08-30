@@ -1,4 +1,3 @@
-// src/components/AuthCallback.tsx
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -35,6 +34,7 @@ async function syncReferralOnce(userId: string) {
 
 export default function AuthCallback({ next = '/map' }: { next?: string }) {
   const [status, setStatus] = useState<'loading'|'ok'|'error'>('loading');
+
   const targetNext = useMemo(
     () => parseNextFromUrl() || localStorage.getItem('post_auth_next') || next,
     [next]
@@ -44,9 +44,7 @@ export default function AuthCallback({ next = '/map' }: { next?: string }) {
     let alive = true;
 
     const hardRedirect = (to: string) => {
-      // прибираємо службові параметри з адресного рядка перед редіректом
       try { window.history.replaceState({}, document.title, to); } catch {}
-      // ВАЖЛИВО: «жорсткий» редірект, щоб додаток стартував з уже збереженою сесією
       window.location.replace(to);
     };
 
@@ -66,7 +64,7 @@ export default function AuthCallback({ next = '/map' }: { next?: string }) {
       try {
         const url = new URL(window.location.href);
 
-        // Якщо це PKCE/код (OAuth-провайдери) — міняємо на сесію
+        // Якщо це PKCE (OAuth) — міняємо code -> session
         if (url.searchParams.has('code')) {
           try {
             const { error } = await supabase.auth.exchangeCodeForSession(url.href);
@@ -76,10 +74,10 @@ export default function AuthCallback({ next = '/map' }: { next?: string }) {
           }
         }
 
-        // 1) Пробуємо завершити одразу
+        // 1) пробуємо завершити одразу
         if (await finishIfSession()) return;
 
-        // 2) Чекаємо подію (для email magic-link detectSessionInUrl підхопить хеш)
+        // 2) чекаємо подію (email magic-link підхопиться detectSessionInUrl)
         const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
           if (!alive) return;
           if (session?.user) {
@@ -87,17 +85,18 @@ export default function AuthCallback({ next = '/map' }: { next?: string }) {
           }
         });
 
-        // 3) Підстраховка: повторна перевірка через 1200мс
-        setTimeout(async () => {
+        // 3) підстраховка: повторна перевірка через 1200мс
+        const t = window.setTimeout(async () => {
           if (!alive) return;
           if (!(await finishIfSession())) {
             setStatus('error');
-            // не робимо миттєвий редірект на /register — покажемо повідомлення,
-            // щоб користувач міг спробувати ще раз (кнопка «Назад»/повторити лінк)
           }
         }, 1200);
 
-        return () => sub.subscription.unsubscribe();
+        return () => {
+          sub.subscription.unsubscribe();
+          clearTimeout(t);
+        };
       } catch (e) {
         console.error('[AuthCallback] fatal:', e);
         setStatus('error');
