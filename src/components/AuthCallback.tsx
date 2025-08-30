@@ -1,9 +1,11 @@
+// src/components/AuthCallback.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
 type Props = { next?: string };
 
+// читаємо next із query або hash
 function parseNextFromUrl(): string | null {
   try {
     const url = new URL(window.location.href);
@@ -34,12 +36,12 @@ async function syncReferralOnce(userId: string) {
       if (referrer_wallet) payload.referrer_wallet = referrer_wallet;
       await supabase.from('profiles').upsert(payload, { onConflict: 'user_id' });
     }
-  } catch {/* ignore */}
+  } catch {}
 }
 
 export default function AuthCallback({ next = '/map' }: Props) {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<'loading'|'ok'|'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'error'>('loading');
 
   const targetNext = useMemo(
     () => parseNextFromUrl() || localStorage.getItem('post_auth_next') || next,
@@ -47,42 +49,62 @@ export default function AuthCallback({ next = '/map' }: Props) {
   );
 
   useEffect(() => {
-    let alive = true;
+    let unsub: { unsubscribe(): void } | undefined;
+    let finished = false;
 
     (async () => {
       try {
-        // 1) Перевіряємо чи вже є сесія
-        let { data: { session } } = await supabase.auth.getSession();
+        const url = new URL(window.location.href);
 
-        // 2) Якщо немає — міняємо код на сесію (magic-link)
-        if (!session) {
-          await supabase.auth.exchangeCodeForSession(window.location.href);
-          ({ data: { session } } = await supabase.auth.getSession());
+        // 1) Підписуємося наперед і чекаємо саме SIGNED_IN
+        const waitSignedIn = new Promise<void>((resolve, reject) => {
+          const to = setTimeout(() => reject(new Error('timeout')), 8000);
+          const { data } = supabase.auth.onAuthStateChange((event, session) => {
+            if (event === 'SIGNED_IN' && session?.user) {
+              clearTimeout(to);
+              data.subscription.unsubscribe();
+              resolve();
+            }
+          });
+          unsub = data.subscription;
+        });
+
+        // 2) Якщо це OAuth/PKCE — у посиланні буде ?code=
+        const code = url.searchParams.get('code');
+        if (code) {
+          // новий API приймає сам code (не весь href)
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
         }
+        // Якщо magic-link (email) — detectSessionInUrl=true зробить усе сам,
+        // просто чекаємо події SIGNED_IN.
 
-        if (!alive) return;
+        // 3) Чекаємо фактичного входу
+        await waitSignedIn.catch(() => {}); // на випадок, якщо вже залогінені
 
-        if (session?.user) {
-          await syncReferralOnce(session.user.id);
-          setStatus('ok');
-          // очищаємо URL та йдемо на потрібний екран
-          const dest = targetNext || '/map';
-          window.history.replaceState({}, document.title, dest);
-          navigate(dest, { replace: true });
-          return;
-        }
+        // 4) Перевіряємо сесію і лише тоді редіректимо
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) throw new Error('no-session');
 
-        setStatus('error');
-        navigate('/register', { replace: true });
+        await syncReferralOnce(session.user.id);
+
+        // чистимо URL від сміття (код/токени)
+        window.history.replaceState({}, document.title, targetNext || '/map');
+
+        finished = true;
+        navigate(targetNext || '/map', { replace: true });
       } catch (e) {
-        console.error('[AuthCallback] exchange error', e);
-        if (!alive) return;
-        setStatus('error');
-        navigate('/register', { replace: true });
+        if (!finished) {
+          console.error('[AuthCallback] verify error:', e);
+          setStatus('error');
+          navigate('/register', { replace: true });
+        }
       }
     })();
 
-    return () => { alive = false; };
+    return () => {
+      unsub?.unsubscribe();
+    };
   }, [navigate, targetNext]);
 
   return (
