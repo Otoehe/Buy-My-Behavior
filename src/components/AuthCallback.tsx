@@ -1,17 +1,14 @@
 // src/components/AuthCallback.tsx
-import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
-
-type Props = { next?: string };
 
 function parseNextFromUrl(): string | null {
   try {
     const url = new URL(window.location.href);
     const qNext = url.searchParams.get('next');
     if (qNext) return qNext;
-    const hash = new URLSearchParams(url.hash.replace(/^#/, ''));
-    return hash.get('next');
+    const hashNext = new URLSearchParams(url.hash.replace(/^#/, '')).get('next');
+    return hashNext;
   } catch { return null; }
 }
 
@@ -36,79 +33,87 @@ async function syncReferralOnce(userId: string) {
   } catch {}
 }
 
-export default function AuthCallback({ next = '/map' }: Props) {
-  const navigate = useNavigate();
+export default function AuthCallback({ next = '/map' }: { next?: string }) {
   const [status, setStatus] = useState<'loading'|'ok'|'error'>('loading');
-
   const targetNext = useMemo(
     () => parseNextFromUrl() || localStorage.getItem('post_auth_next') || next,
     [next]
   );
 
   useEffect(() => {
-    let unsub = supabase.auth.onAuthStateChange(async (_evt, session) => {
+    let alive = true;
+
+    const hardRedirect = (to: string) => {
+      // прибираємо службові параметри з адресного рядка перед редіректом
+      try { window.history.replaceState({}, document.title, to); } catch {}
+      // ВАЖЛИВО: «жорсткий» редірект, щоб додаток стартував з уже збереженою сесією
+      window.location.replace(to);
+    };
+
+    const finishIfSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         await syncReferralOnce(session.user.id);
+        if (!alive) return true;
         setStatus('ok');
-        // прибираємо код/токени з адресного рядка
-        window.history.replaceState({}, document.title, targetNext || '/map');
-        navigate(targetNext || '/map', { replace: true });
+        hardRedirect(targetNext || '/map');
+        return true;
       }
-    }).data.subscription;
+      return false;
+    };
 
     (async () => {
       try {
         const url = new URL(window.location.href);
-        const hasCode = url.searchParams.has('code');
 
-        if (hasCode) {
-          // PKCE: міняємо code -> session
-          const { error } = await supabase.auth.exchangeCodeForSession(url.href);
-          if (error) throw error;
-          // подальший редірект спрацює з onAuthStateChange вище
-          return;
-        }
-
-        // Implicit: сесію вже мав підхопити detectSessionInUrl, лиш перевіримо
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          await syncReferralOnce(session.user.id);
-          setStatus('ok');
-          window.history.replaceState({}, document.title, targetNext || '/map');
-          navigate(targetNext || '/map', { replace: true });
-          return;
-        }
-
-        // якщо ще нема — трохи зачекаємо і спробуємо ще раз
-        setTimeout(async () => {
-          const { data: { session: s2 } } = await supabase.auth.getSession();
-          if (s2?.user) {
-            await syncReferralOnce(s2.user.id);
-            setStatus('ok');
-            window.history.replaceState({}, document.title, targetNext || '/map');
-            navigate(targetNext || '/map', { replace: true });
-          } else {
-            setStatus('error');
-            navigate('/register', { replace: true });
+        // Якщо це PKCE/код (OAuth-провайдери) — міняємо на сесію
+        if (url.searchParams.has('code')) {
+          try {
+            const { error } = await supabase.auth.exchangeCodeForSession(url.href);
+            if (error) console.warn('[AuthCallback] exchange error:', error.message);
+          } catch (e) {
+            console.warn('[AuthCallback] exchange throw:', e);
           }
-        }, 500);
+        }
+
+        // 1) Пробуємо завершити одразу
+        if (await finishIfSession()) return;
+
+        // 2) Чекаємо подію (для email magic-link detectSessionInUrl підхопить хеш)
+        const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+          if (!alive) return;
+          if (session?.user) {
+            finishIfSession();
+          }
+        });
+
+        // 3) Підстраховка: повторна перевірка через 1200мс
+        setTimeout(async () => {
+          if (!alive) return;
+          if (!(await finishIfSession())) {
+            setStatus('error');
+            // не робимо миттєвий редірект на /register — покажемо повідомлення,
+            // щоб користувач міг спробувати ще раз (кнопка «Назад»/повторити лінк)
+          }
+        }, 1200);
+
+        return () => sub.subscription.unsubscribe();
       } catch (e) {
-        console.error('[AuthCallback] error:', e);
+        console.error('[AuthCallback] fatal:', e);
         setStatus('error');
-        navigate('/register', { replace: true });
       }
     })();
 
-    return () => unsub?.unsubscribe();
-  }, [navigate, targetNext]);
+    return () => { alive = false; };
+  }, [targetNext]);
 
   return (
-    <div style={{ padding: '1rem' }}>
-      <h1>Завантаження…</h1>
-      <p>Підтверджуємо вхід і переносимо на карту.</p>
+    <div style={{ padding: 16 }}>
+      <h3>Входимо…</h3>
+      <p>Будь ласка, зачекайте кілька секунд.</p>
       {status === 'error' && (
-        <p style={{ color: 'crimson' }}>
-          Помилка авторизації. Спробуйте ще раз або увійдіть вручну.
+        <p style={{ color: 'crimson', marginTop: 12 }}>
+          Не вдалось підтвердити вхід. Спробуйте натиснути посилання з листа ще раз.
         </p>
       )}
     </div>
