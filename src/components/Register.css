@@ -1,215 +1,65 @@
-/* ===========================
-   BMB Register — FULL CSS
-   (дизайн збережено 1:1)
-   =========================== */
-
-/* ---- Токени (зручніше підтримувати) ---- */
-:root{
-  --bmb-white: #fff;
-  --bmb-black: #000;
-  --bmb-gray-50: #f9f9f9;
-  --bmb-gray-300: #ccc;
-  --bmb-card-radius: 16px;
-  --bmb-border-strong: 3px;
-  --bmb-shadow-card: 0 8px 40px rgba(0,0,0,0.2);
-  --bmb-pink: #ffcdd6; /* бренд-рожевий */
-}
-
-/* базова сітка сторінки */
+/* BMB — базові стилі сторінки реєстрації */
 .register-page {
+  min-height: calc(100vh - 64px);
   display: flex;
-  justify-content: center;
-  align-items: center;
-  padding-top: 100px;
-  min-height: 100svh; /* краще на моб. браузерах */
-  box-sizing: border-box;
-}
-
-/* контейнер форми */
-.register-container {
-  background-color: var(--bmb-gray-50);
-  padding: 40px 30px;
-  border-radius: var(--bmb-card-radius);
-  width: 100%;
-  max-width: 400px;
-  text-align: center;
-  border: var(--bmb-border-strong) solid var(--bmb-white); /* товща біла окантовка */
-  box-shadow: var(--bmb-shadow-card); /* глибша тінь */
-}
-
-/* заголовок форми */
-.register-container h2 {
-  margin-bottom: 24px;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-/* поля вводу */
-.register-container input {
-  width: 100%;
-  padding: 12px;
-  margin-bottom: 16px;
-  border: 1px solid var(--bmb-gray-300);
-  border-radius: 8px;
-  font-size: 16px;
-  box-sizing: border-box;
-  outline: none;
-  background: var(--bmb-white);
-}
-.register-container input::placeholder{
-  color: #9a9a9a;
-}
-.register-container input:focus{
-  border-color: #999;
-  box-shadow: 0 0 0 3px rgba(0,0,0,0.06);
-}
-
-/* кнопки */
-.register-container button {
-  background-color: var(--bmb-black);
-  color: var(--bmb-white);
-  padding: 12px;
-  width: 100%;
-  border: none;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s ease;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.15);
-}
-.register-container button:hover {
-  background-color: #333;
-}
-.register-container button:disabled{
-  opacity: .6;
-  cursor: not-allowed;
-}
-
-/* поле реф-коду з іконкою підказки */
-.referral-wrapper {
-  position: relative;
-}
-
-/* іконка уваги праворуч у полі */
-.attention-icon {
-  position: absolute;
-  right: 14px;
-  top: 0;
-  bottom: 0;              /* розтягуємо по висоті обгортки */
-  display: flex;          /* дає змогу центрувати контент */
-  align-items: center;    /* ідеальний вертикальний центр */
-  font-size: 18px;
-  color: #FFD700;
-  pointer-events: none;
-  animation: pulse 1.6s infinite ease-in-out;
-}
-
-/* анімація пульсу (залишаємо твою логіку 1:1) */
-@keyframes pulse {
-  0%   { opacity: 1;   transform: translateY(-50%) scale(1); }
-  50%  { opacity: 0.6; transform: translateY(-50%) scale(1.2); }
-  100% { opacity: 1;   transform: translateY(-50%) scale(1); }
-} /* ← закриваюча дужка для @keyframes */
-
-/* користувачі з reduce-motion: вимкнути пульс */
-@media (prefers-reduced-motion: reduce){
-  .attention-icon { animation: none; }
-}
-
-/* ======================
-   BMB MODAL (рожеве попередження з бульбашками)
-   ====================== */
-
-/* затемнення фону */
-.bmb-modal-overlay{
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.35);
-  display: none;                 /* ховаємо за замовчуванням */
   align-items: center;
   justify-content: center;
-  z-index: 9999;
-  padding: 16px;
-  backdrop-filter: blur(2px);
-}
-/* якщо показуєш модалку інлайн-стилем display:flex у TSX — підстрахуємося */
-.bmb-modal-overlay[style*="display: flex"]{ display:flex; }
-
-/* картка модалки */
-.bmb-modal-card{
-  width: min(560px, 92vw);
-  border-radius: 24px;
-  border: 3px solid var(--bmb-white);
-  box-shadow: 0 18px 60px rgba(0,0,0,0.25);
-  text-align: center;
-  padding: 32px 28px 28px;
-  position: relative;
-  overflow: hidden;
-  color: #111; /* базовий текст усередині */
+  padding: 24px;
+  background: #fff;
 }
 
-/* фон з “бульбашками” у бренд-рожевому */
-.bmb-pink-bubbles{
-  background:
-    radial-gradient(120px 120px at 85% 20%, rgba(255,255,255,0.7), rgba(255,255,255,0) 60%),
-    radial-gradient(160px 160px at 15% 65%, rgba(255,255,255,0.6), rgba(255,255,255,0) 65%),
-    radial-gradient(80px 80px at 70% 80%, rgba(255,255,255,0.55), rgba(255,255,255,0) 60%),
-    var(--bmb-pink);
+.register-form {
+  width: 100%;
+  max-width: 460px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 16px;
+  padding: 24px 20px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.06);
 }
 
-/* кругла іконка у шапці модалки */
-.bmb-modal-icon{
-  width: 64px; height: 64px;
-  margin: 0 auto 14px;
-  border-radius: 50%;
-  background: var(--bmb-black);
-  color: var(--bmb-white);
-  font-size: 34px;
-  display:flex; align-items:center; justify-content:center;
-  box-shadow: 0 0 0 3px var(--bmb-white), 0 6px 16px rgba(0,0,0,.2);
+.register-form h1 {
+  margin: 0 0 16px;
+  font-size: 24px;
+  line-height: 1.2;
 }
 
-/* заголовок та текст у модалці */
-.bmb-modal-card h3{
-  margin: 8px 0 8px;
-  font-size: 22px;
-  font-weight: 700;
-  color: #111;
-}
-.bmb-modal-card p{
-  margin: 0 0 18px;
-  color: #222;
-  line-height: 1.4;
+.register-form label {
+  display: block;
+  margin: 8px 0 6px;
   font-size: 14px;
+  color: #444;
 }
 
-/* чорна кнопка BMB в модалці */
-.bmb-btn-black{
-  background: var(--bmb-black);
-  color: var(--bmb-white);
-  border: none;
-  border-radius: 999px;
-  padding: 10px 18px;
-  font-weight: 700;
+.register-form input[type="email"] {
+  width: 100%;
+  height: 44px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 0 12px;
+  outline: none;
+}
+
+.register-form button {
+  width: 100%;
+  height: 44px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 12px;
+  background: #ffcdd6; /* бренд BMB */
+  color: #000;
+  font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
-  transition: background .2s ease;
 }
-.bmb-btn-black:hover{ background:#222; }
-.bmb-btn-black:disabled{ opacity:.6; cursor:not-allowed; }
 
-/* ======================
-   Адаптив
-   ====================== */
-@media (max-width: 420px){
-  .register-container {
-    padding: 32px 20px;
-    border-radius: 14px;
-  }
-  .register-container h2 { font-size: 18px; }
-  .bmb-modal-card {
-    padding: 26px 18px 20px;
-    border-radius: 20px;
-  }
+.register-form button:disabled {
+  opacity: .6;
+  cursor: default;
+}
+
+.register-form .hint,
+.register-form .tiny {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #555;
 }
