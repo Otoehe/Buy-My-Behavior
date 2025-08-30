@@ -8,15 +8,35 @@ import InAppOpenInBrowserBanner from './InAppOpenInBrowserBanner';
 export default function Register() {
   const navigate = useNavigate();
 
-  // ——— Слухаємо тільки події: при SIGNED_IN — редіректимо
+  // ——— Слухаємо статус сесії та одразу переводимо автентифікованих далі
   useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        // після входу беремо бажану ціль
-        const next = localStorage.getItem('post_auth_next') || '/map';
-        navigate(next, { replace: true });
+    let done = false;
+
+    const goNext = () => {
+      if (done) return;
+      done = true;
+      const next = localStorage.getItem('post_auth_next') || '/map';
+      navigate(next, { replace: true });
+    };
+
+    // 1) миттєва перевірка поточної сесії (важливо після /auth/callback)
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session?.user) goNext();
+    });
+
+    // 2) реагуємо не лише на SIGNED_IN, а й на INITIAL_SESSION/REFRESH/UPDATED
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (
+        (event === 'INITIAL_SESSION' ||
+         event === 'SIGNED_IN' ||
+         event === 'TOKEN_REFRESHED' ||
+         event === 'USER_UPDATED') &&
+        session?.user
+      ) {
+        goNext();
       }
     });
+
     return () => sub.subscription.unsubscribe();
   }, [navigate]);
 
