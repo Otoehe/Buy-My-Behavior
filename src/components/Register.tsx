@@ -1,44 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+// src/components/Register.tsx
+import { useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import './Register.css';
 import InAppOpenInBrowserBanner from './InAppOpenInBrowserBanner';
 
 export default function Register() {
-  const navigate = useNavigate();
-
-  // ——— якщо вже залогінений — одразу редіректимо; також слухаємо всі події авторизації
-  useEffect(() => {
-    let alive = true;
-
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!alive) return;
-      if (session?.user) {
-        const next = localStorage.getItem('post_auth_next') || '/map';
-        navigate(next, { replace: true });
-      }
-    })();
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        const next = localStorage.getItem('post_auth_next') || '/map';
-        navigate(next, { replace: true });
-      }
-    });
-
-    return () => {
-      alive = false;
-      sub?.subscription?.unsubscribe?.();
-    };
-  }, [navigate]);
-
-  // ====== STATE ======
   const [email, setEmail] = useState('');
   const [referral_code, setReferralCode] = useState('');
 
   const [loadingSignup, setLoadingSignup] = useState(false);
-  const [loadingLogin, setLoadingLogin]   = useState(false);
+  const [loadingLogin, setLoadingLogin] = useState(false);
 
   const inFlightRef = useRef(false);
   const [cooldownUntil, setCooldownUntil] = useState(0);
@@ -61,7 +32,6 @@ export default function Register() {
   const redirectAfterSignup = `${appBase}/auth/callback?next=${encodeURIComponent('/profile')}`;
   const redirectAfterLogin  = `${appBase}/auth/callback?next=${encodeURIComponent('/map')}`;
 
-  // ====== HANDLERS ======
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isEmailValid || blocked()) { if (!isEmailValid) return; alert('Зачекайте…'); return; }
@@ -112,7 +82,6 @@ export default function Register() {
     } finally { setLoadingLogin(false); endFlight(); }
   };
 
-  // ====== UI ======
   return (
     <div className="register-page">
       <InAppOpenInBrowserBanner />
@@ -156,7 +125,7 @@ export default function Register() {
         </button>
       </form>
 
-      {/* Модалка про реф-код */}
+      {/* Модалки */}
       <div
         className="bmb-modal-overlay"
         role="dialog"
@@ -174,7 +143,6 @@ export default function Register() {
         </div>
       </div>
 
-      {/* Модалка “перейдіть на пошту” */}
       <div
         className="bmb-modal-overlay"
         role="dialog"

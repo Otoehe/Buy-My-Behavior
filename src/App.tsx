@@ -1,110 +1,94 @@
+// src/App.tsx
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
-import { hardenAuthStorage } from './lib/hardenAuth';
 
-import BehaviorsFeed        from './components/BehaviorsFeed';
-import NavigationBar        from './components/NavigationBar';
-import Register             from './components/Register';
-import Profile              from './components/Profile';
-import AuthCallback         from './components/AuthCallback';
-import A2HS                 from './components/A2HS';
-import useViewportVH        from './lib/useViewportVH';
-import useGlobalImageHints  from './lib/useGlobalImageHints';
-import NetworkToast         from './components/NetworkToast';
-import SWUpdateToast        from './components/SWUpdateToast';
+import BehaviorsFeed from './components/BehaviorsFeed';
+import NavigationBar from './components/NavigationBar';
+import Register from './components/Register';
+import Profile from './components/Profile';
+import AuthCallback from './components/AuthCallback';
+import A2HS from './components/A2HS';
+import useViewportVH from './lib/useViewportVH';
+import useGlobalImageHints from './lib/useGlobalImageHints';
+import NetworkToast from './components/NetworkToast';
+import SWUpdateToast from './components/SWUpdateToast';
 
-// Захистимо токени від випадкових clear()
-hardenAuthStorage();
-
-// Ліниві сторінки
-const MapView           = lazy(() => import('./components/MapView'));
-const MyOrders          = lazy(() => import('./components/MyOrders'));
+const MapView = lazy(() => import('./components/MapView'));
+const MyOrders = lazy(() => import('./components/MyOrders'));
 const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
-const Manifest          = lazy(() => import('./components/Manifest'));
-const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
+const Manifest = lazy(() => import('./components/Manifest'));
+const ScenarioForm = lazy(() => import('./components/ScenarioForm'));
 
-/**
- * Guard: терпляче чекає гідратацію сесії, дебаунсить SIGNED_OUT,
- * і НЕ редіректить на /register передчасно.
- */
+/** Примусово використовуємо www-хост (щоб localStorage/сесія не “губилися” між хостами) */
+function useEnforceWWW() {
+  useEffect(() => {
+    const h = window.location.hostname;
+    if (h === 'buymybehavior.com') {
+      const to = `https://www.buymybehavior.com${window.location.pathname}${window.location.search}${window.location.hash}`;
+      window.location.replace(to);
+    }
+  }, []);
+}
+
 function RequireAuth({ children }: { children: JSX.Element }) {
-  const [status, setStatus] = useState<'checking' | 'authed' | 'guest'>('checking');
-  const signoutTimer = useRef<number | null>(null);
-  const fallbackTimer = useRef<number | null>(null);
-  const decidedRef = useRef(false);
-
-  const hasSbToken = () =>
-    typeof window !== 'undefined' &&
-    Object.keys(localStorage).some((k) => k.startsWith('sb-') && k.endsWith('-auth-token'));
-
-  const decide = (s: 'authed' | 'guest') => {
-    if (decidedRef.current) return;
-    decidedRef.current = true;
-    if (signoutTimer.current) { clearTimeout(signoutTimer.current); signoutTimer.current = null; }
-    if (fallbackTimer.current) { clearTimeout(fallbackTimer.current); fallbackTimer.current = null; }
-    setStatus(s);
-  };
+  const [state, setState] = useState<'checking' | 'authed' | 'guest'>('checking');
+  const tRef = useRef<number | null>(null);
 
   useEffect(() => {
     let alive = true;
-    let unsub: { unsubscribe(): void } | undefined;
 
-    (async () => {
+    async function hardCheck(label: string) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!alive) return;
-      if (session?.user) setStatus('authed'); else setStatus('checking');
+      if (session) setState('authed');
+      else setState('guest');
+    }
 
-      // слухаємо зміни
-      const { data } = supabase.auth.onAuthStateChange((event, sess) => {
+    (async () => {
+      // перша синхронна перевірка
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!alive) return;
+      setState(session ? 'authed' : 'checking'); // важливо: не одразу guest — даємо шанс події SIGNED_IN
+
+      // підписки
+      const { data: sub } = supabase.auth.onAuthStateChange((ev, session) => {
+        // для дебагу можна відкрити консоль:
+        // console.log('[auth event]', ev, !!session);
+
         if (!alive) return;
 
-        if (event === 'SIGNED_IN' && sess?.user) {
-          decide('authed');
+        if (session) {
+          setState('authed');
+          if (tRef.current) { window.clearTimeout(tRef.current); tRef.current = null; }
           return;
         }
-        if (event === 'SIGNED_OUT') {
-          // дебаунсим на 2.5с — перевіримо, чи не "хибний" вихід
-          if (signoutTimer.current) clearTimeout(signoutTimer.current);
-          signoutTimer.current = window.setTimeout(async () => {
-            if (!alive || decidedRef.current) return;
-            const { data: { session: s2 } } = await supabase.auth.getSession();
-            if (s2?.user || hasSbToken()) return; // токени є — ігноруємо
-            decide('guest');
-          }, 2500) as unknown as number;
-          return;
-        }
-        if (event === 'INITIAL_SESSION' && sess?.user) {
-          decide('authed');
-          return;
-        }
+
+        // Якщо подія без сесії — не поспішаємо. Даємо 5–15 сек і перевіряємо ще раз.
+        if (tRef.current) window.clearTimeout(tRef.current);
+        const delay = ev === 'INITIAL_SESSION' ? 5000 : 15000;
+        tRef.current = window.setTimeout(() => {
+          hardCheck('delayed');
+        }, delay);
       });
-      unsub = data.subscription;
+
+      return () => {
+        alive = false;
+        sub.subscription.unsubscribe();
+        if (tRef.current) window.clearTimeout(tRef.current);
+      };
     })();
-
-    // Щедрий фолбек 6с: якщо сесія не зʼявилась — гостем
-    fallbackTimer.current = window.setTimeout(async () => {
-      if (decidedRef.current) return;
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) decide('authed'); else decide('guest');
-    }, 6000) as unknown as number;
-
-    return () => {
-      alive = false;
-      unsub?.unsubscribe();
-      if (signoutTimer.current) clearTimeout(signoutTimer.current);
-      if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
-    };
   }, []);
 
-  if (status === 'checking') return <div style={{ padding: '1rem' }}>Завантаження…</div>;
-  if (status === 'guest')    return <Navigate to="/register" replace />;
+  if (state === 'checking') return <div style={{ padding: '1rem' }}>Завантаження…</div>;
+  if (state === 'guest') return <Navigate to="/register" replace />;
   return children;
 }
 
 export default function App() {
   useViewportVH();
   useGlobalImageHints();
+  useEnforceWWW();
 
   return (
     <>
@@ -115,24 +99,23 @@ export default function App() {
 
       <Suspense fallback={<div style={{ padding: '1rem' }}>Завантаження…</div>}>
         <Routes>
-          {/* Колбек після Magic Link / OAuth */}
           <Route path="/auth/callback" element={<AuthCallback next="/map" />} />
 
-          {/* Публічні */}
-          <Route path="/register"  element={<Register />} />
+          {/* публічні */}
+          <Route path="/register" element={<Register />} />
           <Route path="/behaviors" element={<BehaviorsFeed />} />
 
-          {/* Захищені */}
-          <Route path="/map"           element={<RequireAuth><MapView /></RequireAuth>} />
-          <Route path="/profile"       element={<RequireAuth><Profile /></RequireAuth>} />
-          <Route path="/my-orders"     element={<RequireAuth><MyOrders /></RequireAuth>} />
-          <Route path="/received"      element={<RequireAuth><ReceivedScenarios /></RequireAuth>} />
-          <Route path="/scenario/new"  element={<RequireAuth><ScenarioForm /></RequireAuth>} />
-          <Route path="/manifest"      element={<RequireAuth><Manifest /></RequireAuth>} />
+          {/* захищені */}
+          <Route path="/map"          element={<RequireAuth><MapView /></RequireAuth>} />
+          <Route path="/profile"      element={<RequireAuth><Profile /></RequireAuth>} />
+          <Route path="/my-orders"    element={<RequireAuth><MyOrders /></RequireAuth>} />
+          <Route path="/received"     element={<RequireAuth><ReceivedScenarios /></RequireAuth>} />
+          <Route path="/scenario/new" element={<RequireAuth><ScenarioForm /></RequireAuth>} />
+          <Route path="/manifest"     element={<RequireAuth><Manifest /></RequireAuth>} />
 
-          {/* За замовчуванням */}
-          <Route path="/"  element={<Navigate to="/map" replace />} />
-          <Route path="*"  element={<Navigate to="/map" replace />} />
+          {/* дефолт */}
+          <Route path="/" element={<Navigate to="/map" replace />} />
+          <Route path="*" element={<Navigate to="/map" replace />} />
         </Routes>
       </Suspense>
     </>

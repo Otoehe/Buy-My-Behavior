@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+// src/components/AuthCallback.tsx
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-
-type Props = { next?: string };
 
 function parseNextFromUrl(): string | null {
   try {
@@ -11,7 +10,9 @@ function parseNextFromUrl(): string | null {
     if (qNext) return qNext;
     const hash = new URLSearchParams(url.hash.replace(/^#/, ''));
     return hash.get('next');
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 async function syncReferralOnce(userId: string) {
@@ -35,9 +36,9 @@ async function syncReferralOnce(userId: string) {
   } catch {}
 }
 
-export default function AuthCallback({ next = '/map' }: Props) {
+export default function AuthCallback({ next = '/map' }: { next?: string }) {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<'loading' | 'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
 
   const targetNext = useMemo(
     () => parseNextFromUrl() || localStorage.getItem('post_auth_next') || next,
@@ -45,72 +46,47 @@ export default function AuthCallback({ next = '/map' }: Props) {
   );
 
   useEffect(() => {
-    let unsub: { unsubscribe(): void } | undefined;
-    let finished = false;
-
     (async () => {
       try {
-        // 0) Якщо вже є сесія — завершуємо одразу
+        // 1) обмін коду на сесію (ідемпотентно: якщо вже міняли — помилки не буде)
+        await supabase.auth.exchangeCodeForSession(window.location.href).catch(() => {});
+
+        // 2) невелика затримка, щоб SDK устиг записати сесію у localStorage
+        await new Promise((r) => setTimeout(r, 150));
+
+        // 3) перевіряємо сесію
         let { data: { session } } = await supabase.auth.getSession();
+
+        if (!session) {
+          // друга спроба через мить (на випадок повільної мережі)
+          await new Promise((r) => setTimeout(r, 350));
+          ({ data: { session } } = await supabase.auth.getSession());
+        }
+
         if (session?.user) {
           await syncReferralOnce(session.user.id);
-          const dest = targetNext || '/map';
-          window.history.replaceState({}, document.title, dest);
-          finished = true;
-          navigate(dest, { replace: true });
+          setStatus('ok');
+
+          // чистимо URL і переходимо
+          const nextUrl = targetNext || '/map';
+          window.history.replaceState({}, document.title, nextUrl);
+          navigate(nextUrl, { replace: true });
           return;
         }
 
-        // 1) Чекаємо подію SIGNED_IN (макс 8с), підписуємося ЗАЗДАЛЕГІДЬ
-        const waitSignedIn = new Promise<void>((resolve) => {
-          const to = setTimeout(() => resolve(), 8000);
-          const { data } = supabase.auth.onAuthStateChange((event, s) => {
-            if (event === 'SIGNED_IN' && s?.user) {
-              clearTimeout(to);
-              data.subscription.unsubscribe();
-              resolve();
-            }
-          });
-          unsub = data.subscription;
-        });
-
-        // 2) Якщо це OAuth/PKCE — обміняти ?code= на сесію
-        const url = new URL(window.location.href);
-        if (url.searchParams.get('code')) {
-          // Для v2 працює з повним href
-          const { error } = await supabase.auth.exchangeCodeForSession(url.href);
-          if (error) throw error;
-        }
-        // Якщо email magic-link (токени у #hash) — detectSessionInUrl=true зробить все сама;
-        // ми просто чекаємо на SIGNED_IN.
-
-        await waitSignedIn;
-
-        // 3) Перевіряємо й завершуємо
-        ({ data: { session } } = await supabase.auth.getSession());
-        if (!session?.user) throw new Error('no-session');
-
-        await syncReferralOnce(session.user.id);
-
-        const dest = targetNext || '/map';
-        window.history.replaceState({}, document.title, dest);
-        finished = true;
-        navigate(dest, { replace: true });
+        setStatus('error');
+        navigate('/register', { replace: true });
       } catch (e) {
-        if (!finished) {
-          console.error('[AuthCallback] error', e);
-          setStatus('error');
-          navigate('/register', { replace: true });
-        }
+        console.error('[AuthCallback] exchange error', e);
+        setStatus('error');
+        navigate('/register', { replace: true });
       }
     })();
-
-    return () => { unsub?.unsubscribe(); };
   }, [navigate, targetNext]);
 
   return (
-    <div style={{ padding: 16 }}>
-      <h3>Входимо…</h3>
+    <div style={{ padding: '1rem' }}>
+      <h1>Входимо…</h1>
       <p>Будь ласка, зачекайте кілька секунд.</p>
       {status === 'error' && (
         <p style={{ color: 'crimson' }}>
