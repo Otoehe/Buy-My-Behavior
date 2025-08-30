@@ -8,36 +8,32 @@ import InAppOpenInBrowserBanner from './InAppOpenInBrowserBanner';
 export default function Register() {
   const navigate = useNavigate();
 
-  // ——— Слухаємо статус сесії та одразу переводимо автентифікованих далі
+  // ——— якщо вже залогінений — одразу редіректимо; також слухаємо всі події авторизації
   useEffect(() => {
-    let done = false;
+    let alive = true;
 
-    const goNext = () => {
-      if (done) return;
-      done = true;
-      const next = localStorage.getItem('post_auth_next') || '/map';
-      navigate(next, { replace: true });
-    };
+    // 1) первинна перевірка поточної сесії
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!alive) return;
+      if (session?.user) {
+        const next = localStorage.getItem('post_auth_next') || '/map';
+        navigate(next, { replace: true });
+      }
+    })();
 
-    // 1) миттєва перевірка поточної сесії (важливо після /auth/callback)
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session?.user) goNext();
-    });
-
-    // 2) реагуємо не лише на SIGNED_IN, а й на INITIAL_SESSION/REFRESH/UPDATED
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (
-        (event === 'INITIAL_SESSION' ||
-         event === 'SIGNED_IN' ||
-         event === 'TOKEN_REFRESHED' ||
-         event === 'USER_UPDATED') &&
-        session?.user
-      ) {
-        goNext();
+    // 2) підписка на будь-яку зміну стану — як тільки з’явилась сесія, ведемо на next
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const next = localStorage.getItem('post_auth_next') || '/map';
+        navigate(next, { replace: true });
       }
     });
 
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      alive = false;
+      sub?.subscription?.unsubscribe?.();
+    };
   }, [navigate]);
 
   // ====== STATE ======
