@@ -2,24 +2,43 @@
 <html lang="uk">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Buy My Behavior</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
+    />
 
-    <!-- Manifest + cache-bust -->
-    <link rel="manifest" href="/manifest.webmanifest?v=2025-08-29" />
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#ffcdd6" />
 
-    <!-- PWA / iOS -->
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- Android / Chrome -->
+    <meta name="mobile-web-app-capable" content="yes" />
 
-    <!-- Favicons -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
+    <!-- iOS PWA підтримка -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="BMB" />
+    <!-- Якщо маєш окремі iOS-іконки — додай їх нижче; інакше лишаємо загальний 192px -->
+    <link rel="apple-touch-icon" href="/icons/bmb-192.png" />
+
+    <!-- SEO / базове -->
+    <title>Buy My Behavior</title>
+    <meta name="description" content="BMB — Web3 платформа взаємодії та escrow на BSC" />
+
+    <!-- Favicons (не обов'язково, але бажано) -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/bmb-192.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/bmb-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/bmb-512.png" />
+
+    <!-- Вказівка браузеру не підміняти кольори -->
+    <meta name="color-scheme" content="light only" />
   </head>
+
   <body>
+    <noscript>Для роботи застосунку потрібен увімкнений JavaScript.</noscript>
     <div id="root"></div>
+
+    <!-- Vite entry -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
