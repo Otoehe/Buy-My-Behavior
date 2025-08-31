@@ -405,18 +405,44 @@ export default function Profile() {
     if (!error) setScenarios(scenarios.map((s) => (s.id === id ? { ...s, hidden: true } : s)));
   };
 
+  // ⬇️ ОНОВЛЕНА ФУНКЦІЯ ПІДКЛЮЧЕННЯ METAMASK (тільки по кліку)
   const connectMetamask = async () => {
     try {
-      // 1) Спробувати інжектований MetaMask (десктоп або мобільний in-app браузер)
+      // 1) Спробувати інжектований MetaMask (десктоп або вбудований браузер MetaMask Mobile)
       const provider = await getMetaMaskProvider();
-      if (provider) {
-        const accounts: string[] = await provider.request({ method: 'eth_requestAccounts' });
-        const address = accounts?.[0] || '';
-        if (!address) { alert('Користувач не надав доступ до акаунта MetaMask.'); return; }
 
-        setProfile((prev) => ({ ...prev, wallet: address }));
-        setWalletConnected(true);
+      // 2) Якщо НЕМає інжекції і це мобільний → відкриваємо MetaMask через deeplink (тільки по кліку)
+      if (!provider) {
+        if (isMobileUA()) {
+          window.location.href = toDeeplinkUrl(); // відкриє MetaMask Mobile і завантажить ваш сайт усередині
+          return;
+        }
+        alert('MetaMask не знайдено. Встановіть розширення MetaMask або відкрийте сайт у MetaMask Mobile.');
+        return;
+      }
 
+      // 3) Запит аккаунтів
+      const accounts: string[] = await provider.request({ method: 'eth_requestAccounts' });
+      const address = accounts?.[0] || '';
+      if (!address) {
+        alert('Користувач не надав доступ до акаунта MetaMask.');
+        return;
+      }
+
+      // 4) Зберігаємо в локальний стан
+      setProfile((prev) => ({ ...prev, wallet: address }));
+      setWalletConnected(true);
+
+      // 5) Перемикаємо/додаємо BSC
+      try {
+        await ensureBSC(provider);
+      } catch (switchErr) {
+        console.warn('BSC switch failed:', switchErr);
+        alert('Не вдалося перемкнути мережу на BSC. Перевірте MetaMask вручну.');
+      }
+
+      // 6) Слухач зміни акаунтів (clean-attach)
+      try {
         const prev = (window as any).__bmb_acc_handler__;
         if (prev && typeof prev === 'function' && (provider as any).removeListener) {
           (provider as any).removeListener('accountsChanged', prev);
@@ -430,21 +456,16 @@ export default function Profile() {
         if ((provider as any).on && typeof (provider as any).on === 'function') {
           (provider as any).on('accountsChanged', handler);
         }
-
-        await ensureBSC(provider);
-        return;
+      } catch (e) {
+        console.warn('accountsChanged listener attach failed:', e);
       }
 
-      // 2) Якщо інжекції немає і це МОБІЛЬНИЙ браузер → відкриваємо MetaMask через deeplink
-      if (isMobileUA()) {
-        window.location.href = toDeeplinkUrl(); // відкриє MetaMask Mobile та завантажить ваш сайт у ньому
-        return;
-      }
-
-      // 3) Немає MetaMask
-      alert('MetaMask недоступний. Встановіть розширення MetaMask (десктоп) або відкрийте сайт через MetaMask Mobile.');
+      // 7) Не пишемо в БД автоматично — збереження лишається на кнопці “Зберегти профіль”
     } catch (e: any) {
-      const msg = e?.code === 4001 ? 'Доступ до акаунта відхилено в MetaMask.' : (e?.message || String(e));
+      const msg =
+        e?.code === 4001
+          ? 'Доступ до акаунта відхилено в MetaMask.'
+          : (e?.message || String(e));
       console.error('MetaMask connect error:', e);
       alert('Помилка підключення MetaMask: ' + msg);
     }
