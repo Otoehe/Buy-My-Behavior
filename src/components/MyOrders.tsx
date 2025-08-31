@@ -21,17 +21,15 @@ import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 import { StatusStripClassic } from './StatusStripClassic';
 
-// ── FIX білого екрану: JSX рендерить {headerRight}, тож оголошуємо безпечний плейсхолдер
+// 🔧 виправлення ReferenceError
 const headerRight: React.ReactNode = null;
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
-// ───────────────────────────────────────────────────────────────
 type BusyMap = Record<string, boolean>;
 type LocalPatch = Partial<Pick<Scenario, 'description' | 'donation_amount_usdt'>>;
 
-// ───────────────────────────────────────────────────────────────
 export default function MyOrders() {
   const [list, setList] = useState<Scenario[]>([]);
   const [local, setLocalState] = useState<Record<string, LocalPatch>>({});
@@ -40,7 +38,7 @@ export default function MyOrders() {
   const [confirmBusy, setConfirmBusy] = useState<BusyMap>({});
   const [toast, setToast] = useState(false);
 
-  // Рейтинг
+  // рейтинг
   const [rateOpen, setRateOpen] = useState(false);
   const [rateBusy, setRateBusy] = useState(false);
   const [rateScore, setRateScore] = useState<number>(10);
@@ -63,16 +61,15 @@ export default function MyOrders() {
     !Number.isNaN(s.longitude);
 
   const stepOf = (s: Scenario) => {
-    // 1: agree, 2: lock, 3: confirm
-    if (!s.is_agreed_by_customer || !s.is_agreed_by_executor) return 1;
-    if (!s.is_locked_onchain) return 2;
-    return 3;
+    if (!s.is_agreed_by_customer || !s.is_agreed_by_executor) return 1; // agree
+    if (!s.is_locked_onchain) return 2; // lock
+    return 3; // confirm
   };
 
   const canDispute = (s: Scenario) =>
     s.status !== 'disputed' && s.is_locked_onchain && s.status !== 'confirmed';
 
-  // ── завантаження моїх сценаріїв (ТИ — автор → creator_id)
+  // завантаження сценаріїв (ти = creator_id)
   const fetchMyScenarios = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return setList([]);
@@ -80,7 +77,7 @@ export default function MyOrders() {
     const { data, error } = await supabase
       .from('scenarios')
       .select('*')
-      .eq('creator_id', user.id)            // ⬅️ ключова правка
+      .eq('creator_id', user.id)
       .order('created_at', { ascending: false });
 
     if (!error && data) setList(data as any as Scenario[]);
@@ -89,7 +86,6 @@ export default function MyOrders() {
   useEffect(() => {
     fetchMyScenarios();
 
-    // Realtime підписка (залишаю просто оновлення свого рядка)
     const ch = supabase
       .channel('realtime:scenarios-myorders')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'scenarios' }, (payload) => {
@@ -107,8 +103,7 @@ export default function MyOrders() {
     return () => { void supabase.removeChannel(ch); };
   }, [fetchMyScenarios]);
 
-  // ───────────────────────────────────────────────────────────────
-  // ДІЇ
+  // дії
   const handleAgree = useCallback(async (s: Scenario) => {
     setAgreeBusy(v => ({ ...v, [s.id]: true }));
     try {
@@ -201,7 +196,7 @@ export default function MyOrders() {
     }
   }, [fetchMyScenarios]);
 
-  // Рейтинг
+  // рейтинг
   const openRateFor = (s: Scenario) => {
     setRateScenarioId(s.id);
     setRateScore(10);
@@ -223,7 +218,6 @@ export default function MyOrders() {
     }
   };
 
-  // ───────────────────────────────────────────────────────────────
   return (
     <div className="scenario-list">
       <div className="scenario-header">
@@ -241,7 +235,6 @@ export default function MyOrders() {
 
         return (
           <div key={s.id} style={{ marginBottom: 12 }}>
-            {/* статус угоди над карткою */}
             <div style={{ marginBottom: 10 }}>
               <StatusStripClassic state={s} />
             </div>
