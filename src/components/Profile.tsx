@@ -37,6 +37,80 @@ const RatingStars: React.FC<{ value: number }> = ({ value }) => {
   );
 };
 
+/* ====== ДОДАНО: кнопка-додавання іконки A2HS (всередині файлу) ====== */
+// тип для beforeinstallprompt
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+}
+const isIOSUA = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+const BRAND_LOGO_SQUARE = '/mUSD-icon.svg'; // квадратний логотип із /public
+
+const AddToHomeCard: React.FC = () => {
+  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
+  const [installed, setInstalled] = useState<boolean>(() => {
+    const mm = window.matchMedia?.('(display-mode: standalone)')?.matches ?? false;
+    const ios = (window as any).navigator?.standalone === true;
+    return mm || ios;
+  });
+
+  useEffect(() => {
+    const onBIP = (e: Event) => {
+      e.preventDefault();
+      setDeferred(e as BeforeInstallPromptEvent);
+    };
+    const onInstalled = () => {
+      setInstalled(true);
+      setDeferred(null);
+    };
+    window.addEventListener('beforeinstallprompt', onBIP);
+    window.addEventListener('appinstalled', onInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBIP);
+      window.removeEventListener('appinstalled', onInstalled);
+    };
+  }, []);
+
+  if (installed) return null;
+
+  async function handleInstall() {
+    // iOS: лише інструкція
+    if (isIOSUA() || !deferred) {
+      alert(
+        isIOSUA()
+          ? 'iPhone/iPad: Safari → Поділитися → Додати на початковий екран → Підтвердити.'
+          : 'Android: меню «⋮» у Chrome → Додати на головний екран/Встановити додаток → Підтвердити.'
+      );
+      return;
+    }
+    try {
+      await deferred.prompt();
+      const choice = await deferred.userChoice;
+      setDeferred(null);
+      if (choice.outcome === 'accepted') setInstalled(true);
+    } catch {
+      // тихо ігноруємо
+    }
+  }
+
+  // Контейнер робимо в стилі ваших форм, щоб ширина збігалася
+  return (
+    <div className="profile-form" style={{ marginTop: 12 }}>
+      <button onClick={handleInstall} className="button" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+        <img
+          src={BRAND_LOGO_SQUARE}
+          alt="BMB"
+          width={22}
+          height={22}
+          style={{ borderRadius: 8, display: 'block' }}
+        />
+        <span style={{ fontWeight: 800 }}>Вивести іконку на робочий стіл</span>
+      </button>
+    </div>
+  );
+};
+/* ====== КІНЕЦЬ доданого блоку ====== */
+
 /* ===== Auth gate (без редіректів) ===== */
 const ProfileAuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [authReady, setAuthReady] = React.useState(false);
@@ -566,6 +640,10 @@ export default function Profile() {
 
             <button onClick={handleSaveProfile} className="button">💾 Зберегти профіль</button>
           </div>
+
+          {/* ===== ДОДАНО: кнопка виводу іконки — між верхнім блоком і «Створити сценарій» ===== */}
+          <AddToHomeCard />
+          {/* ===== КІНЕЦЬ доданого фрагмента ===== */}
 
           {/* Драфти сценаріїв */}
           <div className="scenario-form">
