@@ -103,6 +103,39 @@ const InfoIcon = ({ className = "h-10 w-10", stroke = "currentColor" }) => (
   </svg>
 );
 
+// Конверт — для "магік-лінка" та e-mail підтверджень
+const MailIcon = ({ className = "h-10 w-10", stroke = "currentColor" }) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke={stroke} strokeWidth="1.8">
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="M3 7l9 6 9-6" />
+  </svg>
+)
+
+// App icon + plus — для A2HS (додати іконку на головний екран)
+const AppIconAdd = ({ className = "h-10 w-10", stroke = "currentColor" }) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke={stroke} strokeWidth="1.6">
+    <rect x="4.5" y="5" width="11" height="11" rx="2.2" />
+    <path d="M18 8h3M19.5 6.5v3" />
+  </svg>
+);
+
+// Квадрат із реальним фавіконом без плюса
+const AppIconSquare = ({ size = 48 }) => (
+  <div
+    className="grid place-items-center rounded-[12px] overflow-hidden bg-white"
+    style={{ width: size, height: size }}
+  >
+    <img
+      src="/icons/icon-192.png"
+      alt=""
+      role="presentation"
+      aria-hidden="true"
+      draggable={false}
+      className="h-full w-full object-contain"
+    />
+  </div>
+);
+
 /**
  * LogoBadge — круглий бейдж без фону; лого заповнює весь круг; біла окантовка = ringWidth
  */
@@ -148,6 +181,7 @@ export default function DemoBMBModals() {
   const [openInfo, setOpenInfo] = useState(false);
   const [openCongratsCustomer, setOpenCongratsCustomer] = useState(false);
   const [openCongratsPerformer, setOpenCongratsPerformer] = useState(false);
+  const [openMagic, setOpenMagic] = useState(false);
 
   // Standalone check
   const checkStandalone = () =>
@@ -244,6 +278,9 @@ export default function DemoBMBModals() {
           <button onClick={() => setOpenInfo(true)} className="rounded-full bg-black px-4 py-2 text-white">
             Info (Чернетку збережено)
           </button>
+          <button onClick={() => setOpenMagic(true)} className="rounded-full bg-black px-4 py-2 text-white">
+            Magic‑link (реєстрація)
+          </button>
           <button onClick={() => setOpenCongratsCustomer(true)} className="rounded-full bg-black px-4 py-2 text-white">
             Congrats (Замовник)
           </button>
@@ -260,12 +297,12 @@ export default function DemoBMBModals() {
             <div className="pointer-events-none absolute -left-10 -top-12 h-56 w-56 rounded-full bg-white/35" />
             <div className="pointer-events-none absolute -right-8 -bottom-10 h-56 w-56 rounded-full bg-white/30" />
 
-            <div className="relative mx-auto mb-3 grid h-20 w-20 place-items-center rounded-full border-2 border-black/70 bg-yellow-300 text-black">
-              <PhoneIcon />
+            <div className="relative mx-auto mb-3 grid h-20 w-20 place-items-center rounded-full bg-white border-[3px] border-white">
+              <AppIconSquare size={48} />
             </div>
 
             <h3 className="relative mb-2 text-2xl font-semibold tracking-tight text-neutral-900">
-              Додайте BMB на головний екран
+              Додайте іконку BMB на головний екран
             </h3>
             <p className="relative mx-auto mb-5 max-w-xl text-neutral-800">
               Відкриватимете платформу в один тап — швидше та стабільніше.
@@ -381,6 +418,21 @@ export default function DemoBMBModals() {
           </button>
         </div>
       </BMBModal>
+
+      {/* Magic-link — фірмовий стиль для реєстрації */}
+      <BMBModal
+        isOpen={openMagic}
+        onClose={() => setOpenMagic(false)}
+        icon={<MailIcon />}
+        title="Магік‑лінк надіслано"
+        subtitle={
+          <>
+            <div>Перевір пошту і відкрий посилання у звичному браузері (Chrome/Safari).</div>
+            <div>Після переходу тебе автоматично перекине на «Обрати виконавця».</div>
+          </>
+        }
+        actionLabel="Закрити"
+      />
 
       {/* Info — Чернетку збережено */}
       <BMBModal
