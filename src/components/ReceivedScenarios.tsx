@@ -1,3 +1,4 @@
+// 📄 src/components/ReceivedScenarios.tsx
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import {
@@ -6,7 +7,7 @@ import {
   ESCROW_ADDRESS,
   generateScenarioIdBytes32,
 } from '../lib/escrowContract';
-import { getSigner } from '../lib/web3';
+import { getSigner, ensureBSC } from '../lib/web3';
 import { ethers } from 'ethers';
 import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
 import { useRealtimeNotifications } from '../lib/realtimeNotifications';
@@ -17,7 +18,7 @@ import type { DisputeRow, ScenarioRow } from '../lib/tables';
 import { getLatestDisputeByScenario, uploadEvidenceAndAttach, ensureDisputeRowForScenario } from '../lib/disputeApi';
 import RateCounterpartyModal from './RateCounterpartyModal';
 
-// ⬇️ додано: класичний степер статусів
+// індикатор статусів
 import { StatusStripClassic } from './StatusStripClassic';
 
 type Status = 'pending' | 'agreed' | 'confirmed' | 'disputed' | string;
@@ -26,23 +27,17 @@ interface Scenario extends ScenarioRow {}
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.85;
 
-// MetaMask + BSC
+// ———————————————————————————————————————————————————————
+// helpers
+
 async function ensureBSCAndGetSigner() {
-  let signer = await getSigner();
-  const provider = signer.provider as ethers.providers.Web3Provider;
-  const net = await provider.getNetwork();
-  if (Number(net.chainId) !== 56 && (window as any).ethereum?.request) {
-    await (window as any).ethereum.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: '0x38' }],
-    });
-    signer = await getSigner();
-  }
-  return signer;
+  // тепер перемикаємо мережу централізовано
+  await ensureBSC();
+  return await getSigner();
 }
 
 function humanizeEthersError(err: any): string {
-  const m = String(err?.reason || err?.error?.message || err?.message || '');
+  const m = String(err?.shortMessage || err?.reason || err?.error?.message || err?.message || '');
   if (!m) return 'Невідома помилка';
   return m.replace(/execution reverted:?/i, '').replace(/\(reason=.*?\)/i, '').trim();
 }
@@ -59,11 +54,12 @@ async function waitForChainRelease(sid: string, tries = 6, delayMs = 1200) {
   return 0;
 }
 
-// чи настав час виконання
 function reachedExecutionTime(s: Scenario) {
   const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
   return !isNaN(dt.getTime()) && new Date() >= dt;
 }
+
+// ———————————————————————————————————————————————————————
 
 export default function ReceivedScenarios() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
@@ -197,9 +193,8 @@ export default function ReceivedScenarios() {
   const setLocal = (id: string, patch: Partial<Scenario>) =>
     setScenarios(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
-  // редагування опису/суми → pending + скидання погоджень (до confirmed)
+  // редагування опису/суми → pending + скидання погоджень
   const updateScenarioField = async (id: string, field: keyof Scenario, value: any) => {
-    // ⬇️ нова перевірка: сума лише ціле >= 0 (нуль дозволено)
     if (field === 'donation_amount_usdt') {
       if (value === '' || value === null) {
         // дозволяємо пусто
@@ -266,7 +261,7 @@ export default function ReceivedScenarios() {
     try {
       const signer = await ensureBSCAndGetSigner();
       const who = (await signer.getAddress()).toLowerCase();
-      const provider = signer.provider as ethers.providers.Web3Provider;
+      const provider: any = (signer as any).provider;
 
       const dealBefore = await getDealOnChain(s.id);
       const statusOnChain = Number((dealBefore as any).status); // 1 = Locked
@@ -277,18 +272,31 @@ export default function ReceivedScenarios() {
         alert(`Підключений гаманець не є виконавцем цього сценарію.\nОчікується: ${executorOnChain}\nПідключено: ${who}`);
         return;
       }
-      const bal = await provider.getBalance(who);
-      if (bal.lt(ethers.utils.parseUnits('0.00005', 'ether'))) { alert('Недостатньо нативної монети для комісії.'); return; }
+
+      const bal = await provider.getBalance(who); // bigint у v6
+      const minFee = ethers.parseUnits('0.00005', 'ether'); // bigint
+      if (typeof bal === 'bigint' ? bal < minFee : (bal as any).lt?.(minFee)) {
+        alert('Недостатньо нативної монети для комісії.');
+        return;
+      }
 
       try {
         const b32 = generateScenarioIdBytes32(s.id);
         const abi = ['function confirmCompletion(bytes32)'];
         const c = new ethers.Contract(ESCROW_ADDRESS, abi, signer);
-        await c.callStatic.confirmCompletion(b32);
-        let gas; try { gas = await c.estimateGas.confirmCompletion(b32); } catch { gas = ethers.BigNumber.from(150000); }
-        const tx = await c.confirmCompletion(b32, { gasLimit: gas.mul(12).div(10) });
+
+        // симуляція / dry-run (v6)
+        await c.confirmCompletion.staticCall(b32);
+
+        // оцінка газу (v6 → bigint)
+        let gas: bigint;
+        try { gas = await c.confirmCompletion.estimateGas(b32); }
+        catch { gas = 150000n; }
+
+        const tx = await c.confirmCompletion(b32, { gasLimit: (gas * 12n) / 10n });
         await tx.wait();
       } catch {
+        // фолбек на твою утиліту
         await confirmCompletionOnChain({ scenarioId: s.id });
       }
 
@@ -319,7 +327,7 @@ export default function ReceivedScenarios() {
     }
   };
 
-  // СПОРИ
+  // ——— СПОРИ
   const loadOpenDispute = useCallback(async (scenarioId: string) => {
     let d = await getLatestDisputeByScenario(scenarioId);
     if (!d) {
@@ -354,7 +362,7 @@ export default function ReceivedScenarios() {
     } finally { setUploading(p => ({ ...p, [s.id]: false })); ev.target.value = ''; }
   };
 
-  // стилі (інлайн, нічого глобального не чіпаю)
+  // стилі (інлайн)
   const hintStyle: React.CSSProperties = { fontSize: 12, lineHeight: '16px', opacity: 0.8, marginBottom: 8 };
   const labelStyle: React.CSSProperties = { fontSize: 13, lineHeight: '18px', marginBottom: 6, opacity: 0.9 };
   const amountPillStyle: React.CSSProperties = {
@@ -362,20 +370,19 @@ export default function ReceivedScenarios() {
     alignItems: 'center',
     gap: 8,
     borderRadius: 9999,
-    padding: '2px 8px',          // ⬅️ трішки менше
-    background: '#f7f7f7',       // ⬅️ як у полі «обрати сценарій»
+    padding: '2px 8px',
+    background: '#f7f7f7',
   };
   const amountInputStyle: React.CSSProperties = {
     borderRadius: 9999,
-    padding: '10px 14px',        // ⬅️ менше
+    padding: '10px 14px',
     fontSize: 16,
-    height: 40,                  // ⬅️ менше
+    height: 40,
     outline: 'none',
-    border: 'none',              // ⬅️ без рамки
+    border: 'none',
     background: 'transparent',
   };
 
-  // ⬇️ утиліта: пропускаємо лише цифри (порожньо = null)
   const parseDigits = (raw: string): number | null | 'invalid' => {
     if (raw.trim() === '') return null;
     if (!/^[0-9]+$/.test(raw.trim())) return 'invalid';
@@ -398,13 +405,12 @@ export default function ReceivedScenarios() {
 
         return (
           <div key={s.id} className="scenario-card" data-card-id={s.id}>
-            {/* ⬇️ нове: класичний степер статусу угоди */}
+            {/* індикатор статусу угоди */}
             <div style={{ marginBottom: 10 }}>
               <StatusStripClassic state={s} />
             </div>
 
             <div className="scenario-info">
-              {/* 🔔 Підказка */}
               <div style={hintStyle}>
                 Опис сценарію і сума добровільного донату редагуються обома учасниками до Погодження угоди.
               </div>
@@ -435,7 +441,6 @@ export default function ReceivedScenarios() {
                 </label>
                 <div className="amount-pill" style={amountPillStyle}>
                   <input
-                    // ⬇️ лише цифри, без десяткових; нуль дозволено
                     type="text"
                     inputMode="numeric"
                     pattern="[0-9]*"
@@ -444,78 +449,3 @@ export default function ReceivedScenarios() {
                     placeholder="—"
                     onChange={(e) => {
                       const raw = e.target.value;
-                      if (raw === '' || /^[0-9]+$/.test(raw)) {
-                        setLocal(s.id, { donation_amount_usdt: raw === '' ? null : parseInt(raw, 10) });
-                      }
-                    }}
-                    onBlur={(e) => {
-                      if (s.status === 'confirmed') return;
-                      const res = parseDigits((e.target as HTMLInputElement).value);
-                      if (res === 'invalid') { alert('Лише цифри (0,1,2,3,...)'); return; }
-                      updateScenarioField(s.id, 'donation_amount_usdt', res === null ? null : res);
-                    }}
-                    disabled={s.status === 'confirmed'}
-                    style={amountInputStyle}
-                  />
-                  <span className="amount-unit">USDT</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="scenario-actions">
-              <button className="btn agree"   onClick={() => handleAgree(s)}  disabled={!canAgree(s)}>🤝 Погодити угоду</button>
-              <button className="btn confirm" onClick={() => handleConfirm(s)} disabled={!canConfirm(s)}>✅ Підтвердити виконання</button>
-
-              <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-                <RateCounterpartyModal
-                  scenarioId={s.id}
-                  counterpartyId={s.creator_id}
-                  disabled={!canRate}
-                  onDone={() => setRatedMap(prev => ({ ...prev, [s.id]: true }))}
-                />
-                {!canRate && s.status === 'confirmed' && ratedMap[s.id] && (
-                  <span style={{ opacity: .8 }}>⭐ Оцінено</span>
-                )}
-              </div>
-
-              <input
-                type="file"
-                accept="video/*"
-                ref={el => { fileInputsRef.current[s.id] = el; }}
-                onChange={(ev) => onFileChange(s, ev)}
-                style={{ display: 'none' }}
-              />
-              <button
-                type="button"
-                className="btn dispute"
-                onClick={() => {
-                  const i = fileInputsRef.current[s.id];
-                  if (!i || uploading[s.id]) return;
-                  i.value = '';
-                  i.click();
-                }}
-                disabled={
-                  !openDisputes[s.id] ||
-                  openDisputes[s.id]?.status !== 'open' ||
-                  !!openDisputes[s.id]?.behavior_id ||
-                  !!uploading[s.id]
-                }
-                title={!openDisputes[s.id] ? 'Доступно лише при відкритому спорі' : ''}
-              >
-                {uploading[s.id] ? '…' : '📹 ЗАВАНТАЖИТИ ВІДЕОДОКАЗ'}
-              </button>
-
-              <button
-                className="btn location"
-                onClick={() => hasCoords(s) && window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank')}
-                disabled={!hasCoords(s)}
-              >📍 Показати локацію</button>
-            </div>
-          </div>
-        );
-      })}
-
-      <CelebrationToast open={showFinalToast} variant="executor" onClose={() => setShowFinalToast(false)} />
-    </div>
-  );
-}
