@@ -10,15 +10,13 @@ import Register        from './components/Register';
 import Profile         from './components/Profile';
 import AuthCallback    from './components/AuthCallback';
 import A2HS            from './components/A2HS';
-// Якщо було вимкнено — залишай вимкненим. Коли повернемо — просто розкоментуємо.
-// import AuthAutoCapture from './components/AuthAutoCapture';
+// import AuthAutoCapture from './components/AuthAutoCapture'; // залишаю як було (вимкнено/увімкнено — за вашим станом)
 
 import useViewportVH        from './lib/useViewportVH';
 import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 
-// Ледачі імпорти великих сторінок
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
 const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
@@ -26,7 +24,7 @@ const Manifest          = lazy(() => import('./components/Manifest'));
 const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
 
 // ───────────────────────────────────────────────────────────────────────────────
-// Допоміжні guard-компоненти
+// Guards
 // ───────────────────────────────────────────────────────────────────────────────
 function RequireAuth({ user, children }: { user: User | null; children: React.ReactElement }) {
   if (!user) return <Navigate to="/register" replace />;
@@ -38,34 +36,25 @@ function RedirectIfAuthed({ user, children }: { user: User | null; children: Rea
   return children;
 }
 
-/**
- * HomeGate — єдина логіка стартової сторінки.
- * Якщо користувач є — ведемо на карту (/map).
- * Якщо ні — на реєстрацію (/register).
- * Таким чином корінь "/" більше не показує BehaviorsFeed.
- */
-function HomeGate({ user }: { user: User | null }) {
-  return <Navigate to={user ? '/map' : '/register'} replace />;
+/** Домашня: тепер завжди ведемо на публічну карту */
+function HomeGate() {
+  return <Navigate to="/map" replace />;
 }
 
 export default function App() {
-  // Системні хуки (як і раніше)
   useViewportVH();
   useGlobalImageHints();
 
-  // Стежимо за авторизацією Supabase
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
     let mounted = true;
 
-    // 1) первинне отримання користувача
     supabase.auth.getUser().then(({ data }) => {
       if (!mounted) return;
       setUser(data.user ?? null);
     });
 
-    // 2) підписка на зміни сесії
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
     });
@@ -78,25 +67,25 @@ export default function App() {
 
   return (
     <>
-      {/* PWA/мережеві дрібниці — без змін */}
       <A2HS />
       <NetworkToast />
       <SWUpdateToast />
 
-      {/* Навбар НЕ чіпаємо */}
       <NavigationBar />
 
-      {/* Маршрутизація */}
       <Suspense fallback={null}>
         <Routes>
-          {/* Домашній вхід за адресою сайту */}
-          <Route path="/" element={<HomeGate user={user} />} />
+          {/* Домашня сторінка → публічна карта */}
+          <Route path="/" element={<HomeGate />} />
 
-          {/* Публічні сторінки */}
+          {/* Публічні */}
           <Route path="/auth/callback" element={<AuthCallback />} />
-          <Route path="/behaviors" element={<BehaviorsFeed />} />
+          <Route path="/map"        element={<MapView />} />
+          <Route path="/behaviors"  element={<BehaviorsFeed />} />
+          <Route path="/manifest"   element={<Manifest />} />
 
-          {/* Реєстрація доступна лише неавторизованим */}
+          {/* Реєстрація: відкрита, але якщо вже залогінений — перенаправляємо на карту.
+              Перевірка реф-слова відбувається всередині Register.tsx (як і було). */}
           <Route
             path="/register"
             element={
@@ -106,7 +95,7 @@ export default function App() {
             }
           />
 
-          {/* Захищені сторінки */}
+          {/* Приватні (особисті дії/дані) */}
           <Route
             path="/profile"
             element={
@@ -115,16 +104,6 @@ export default function App() {
               </RequireAuth>
             }
           />
-
-          <Route
-            path="/map"
-            element={
-              <RequireAuth user={user}>
-                <MapView />
-              </RequireAuth>
-            }
-          />
-
           <Route
             path="/my-orders"
             element={
@@ -133,7 +112,6 @@ export default function App() {
               </RequireAuth>
             }
           />
-
           <Route
             path="/received"
             element={
@@ -142,16 +120,6 @@ export default function App() {
               </RequireAuth>
             }
           />
-
-          <Route
-            path="/manifest"
-            element={
-              <RequireAuth user={user}>
-                <Manifest />
-              </RequireAuth>
-            }
-          />
-
           <Route
             path="/scenario/new"
             element={
@@ -161,7 +129,7 @@ export default function App() {
             }
           />
 
-          {/* Фолбек на дім */}
+          {/* Фолбек */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
