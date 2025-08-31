@@ -72,19 +72,41 @@ export default function MapView() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
 
-  // ====== свайп для шторки (праворуч -> закриття) ======
-  const drawerWidth = 340; // sync з inline стилями
+  // ====== свайп для шторки (правий дроуер → закриття свайпом праворуч) ======
+  const drawerWidth = 340; // тримай синхронно зі стилями
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const backdropRef = useRef<HTMLDivElement | null>(null);
+
   const touchStartX = useRef<number | null>(null);
   const lastX = useRef<number | null>(null);
-  const [dragX, setDragX] = useState(0);
+  const dragXRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
+
+  const setTransform = (dx: number) => {
+    dragXRef.current = dx;
+    if (rafRef.current != null) return; // дедуплікація кадрів
+    rafRef.current = requestAnimationFrame(() => {
+      const el = panelRef.current;
+      const bd = backdropRef.current;
+      if (el) el.style.transform = `translate3d(${dragXRef.current}px,0,0)`;
+      if (bd) {
+        const k = Math.max(0, Math.min(1, 1 - dragXRef.current / drawerWidth));
+        bd.style.opacity = String(0.35 * k);
+      }
+      rafRef.current = null;
+    });
+  };
+
+  const setTransition = (enabled: boolean) => {
+    const el = panelRef.current;
+    if (!el) return;
+    el.style.transition = enabled ? 'transform 200ms cubic-bezier(.2,.8,.2,1)' : 'none';
+  };
 
   const onTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX;
     lastX.current = touchStartX.current;
-    // плавний «живий» рух
-    const el = panelRef.current;
-    if (el) el.style.transition = 'none';
+    setTransition(false); // живий рух без анімації
   };
 
   const onTouchMove = (e: React.TouchEvent) => {
@@ -92,38 +114,34 @@ export default function MapView() {
     const x = e.touches[0].clientX;
     lastX.current = x;
     const deltaX = x - touchStartX.current; // >0 — тягнемо праворуч (до краю)
-    // тягнути можна лише праворуч (0..drawerWidth)
     const next = Math.max(0, Math.min(deltaX, drawerWidth));
-    setDragX(next);
+    setTransform(next);
   };
 
   const onTouchEnd = () => {
     if (touchStartX.current == null || lastX.current == null) {
-      touchStartX.current = null;
-      lastX.current = null;
-      return;
+      touchStartX.current = null; lastX.current = null; return;
     }
     const deltaX = lastX.current - touchStartX.current;
-    const el = panelRef.current;
-    if (el) el.style.transition = 'transform 200ms ease';
+    setTransition(true);
 
-    // якщо протягнули праворуч більше 80px — закриваємо
     if (deltaX > 80) {
-      setDragX(drawerWidth);
+      // закриваємо
+      setTransform(drawerWidth);
+      // дочекаємося кінця анімації (коротко) і сховаємо
       setTimeout(() => {
-        setDragX(0);
+        setTransform(0);
         setSelectedProfile(null);
       }, 180);
     } else {
-      // відкотити назад
-      setDragX(0);
-      if (el) el.style.transform = 'translateX(0)';
+      // повернення на місце
+      setTransform(0);
     }
 
     touchStartX.current = null;
     lastX.current = null;
   };
-  // =====================================================
+  // =======================================================================
 
   // завантажити користувачів + центр карти
   useEffect(() => {
@@ -161,13 +179,11 @@ export default function MapView() {
     const lng = Number(localStorage.getItem('longitude'));
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
       setCenter([lat, lng]);
-      // коли створиться мапа — ще й зсунути вид
       requestAnimationFrame(() => {
         const m = mapRef.current;
         if (m) m.setView({ lat, lng });
       });
     }
-    // також закриваємо шторку/відгуки на час вибору
     setSelectedProfile(null);
     setReviewsOpen(false);
   }, [isSelectMode]);
@@ -197,7 +213,7 @@ export default function MapView() {
     setScenarios((data || []) as unknown as Scenario[]);
   }
 
-  // cтворення іконки маркера (без inline onclick у HTML)
+  // cтворення іконки маркера
   function createAvatarIcon(avatarUrl: string) {
     return L.divIcon({
       html: `<div class="custom-marker small"><img src="${avatarUrl}" class="marker-img"/></div>`,
@@ -209,10 +225,15 @@ export default function MapView() {
 
   // клік по маркеру з leaflet
   function handleMarkerClick(user: User) {
-    if (isSelectMode) return; // у виборі місця маркери не відкривають профілі
+    if (isSelectMode) return;
     setSelectedProfile(user);
     fetchScenarios(user);
     setReviewsOpen(false);
+    // ресет положення шторки/бекдропа
+    setTimeout(() => {
+      setTransform(0);
+      setTransition(true);
+    }, 0);
   }
 
   // клік по мапі — закриваємо все (у select-mode ігноруємо)
@@ -230,7 +251,6 @@ export default function MapView() {
     e?.stopPropagation();
     if (!selectedProfile) return;
 
-    // єдине джерело правди — scenario_receiverId
     localStorage.setItem('scenario_receiverId', selectedProfile.user_id);
     if (selectedProfile.latitude && selectedProfile.longitude) {
       localStorage.setItem('latitude', String(selectedProfile.latitude));
@@ -248,7 +268,7 @@ export default function MapView() {
     });
   }
 
-  // Підтвердження точки у select-mode: фіксуємо центр-маячок і повертаємось
+  // Підтвердження точки у select-mode
   const confirmCenterAsLocation = () => {
     const m = mapRef.current;
     if (!m) return;
@@ -286,7 +306,6 @@ export default function MapView() {
 
   return (
     <div className="map-view-container" onClick={handleMapClick} style={{ position: 'relative' }}>
-      {/* у select-mode можна прибрати StoryBar, якщо заважає */}
       {!isSelectMode && <StoryBar />}
 
       <MapContainer
@@ -303,7 +322,6 @@ export default function MapView() {
           zoomOffset={-1}
         />
 
-        {/* У select-mode кліки лише пересувають карту під маячок */}
         {isSelectMode && <MoveOnClickLayer />}
 
         {!isSelectMode && users.map((user, index) => (
@@ -397,9 +415,26 @@ export default function MapView() {
         </>
       )}
 
+      {/* Бекдроп (плавна тінь) для дроуера */}
+      {!isSelectMode && selectedProfile && (
+        <div
+          ref={backdropRef}
+          onClick={() => setSelectedProfile(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1999,
+            background: 'rgba(0,0,0,0.35)',
+            opacity: 0.35, // стартове значення; під час свайпу змінюється через setTransform
+            transition: 'opacity 200ms ease',
+          }}
+        />
+      )}
+
       {/* ШТОРКА ПРОФІЛЮ — не показуємо у select-mode */}
       {!isSelectMode && selectedProfile && (
         <div
+          ref={panelRef}
           className="drawer-overlay"
           style={{
             position: 'fixed',
@@ -408,26 +443,34 @@ export default function MapView() {
             right: 0,
             bottom: 0,
             width: drawerWidth,
-            background: 'white',
-            boxShadow: '-4px 0 12px rgba(0,0,0,0.2)',
+            background: '#fff',
+            boxShadow: '-8px 0 24px rgba(0,0,0,0.22)',
             padding: 20,
             overflowY: 'auto',
-            transform: `translateX(${dragX}px)`,
-            transition: 'transform 220ms ease',
-            touchAction: 'pan-y', // дозволяє горизонтальний жест всередині
+            transform: 'translate3d(0,0,0)', // буде мінятися у RAF
+            transition: 'transform 200ms cubic-bezier(.2,.8,.2,1)',
+            touchAction: 'pan-y',
+            willChange: 'transform',
+            // невидимий «градієнт-край» ліворуч, щоб відчувалась глибина
+            backgroundImage:
+              'linear-gradient(90deg, rgba(0,0,0,0.04) 0, rgba(0,0,0,0) 24px), linear-gradient(#fff,#fff)',
+            backgroundRepeat: 'no-repeat',
+            backgroundSize: '24px 100%, 100% 100%',
+            backgroundPosition: 'left top, left top',
           }}
-          // клік поза внутрішнім контентом (на сам контейнер) — закриває
-          onClick={() => { setSelectedProfile(null); }}
+          onClick={(e) => {
+            // клік на порожнє місце шторки — не закриваємо; для закриття є бекдроп
+            e.stopPropagation();
+          }}
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
-          ref={panelRef}
         >
           {/* кнопка закриття (стрілочка) */}
           <button
             type="button"
             aria-label="Закрити"
-            onClick={(e) => { e.stopPropagation(); setSelectedProfile(null); }}
+            onClick={() => setSelectedProfile(null)}
             style={{
               position: 'absolute',
               top: 10,
@@ -447,128 +490,14 @@ export default function MapView() {
             </svg>
           </button>
 
-          <div onClick={(e) => e.stopPropagation()}>
-            {selectedProfile.avatar_url && (
-              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-                <img
-                  src={selectedProfile.avatar_url}
-                  alt="avatar"
-                  style={{
-                    width: 110,
-                    height: 110,
-                    borderRadius: '50%',
-                    objectFit: 'cover',
-                    boxShadow: '0 4px 10px rgba(0,0,0,0.12)',
-                    border: '5px solid #fff'
-                  }}
-                />
-              </div>
-            )}
-
-            <h2 style={{ fontSize: 20, fontWeight: 700, textAlign: 'center', marginBottom: 6 }}>
-              {selectedProfile.name}
-            </h2>
-
-            <div className="rating-row">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {renderStars(avg)}
-                <span className="rating-number">{avg.toFixed(1)}</span>
-              </div>
-
-              <button
-                type="button"
-                className="pill ghost"
-                style={{ marginLeft: 8 }}
-                onClick={() => setReviewsOpen(true)}
-              >
-                Відгуки
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8, marginBottom: 16 }}>
-              <span
-                style={{
-                  background: '#111827',
-                  color: '#fff',
-                  padding: '4px 12px',
-                  borderRadius: 999,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  textTransform: 'capitalize'
-                }}
-              >
-                {selectedProfile.role}
-              </span>
-            </div>
-
-            <p style={{ fontSize: 14, color: '#475569', marginBottom: 16, textAlign: 'left' }}>
-              {selectedProfile.description}
-            </p>
-
-            <div>
-              <strong style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 8 }}>
-                СЦЕНАРІЇ ВИКОНАВЦЯ
-              </strong>
-
-              {scenarios.length === 0 ? (
-                <p style={{ color: '#94a3b8' }}>Немає доступних сценаріїв</p>
-              ) : (
-                scenarios.map((s) => (
-                  <div
-                    key={s.id}
-                    style={{
-                      padding: 10,
-                      marginTop: 8,
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 12,
-                      background: 'rgba(255,182,193,0.2)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 8
-                    }}
-                  >
-                    <div style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>
-                      {s.description}
-                    </div>
-                    <div
-                      style={{
-                        background: '#fff',
-                        color: '#6b7280',
-                        borderRadius: 999,
-                        padding: '3px 10px',
-                        fontSize: 12,
-                        fontWeight: 700,
-                        whiteSpace: 'nowrap',
-                        border: '1px solid #e5e7eb',
-                      }}
-                    >
-                      {s.price} USDT
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <button
-              style={{
-                position: 'sticky',
-                bottom: 16,
-                marginTop: 24,
-                width: '100%',
-                padding: '12px 16px',
-                background: '#000',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 999,
-                cursor: 'pointer',
-                fontWeight: 700
-              }}
-              onClick={handleOrderClick}
-            >
-              Замовити поведінку
-            </button>
-          </div>
+          {/* Контент шторки */}
+          <DrawerContent
+            selectedProfile={selectedProfile}
+            scenarios={scenarios}
+            avg={avg}
+            onOpenReviews={() => setReviewsOpen(true)}
+            onOrderClick={handleOrderClick}
+          />
         </div>
       )}
 
@@ -579,6 +508,149 @@ export default function MapView() {
           onClose={() => setReviewsOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+/* Виніс в окремий компонент, щоб не загромаджувати і не перерендерити шторку під час свайпу */
+function DrawerContent({
+  selectedProfile,
+  scenarios,
+  avg,
+  onOpenReviews,
+  onOrderClick,
+}: {
+  selectedProfile: User;
+  scenarios: Scenario[];
+  avg: number;
+  onOpenReviews: () => void;
+  onOrderClick: (e?: React.MouseEvent) => void;
+}) {
+  return (
+    <div>
+      {selectedProfile.avatar_url && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <img
+            src={selectedProfile.avatar_url}
+            alt="avatar"
+            style={{
+              width: 110,
+              height: 110,
+              borderRadius: '50%',
+              objectFit: 'cover',
+              boxShadow: '0 4px 10px rgba(0,0,0,0.12)',
+              border: '5px solid #fff'
+            }}
+          />
+        </div>
+      )}
+
+      <h2 style={{ fontSize: 20, fontWeight: 700, textAlign: 'center', marginBottom: 6 }}>
+        {selectedProfile.name}
+      </h2>
+
+      <div className="rating-row">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="stars-wrap" title={`${avg.toFixed(1)}/10`}>
+            <div className="stars-bg">★★★★★★★★★★</div>
+            <div className="stars-fill" style={{ width: `${pctFrom10(avg)}%` }}>★★★★★★★★★★</div>
+          </div>
+          <span className="rating-number">{avg.toFixed(1)}</span>
+        </div>
+
+        <button
+          type="button"
+          className="pill ghost"
+          style={{ marginLeft: 8 }}
+          onClick={onOpenReviews}
+        >
+          Відгуки
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8, marginBottom: 16 }}>
+        <span
+          style={{
+            background: '#111827',
+            color: '#fff',
+            padding: '4px 12px',
+            borderRadius: 999,
+            fontSize: 12,
+            fontWeight: 600,
+            textTransform: 'capitalize'
+          }}
+        >
+          {selectedProfile.role}
+        </span>
+      </div>
+
+      <p style={{ fontSize: 14, color: '#475569', marginBottom: 16, textAlign: 'left' }}>
+        {selectedProfile.description}
+      </p>
+
+      <div>
+        <strong style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 8 }}>
+          СЦЕНАРІЇ ВИКОНАВЦЯ
+        </strong>
+
+        {scenarios.length === 0 ? (
+          <p style={{ color: '#94a3b8' }}>Немає доступних сценаріїв</p>
+        ) : (
+          scenarios.map((s) => (
+            <div
+              key={s.id}
+              style={{
+                padding: 10,
+                marginTop: 8,
+                border: '1px solid #e2e8f0',
+                borderRadius: 12,
+                background: 'rgba(255,182,193,0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>
+                {s.description}
+              </div>
+              <div
+                style={{
+                  background: '#fff',
+                  color: '#6b7280',
+                  borderRadius: 999,
+                  padding: '3px 10px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                  border: '1px solid #e5e7eb',
+                }}
+              >
+                {s.price} USDT
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <button
+        style={{
+          position: 'sticky',
+          bottom: 16,
+          marginTop: 24,
+          width: '100%',
+          padding: '12px 16px',
+          background: '#000',
+          color: '#fff',
+          border: 'none',
+          borderRadius: 999,
+          cursor: 'pointer',
+          fontWeight: 700
+        }}
+        onClick={onOrderClick}
+      >
+        Замовити поведінку
+      </button>
     </div>
   );
 }
