@@ -1,178 +1,275 @@
-import { useEffect, useMemo, useState } from 'react';
+// src/components/Register.tsx
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import './Register.css';
-import './Register.mobile.css';
 
-const APP_URL = (import.meta.env.VITE_PUBLIC_APP_URL || 'https://www.buymybehavior.com').replace(/\/+$/, '');
-const AUTH_CALLBACK = `${APP_URL}/auth/callback`;
+const APP_URL =
+  (import.meta as any).env?.VITE_PUBLIC_APP_URL ||
+  (typeof window !== 'undefined' ? window.location.origin : 'https://buymybehavior.com');
 
-/** Проста модалка всередині одного файлу (щоб не чіпати інші компоненти) */
-function Modal({
-  open, title, onClose, children,
-}: { open: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
-  if (!open) return null;
+type Phase = 'idle' | 'sending' | 'sent' | 'error';
+
+export default function Register() {
+  // ───────────────── state ─────────────────
+  const [email, setEmail] = useState('');
+  const [refWord, setRefWord] = useState('');
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isMagicModalOpen, setMagicModalOpen] = useState(false);
+
+  // куди повертаємося після магік-лінку
+  const redirectTo = useMemo(
+    () => `${APP_URL}/auth/callback?next=/map`,
+    []
+  );
+
+  const openMagicModal = useCallback(() => {
+    setMagicModalOpen(true);
+    try { document.body.style.overflow = 'hidden'; } catch {}
+  }, []);
+  const closeMagicModal = useCallback(() => {
+    setMagicModalOpen(false);
+    setPhase('idle');
+    setErrorMsg(null);
+    try { document.body.style.overflow = ''; } catch {}
+  }, []);
+
+  // закриття модалки по ESC
+  useEffect(() => {
+    if (!isMagicModalOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMagicModal(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isMagicModalOpen, closeMagicModal]);
+
+  // ─────────────── Supabase helpers ───────────────
+  // Перевірка реф-слова у profiles.referral_code
+  const verifyReferral = async (word: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, wallet, referral_code')
+      .eq('referral_code', word.trim())
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data; // null, якщо код не знайдено
+  };
+
+  const sendMagicLink = async (emailValue: string) => {
+    return supabase.auth.signInWithOtp({
+      email: emailValue.trim(),
+      options: { emailRedirectTo: redirectTo },
+    });
+  };
+
+  // ─────────────── submit handlers ───────────────
+  const onRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+
+    if (!email.trim()) { setErrorMsg('Вкажіть email.'); openMagicModal(); return; }
+    if (!refWord.trim()) { setErrorMsg('Потрібне реферальне слово для реєстрації.'); openMagicModal(); return; }
+
+    try {
+      setPhase('sending');
+
+      const ref = await verifyReferral(refWord);
+      if (!ref) { setPhase('error'); setErrorMsg('Невірне реферальне слово.'); openMagicModal(); return; }
+
+      // збережемо контекст запрошення — дочитаємо та запишемо у профіль після логіну
+      try {
+        localStorage.setItem(
+          'bmb_ref_context',
+          JSON.stringify({ referred_by: ref.id, referrer_wallet: ref.wallet, referral_code: ref.referral_code })
+        );
+      } catch {}
+
+      const { error } = await sendMagicLink(email);
+      if (error) throw error;
+
+      setPhase('sent');
+      openMagicModal();
+    } catch (err: any) {
+      setPhase('error');
+      setErrorMsg(err?.message || 'Сталася помилка.');
+      openMagicModal();
+    }
+  };
+
+  // логін без реф-слова
+  const onLogin = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+
+    if (!email.trim()) { setErrorMsg('Вкажіть email.'); openMagicModal(); return; }
+
+    try {
+      setPhase('sending');
+      const { error } = await sendMagicLink(email);
+      if (error) throw error;
+      setPhase('sent');
+      openMagicModal();
+    } catch (err: any) {
+      setPhase('error');
+      setErrorMsg(err?.message || 'Сталася помилка.');
+      openMagicModal();
+    }
+  };
+
+  // ───────────────── UI (дизайн як на скріні) ─────────────────
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
-      display: 'grid', placeItems: 'center', zIndex: 9999
-    }}>
-      <div style={{
-        width: 'min(520px, 92vw)', background: '#fff', borderRadius: 16,
-        boxShadow: '0 10px 30px rgba(0,0,0,0.2)', padding: 20
-      }}>
-        <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>{title}</div>
-        <div style={{ fontSize: 14, lineHeight: 1.5 }}>{children}</div>
-        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
-          <button onClick={onClose} style={{ padding: '10px 14px', borderRadius: 10, border: 0, background: '#eee' }}>
-            Закрити
+    <div style={pageWrap}>
+      <div style={card}>
+        <h1 style={title}>Реєстрація з реферальним словом</h1>
+
+        <form onSubmit={onRegister} style={formGrid}>
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            // легкий блакитний фон як на скріні
+            style={{ ...input, background: '#eaf2ff' }}
+          />
+
+          <input
+            type="text"
+            value={refWord}
+            onChange={(e) => setRefWord(e.target.value)}
+            placeholder="Реферальний код"
+            style={input}
+          />
+
+          <button type="submit" disabled={phase === 'sending'} style={{ ...btnBlack, opacity: phase === 'sending' ? 0.7 : 1 }}>
+            Зареєструватися
           </button>
-        </div>
+
+          <button type="button" onClick={onLogin} disabled={phase === 'sending'} style={{ ...btnBlack, opacity: phase === 'sending' ? 0.7 : 1 }}>
+            Увійти
+          </button>
+        </form>
+      </div>
+
+      {/* Модалка підтвердження/помилки */}
+      {isMagicModalOpen && (
+        <Modal onClose={closeMagicModal}>
+          {phase === 'sent' && (
+            <>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Магік-лінк надіслано</h3>
+              <p style={{ marginTop: 8 }}>
+                Перевір пошту <b>{email}</b>.<br />
+                Відкрий посилання у зовнішньому браузері (Chrome/Safari).<br />
+                Після переходу має перекинути на <b>«Обрати виконавця»</b>.
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={closeMagicModal} style={btnBlackSmall}>Закрити</button>
+              </div>
+            </>
+          )}
+
+          {(phase === 'error' || (phase === 'idle' && errorMsg)) && (
+            <>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Повідомлення</h3>
+              <p style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>{errorMsg || 'Сталася помилка.'}</p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={closeMagicModal} style={btnBlackSmall}>Ок</button>
+              </div>
+            </>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ────────────── автономна модалка з закриттям по фону/ESC ──────────────
+function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  const onOverlayClick = (e: React.MouseEvent) => { e.stopPropagation(); onClose(); };
+  const onCardClick = (e: React.MouseEvent) => { e.stopPropagation(); };
+
+  return (
+    <div style={overlay} onClick={onOverlayClick}>
+      <div style={modalCard} onClick={onCardClick} role="dialog" aria-modal="true">
+        {children}
       </div>
     </div>
   );
 }
 
-export default function Register() {
-  const [email, setEmail] = useState('');
-  const [refCode, setRefCode] = useState('');
-  const [sending, setSending] = useState<null | 'reg' | 'login'>(null);
-  const [hint, setHint] = useState<string | null>(null);
+// ────────────── стилі (під скрін) ──────────────
+const pageWrap: React.CSSProperties = {
+  minHeight: 'calc(100vh - 120px)', // щоб під навбаром красиво центрувалось
+  display: 'grid',
+  placeItems: 'center',
+  padding: '32px 16px',
+};
 
-  // Модалка-попередження
-  const [modalOpen, setModalOpen] = useState(false);
-  const [modalTitle, setModalTitle] = useState('Повідомлення');
-  const [modalBody, setModalBody] = useState<React.ReactNode>(null);
+const card: React.CSSProperties = {
+  width: 'min(680px, 92vw)',
+  background: '#f7f7f7',
+  borderRadius: 16,
+  padding: 24,
+  boxShadow: '0 30px 60px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.08)',
+  border: '1px solid #eaeaea',
+};
 
-  const isInApp = useMemo(
-    () => /(FBAN|FBAV|Instagram|Line|WeChat|Twitter|WhatsApp|Telegram)/i.test(navigator.userAgent || ''),
-    []
-  );
+const title: React.CSSProperties = {
+  margin: '8px 0 20px',
+  fontSize: 24,
+  fontWeight: 800,
+  textAlign: 'center',
+  color: '#111',
+};
 
-  // Після входу — разово підчепити реферал у БД
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+const formGrid: React.CSSProperties = {
+  display: 'grid',
+  gap: 14,
+};
 
-        const referred_by = localStorage.getItem('referred_by');
-        const referrer_wallet = localStorage.getItem('referrer_wallet');
-        if (!referred_by && !referrer_wallet) return;
+const input: React.CSSProperties = {
+  height: 48,
+  borderRadius: 12,
+  border: '1px solid #e3e3e3',
+  padding: '0 14px',
+  fontSize: 16,
+  outline: 'none',
+  background: '#fff',
+  color: '#111',
+};
 
-        const { data: prof } = await supabase
-          .from('profiles')
-          .select('user_id,referred_by,referrer_wallet')
-          .eq('user_id', user.id)
-          .maybeSingle();
+const btnBlack: React.CSSProperties = {
+  height: 52,
+  borderRadius: 12,
+  border: '1px solid #000',
+  background: '#000',
+  color: '#fff',
+  fontWeight: 700,
+  fontSize: 16,
+  cursor: 'pointer',
+};
 
-        if (prof && (prof.referred_by || prof.referrer_wallet)) return;
+const overlay: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(0,0,0,0.45)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  zIndex: 9999,
+  padding: 16,
+};
 
-        const payload: any = { user_id: user.id };
-        if (referred_by) payload.referred_by = referred_by;
-        if (referrer_wallet) payload.referrer_wallet = referrer_wallet;
+const modalCard: React.CSSProperties = {
+  width: 'min(560px, 92vw)',
+  background: '#fff',
+  borderRadius: 16,
+  padding: 20,
+  boxShadow: '0 18px 40px rgba(0,0,0,0.25)',
+  color: '#111',
+};
 
-        await supabase.from('profiles').upsert(payload);
-        localStorage.removeItem('referred_by');
-        localStorage.removeItem('referrer_wallet');
-      } catch {/* no-op */}
-    })();
-  }, []);
-
-  function showModal(title: string, body: React.ReactNode) {
-    setModalTitle(title);
-    setModalBody(body);
-    setModalOpen(true);
-  }
-
-  async function sendOtp(shouldCreateUser: boolean) {
-    setHint(null);
-    setSending(shouldCreateUser ? 'reg' : 'login');
-
-    try {
-      if (refCode?.trim()) localStorage.setItem('referred_by', refCode.trim());
-
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: AUTH_CALLBACK,
-          shouldCreateUser,
-        },
-      });
-      if (error) throw error;
-
-      // Модалка з інструкціями
-      const extra = isInApp
-        ? 'Якщо відкриєш лист у додатку (Gmail/Instagram/FB), натисни “Відкрити в браузері”.'
-        : 'Відкрий посилання у зовнішньому браузері (Chrome/Safari).';
-
-      showModal('Магік-лінк надіслано', (
-        <>
-          <div>Перевір пошту <b>{email}</b>.</div>
-          <div style={{ marginTop: 6 }}>{extra}</div>
-          <div style={{ marginTop: 6 }}>
-            Після переходу має перекинути на <b>“Обрати виконавця”</b>.
-          </div>
-        </>
-      ));
-    } catch (e: any) {
-      setHint(e?.message || 'Не вдалося надіслати лист. Спробуй ще раз.');
-    } finally {
-      setSending(null);
-    }
-  }
-
-  return (
-    <>
-      <div className="register-page">
-        <form className="register-form" onSubmit={(e) => e.preventDefault()}>
-          <h1>Вхід / Реєстрація</h1>
-
-          <label htmlFor="email">Email</label>
-          <input
-            id="email"
-            type="email"
-            inputMode="email"
-            autoComplete="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-
-          <label htmlFor="ref">Реферальний код (необов’язково)</label>
-          <input
-            id="ref"
-            type="text"
-            placeholder="friend123"
-            value={refCode}
-            onChange={(e) => setRefCode(e.target.value)}
-          />
-
-          <button
-            type="button"
-            disabled={sending !== null || !email}
-            onClick={() => sendOtp(true)}
-            style={{ marginTop: 12 }}
-          >
-            {sending === 'reg' ? 'Надсилаємо…' : 'Зареєструватися'}
-          </button>
-
-          <button
-            type="button"
-            disabled={sending !== null || !email}
-            onClick={() => sendOtp(false)}
-            style={{ marginTop: 8, background: '#ddd' }}
-          >
-            {sending === 'login' ? 'Надсилаємо…' : 'Увійти'}
-          </button>
-
-          {hint && <p className="hint" style={{ marginTop: 10 }}>{hint}</p>}
-        </form>
-      </div>
-
-      <Modal open={modalOpen} title={modalTitle} onClose={() => setModalOpen(false)}>
-        {modalBody}
-      </Modal>
-    </>
-  );
-}
+const btnBlackSmall: React.CSSProperties = {
+  ...btnBlack,
+  height: 40,
+  fontSize: 15,
+};
