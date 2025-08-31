@@ -21,9 +21,6 @@ import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 import { StatusStripClassic } from './StatusStripClassic';
 
-// 🔧 виправлення ReferenceError
-const headerRight: React.ReactNode = null;
-
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
@@ -222,7 +219,6 @@ export default function MyOrders() {
     <div className="scenario-list">
       <div className="scenario-header">
         <h2>Мої замовлення</h2>
-        {headerRight}
       </div>
 
       {list.length === 0 && <div className="empty-hint">Немає активних замовлень.</div>}
