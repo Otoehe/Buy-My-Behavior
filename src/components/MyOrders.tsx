@@ -83,21 +83,42 @@ export default function MyOrders() {
   useEffect(() => {
     fetchMyScenarios();
 
+    // 🔒 БЕЗПЕЧНА realtime-підписка: коректно обробляє INSERT / UPDATE / DELETE
     const ch = supabase
       .channel('realtime:scenarios-myorders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'scenarios' }, (payload) => {
-        const row = payload.new as any as Scenario;
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scenarios' }, (payload: any) => {
+        const type = payload?.eventType as 'INSERT' | 'UPDATE' | 'DELETE' | undefined;
+
         setList(prev => {
+          if (type === 'DELETE') {
+            const delId = payload?.old?.id as string | undefined;
+            return delId ? prev.filter(x => x.id !== delId) : prev;
+          }
+
+          const row = payload?.new as Scenario | undefined;
+          if (!row) return prev;
+
+          // тримаємо тільки мої (creator_id = я)
+          // якщо хочеш жорстко фільтрувати тут: const mine = row.creator_id === currentUserId
           const i = prev.findIndex(x => x.id === row.id);
-          if (i === -1) return prev;
-          const next = [...prev];
-          next[i] = { ...prev[i], ...row };
-          return next;
+
+          if (type === 'INSERT') {
+            return i === -1 ? [row, ...prev] : prev;
+          }
+          if (type === 'UPDATE') {
+            if (i === -1) return prev;
+            const next = [...prev];
+            next[i] = { ...next[i], ...row };
+            return next;
+          }
+          return prev;
         });
       })
       .subscribe();
 
-    return () => { void supabase.removeChannel(ch); };
+    return () => {
+      try { supabase.removeChannel(ch); } catch {}
+    };
   }, [fetchMyScenarios]);
 
   // дії
