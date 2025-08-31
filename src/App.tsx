@@ -1,6 +1,6 @@
 // src/App.tsx
 import React, { useEffect, useState, Suspense, lazy } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
 
@@ -10,7 +10,7 @@ import Register        from './components/Register';
 import Profile         from './components/Profile';
 import AuthCallback    from './components/AuthCallback';
 import A2HS            from './components/A2HS';
-// import AuthAutoCapture from './components/AuthAutoCapture'; // залишаю як було (вимкнено/увімкнено — за вашим станом)
+// import AuthAutoCapture from './components/AuthAutoCapture';
 
 import useViewportVH        from './lib/useViewportVH';
 import useGlobalImageHints  from './lib/useGlobalImageHints';
@@ -24,19 +24,40 @@ const Manifest          = lazy(() => import('./components/Manifest'));
 const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
 
 // ───────────────────────────────────────────────────────────────────────────────
-// Guards
+// Guards, що враховують "loading" стан (user === undefined)
 // ───────────────────────────────────────────────────────────────────────────────
-function RequireAuth({ user, children }: { user: User | null; children: React.ReactElement }) {
-  if (!user) return <Navigate to="/register" replace />;
+function RequireAuth({
+  user,
+  children,
+}: {
+  user: User | null | undefined;
+  children: React.ReactElement;
+}) {
+  const location = useLocation();
+
+  // ⬅️ Поки не знаємо стан авторизації — НІЧОГО не редіректимо
+  if (user === undefined) return null; // можна підставити легкий спінер
+
+  if (user === null) {
+    // запам'ятаємо, куди хотіли зайти (може знадобитися)
+    return <Navigate to="/register" replace state={{ from: location.pathname }} />;
+  }
   return children;
 }
 
-function RedirectIfAuthed({ user, children }: { user: User | null; children: React.ReactElement }) {
+function RedirectIfAuthed({
+  user,
+  children,
+}: {
+  user: User | null | undefined;
+  children: React.ReactElement;
+}) {
+  if (user === undefined) return null; // не стрибаємо, поки вантажиться
   if (user) return <Navigate to="/map" replace />;
   return children;
 }
 
-/** Домашня: тепер завжди ведемо на публічну карту */
+/** Домашня: публічна карта */
 function HomeGate() {
   return <Navigate to="/map" replace />;
 }
@@ -45,16 +66,19 @@ export default function App() {
   useViewportVH();
   useGlobalImageHints();
 
-  const [user, setUser] = useState<User | null>(null);
+  // ⬅️ undefined = loading, null = неавторизований, User = авторизований
+  const [user, setUser] = useState<User | null | undefined>(undefined);
 
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getUser().then(({ data }) => {
+    // 1) швидке отримання сесії (швидше й стабільніше для першого рендера)
+    supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
-      setUser(data.user ?? null);
+      setUser(data.session?.user ?? null);
     });
 
+    // 2) підписка на всі події логіну/логауту
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
     });
@@ -71,21 +95,21 @@ export default function App() {
       <NetworkToast />
       <SWUpdateToast />
 
+      {/* NavigationBar не змінюємо */}
       <NavigationBar />
 
       <Suspense fallback={null}>
         <Routes>
-          {/* Домашня сторінка → публічна карта */}
+          {/* Домівка → публічна карта */}
           <Route path="/" element={<HomeGate />} />
 
-          {/* Публічні */}
+          {/* Публічні сторінки */}
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/map"        element={<MapView />} />
           <Route path="/behaviors"  element={<BehaviorsFeed />} />
           <Route path="/manifest"   element={<Manifest />} />
 
-          {/* Реєстрація: відкрита, але якщо вже залогінений — перенаправляємо на карту.
-              Перевірка реф-слова відбувається всередині Register.tsx (як і було). */}
+          {/* Реєстрація: відкрита. Якщо вже залогінений — повертаємо на карту. */}
           <Route
             path="/register"
             element={
@@ -95,7 +119,7 @@ export default function App() {
             }
           />
 
-          {/* Приватні (особисті дії/дані) */}
+          {/* Приватні сторінки */}
           <Route
             path="/profile"
             element={
