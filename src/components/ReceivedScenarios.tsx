@@ -23,7 +23,7 @@ interface Scenario extends ScenarioRow {}
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.85;
 
-// ⬇️ Локальний хелпер — MetaMask + BSC
+// MetaMask + BSC
 async function ensureBSCAndGetSigner() {
   let signer = await getSigner();
   const provider = signer.provider as ethers.providers.Web3Provider;
@@ -56,6 +56,12 @@ async function waitForChainRelease(sid: string, tries = 6, delayMs = 1200) {
   return 0;
 }
 
+// чи настав час виконання
+function reachedExecutionTime(s: Scenario) {
+  const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
+  return !isNaN(dt.getTime()) && new Date() >= dt;
+}
+
 export default function ReceivedScenarios() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [userId, setUserId] = useState('');
@@ -76,12 +82,9 @@ export default function ReceivedScenarios() {
   const rt = useRealtimeNotifications(userId);
 
   function stepOf(s: Scenario) {
-    if (!s.is_agreed_by_executor) return 1;                               // Погодити угоду
-    if (!s.escrow_tx_hash && s.is_agreed_by_customer) return 0;           // чекаємо lock від клієнта
-    if (s.escrow_tx_hash) {
-      const t = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
-      if (!isNaN(t.getTime()) && new Date() >= t && !s.is_completed_by_executor) return 2; // Підтвердити виконання
-    }
+    if (!s.is_agreed_by_executor) return 1; // погодити
+    if (!s.escrow_tx_hash && s.is_agreed_by_customer) return 0; // чекаємо lock
+    if (s.escrow_tx_hash && reachedExecutionTime(s) && !s.is_completed_by_executor) return 2; // підтвердити
     return 0;
   }
   const canAgree   = (s: Scenario) => stepOf(s) === 1 && !agreeBusy[s.id];
@@ -123,6 +126,17 @@ export default function ReceivedScenarios() {
                   });
                 })();
                 setShowFinalToast(true);
+              }
+              if (!prev[i].escrow_tx_hash && s.escrow_tx_hash) {
+                (async () => {
+                  try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
+                  await pushNotificationManager.showNotification({
+                    title: '💳 Клієнт заблокував кошти',
+                    body: 'Escrow активовано. Очікуємо час виконання.',
+                    tag: `escrow-locked-${s.id}`,
+                    requireSound: true
+                  });
+                })();
               }
               next[i] = { ...next[i], ...s };
               return next;
@@ -180,6 +194,7 @@ export default function ReceivedScenarios() {
   const setLocal = (id: string, patch: Partial<Scenario>) =>
     setScenarios(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
+  // редагування опису/суми (до confirmed): будь-яка зміна → pending + скидання погоджень
   const updateScenarioField = async (id: string, field: keyof Scenario, value: any) => {
     setLocal(id, { [field]: value as any, is_agreed_by_customer: false, is_agreed_by_executor: false, status: 'pending' });
     if (field === 'donation_amount_usdt' && value !== '' && value !== null) {
@@ -290,7 +305,7 @@ export default function ReceivedScenarios() {
     }
   };
 
-  // спори
+  // СПОРИ
   const loadOpenDispute = useCallback(async (scenarioId: string) => {
     let d = await getLatestDisputeByScenario(scenarioId);
     if (!d) {
@@ -314,9 +329,43 @@ export default function ReceivedScenarios() {
       await uploadEvidenceAndAttach(d.id, file, uidRef.current);
       await loadOpenDispute(s.id);
       try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
+      await pushNotificationManager.showNotification({
+        title: '📹 Відеодоказ завантажено',
+        body: 'Кліп зʼявився в стрічці Behaviors для голосування.',
+        tag: `evidence-uploaded-${s.id}`,
+        requireSound: true
+      });
     } catch (e:any) {
       alert(e?.message || 'Помилка завантаження відео');
     } finally { setUploading(p => ({ ...p, [s.id]: false })); ev.target.value = ''; }
+  };
+
+  // стилі для підказки та овалу (інлайн, щоб не чіпати існуючі CSS)
+  const hintStyle: React.CSSProperties = {
+    fontSize: 12,
+    lineHeight: '16px',
+    opacity: 0.8,
+    marginBottom: 8,
+  };
+  const labelStyle: React.CSSProperties = {
+    fontSize: 13,
+    lineHeight: '18px',
+    marginBottom: 6,
+    opacity: 0.9,
+  };
+  const amountPillStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 9999,
+    padding: '4px 8px',
+  };
+  const amountInputStyle: React.CSSProperties = {
+    borderRadius: 9999,
+    padding: '14px 16px',
+    fontSize: 18,
+    height: 48,
+    outline: 'none',
   };
 
   return (
@@ -336,12 +385,18 @@ export default function ReceivedScenarios() {
         return (
           <div key={s.id} className="scenario-card" data-card-id={s.id}>
             <div className="scenario-info">
+
+              {/* 🔔 НАГАДУВАННЯ над полем опису */}
+              <div style={hintStyle}>
+                Опис сценарію і сума добровільного донату редагуються обома учасниками до Погодження угоди.
+              </div>
+
               <div>
                 <strong>Опис:</strong><br/>
                 <textarea
                   value={s.description ?? ''}
                   maxLength={1000}
-                  style={{ width: lineWidths[s.id] ? `${lineWidths[s.id]}px` : undefined }}
+                  style={{ width: lineWidths[s.id] ? `${lineWidths[s.id]}px` : '100%' }}
                   onChange={(e) => setLocal(s.id, { description: e.target.value })}
                   onBlur={(e) => {
                     if (s.status === 'confirmed') return;
@@ -356,8 +411,11 @@ export default function ReceivedScenarios() {
                 <div className="meta-col"><div className="meta-label">Час:</div><div className="meta-value">{s.time || '—'}</div></div>
               </div>
 
-              <div className="amount-row">
-                <div className="amount-pill">
+              <div className="amount-row" style={{ marginTop: 10 }}>
+                <label className="amount-label" style={labelStyle}>
+                  Сума добровільного донату на підтримку креативності
+                </label>
+                <div className="amount-pill" style={amountPillStyle}>
                   <input
                     className="amount-input"
                     type="number"
@@ -378,6 +436,7 @@ export default function ReceivedScenarios() {
                       else { alert('Сума має бути > 0'); }
                     }}
                     disabled={s.status === 'confirmed'}
+                    style={amountInputStyle}
                   />
                   <span className="amount-unit">USDT</span>
                 </div>

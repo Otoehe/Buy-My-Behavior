@@ -22,7 +22,7 @@ import { upsertRating } from '../lib/ratings';
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
-// ⬇️ Локальний хелпер — гарантує MetaMask + мережу BSC
+// ⬇️ Гарантуємо MetaMask + мережу BSC
 async function ensureBSCAndGetSigner() {
   let signer = await getSigner();
   const provider = signer.provider as ethers.providers.Web3Provider;
@@ -47,6 +47,12 @@ async function waitForChainRelease(scenarioId: string, tries = 6, delayMs = 1200
     await new Promise(r => setTimeout(r, delayMs));
   }
   return 0;
+}
+
+// ⬇️ допоміжне: чи настав час виконання
+function reachedExecutionTime(s: Scenario) {
+  const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
+  return !Number.isNaN(dt.getTime()) && new Date() >= dt;
 }
 
 export default function MyOrders() {
@@ -76,13 +82,15 @@ export default function MyOrders() {
     typeof s.latitude === 'number' && Number.isFinite(s.latitude) &&
     typeof s.longitude === 'number' && Number.isFinite(s.longitude);
 
-  // ---- STEP GATING ----
+  // ---- КРОКИ (step gating) ----
   function stepOf(s: Scenario) {
-    if (!(s.is_agreed_by_customer && s.is_agreed_by_executor)) return 1; // Погодити угоду
-    if (!s.escrow_tx_hash) return 2;                                    // Заблокувати кошти
-    const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
-    if (!Number.isNaN(dt.getTime()) && new Date() >= dt) return 3;      // Підтвердити виконання
-    return 0;                                                            // Очікуємо дати/часу
+    // 1) Погодити угоду (доступно обом, поки не взаємно погоджено)
+    if (!(s.is_agreed_by_customer && s.is_agreed_by_executor)) return 1;
+    // 2) Після взаємного погодження — тільки Замовник блокує кошти
+    if (!s.escrow_tx_hash) return 2;
+    // 3) Після escrow — чекаємо настання часу виконання
+    if (reachedExecutionTime(s)) return 3; // Підтвердити/Оспорити виконання (для Клієнта), підтвердити — для обох
+    return 0; // очікуємо часу
   }
   const canAgree = (s: Scenario)   => stepOf(s) === 1;
   const canLock = (s: Scenario)    => stepOf(s) === 2;
@@ -139,6 +147,8 @@ export default function MyOrders() {
               if (i === -1) return prev;
               const before = prev[i];
               const after = { ...before, ...s };
+
+              // Пуш при фінальному підтвердженні
               if (before.status !== 'confirmed' && after.status === 'confirmed') {
                 (async () => {
                   try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
@@ -151,6 +161,7 @@ export default function MyOrders() {
                 })();
                 setToast(true);
               }
+
               const cp = [...prev]; cp[i] = after; return cp;
             }
             return prev;
@@ -194,6 +205,15 @@ export default function MyOrders() {
       if (error && error.code !== 'PGRST116') throw error;
 
       setLocal(s.id, { is_agreed_by_customer: true, status: rec?.status || s.status });
+
+      // Локальний пуш-підтвердження кроку
+      try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
+      await pushNotificationManager.showNotification({
+        title: '🤝 Ви погодили угоду',
+        body: s.is_agreed_by_executor ? 'Доступно: Забронювати кошти' : 'Чекаємо погодження виконавця',
+        tag: `agree-customer-${s.id}`,
+        requireSound: true
+      });
     } catch (e:any) {
       alert(e?.message || 'Помилка погодження.');
     } finally {
@@ -209,10 +229,18 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      const signer = await ensureBSCAndGetSigner(); // ⬅ тут виправлення
+      const signer = await ensureBSCAndGetSigner();
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id, signer });
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
       setLocal(s.id, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
+
+      try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
+      await pushNotificationManager.showNotification({
+        title: '💳 Кошти заброньовано',
+        body: 'Escrow активовано. Очікуємо час виконання.',
+        tag: `escrow-locked-${s.id}`,
+        requireSound: true
+      });
     } catch (e:any) {
       alert(e?.message || 'Не вдалося заблокувати кошти.');
     } finally {
@@ -250,12 +278,14 @@ export default function MyOrders() {
     }
   };
 
+  // ⬇️ Оспорити виконання (доступно Клієнту після escrow і настання часу, без відкритого спору)
   const canDispute = (s: Scenario) => {
     const notFinal = s.status !== 'confirmed';
     const escrowLocked = !!s.escrow_tx_hash;
     const noOpenDispute = !openDisputes[s.id];
     const iAmCustomer = userId === s.creator_id;
-    return notFinal && escrowLocked && noOpenDispute && iAmCustomer;
+    const timeReached = reachedExecutionTime(s);
+    return notFinal && escrowLocked && noOpenDispute && iAmCustomer && timeReached;
   };
 
   const handleDispute = async (s: Scenario) => {
@@ -263,6 +293,14 @@ export default function MyOrders() {
       const d = await initiateDispute({ id: s.id, creator_id: s.creator_id, executor_id: s.executor_id });
       setLocal(s.id, { status: 'disputed' } as any);
       setOpenDisputes(prev => ({ ...prev, [s.id]: d }));
+
+      try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
+      await pushNotificationManager.showNotification({
+        title: '⚖️ Спір відкрито',
+        body: 'Виконавцю доступне завантаження відеодоказу.',
+        tag: `dispute-opened-${s.id}`,
+        requireSound: true
+      });
     } catch (e:any) {
       alert(e?.message || 'Не вдалося створити спір');
     }
@@ -326,6 +364,7 @@ export default function MyOrders() {
             role="customer"
             s={s}
 
+            // ⬇️ Редагування опису/суми для Замовника — активне до фінального підтвердження.
             onChangeDesc={(v) => setLocal(s.id, { description: v })}
             onCommitDesc={async (v) => {
               if (s.status === 'confirmed') return;
@@ -335,6 +374,14 @@ export default function MyOrders() {
                 is_agreed_by_customer: false,
                 is_agreed_by_executor: false
               }).eq('id', s.id);
+
+              try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
+              await pushNotificationManager.showNotification({
+                title: '📝 Опис оновлено (замовник)',
+                body: 'Потрібно знову погодити угоду.',
+                tag: `scenario-update-${s.id}-desc`,
+                requireSound: true
+              });
             }}
 
             onChangeAmount={(v) => setLocal(s.id, { donation_amount_usdt: v })}
@@ -347,6 +394,14 @@ export default function MyOrders() {
                 is_agreed_by_customer: false,
                 is_agreed_by_executor: false
               }).eq('id', s.id);
+
+              try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
+              await pushNotificationManager.showNotification({
+                title: '💰 Сума USDT оновлена (замовник)',
+                body: 'Потрібно знову погодити угоду.',
+                tag: `scenario-update-${s.id}-amount`,
+                requireSound: true
+              });
             }}
 
             onAgree={() => handleAgree(s)}
@@ -355,14 +410,21 @@ export default function MyOrders() {
             onDispute={() => handleDispute(s)}
             onOpenLocation={() => hasCoords(s) && window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank')}
 
+            // ⬇️ Строге вмикання по етапах
             canAgree={onlyAgree && !agreeBusy[s.id]}
             canLock={onlyLock && !lockBusy[s.id]}
             canConfirm={onlyConfirm && !confirmBusy[s.id]}
             canDispute={canDispute(s)}
+
             hasCoords={hasCoords(s)}
             busyAgree={!!agreeBusy[s.id]}
             busyLock={!!lockBusy[s.id]}
             busyConfirm={!!confirmBusy[s.id]}
+
+            // (якщо ScenarioCard підтримує приховування — підкинемо хінти; інакше — ігнорує)
+            hideLock={!onlyLock}
+            hideConfirm={!onlyConfirm}
+            hideDispute={!canDispute(s)}
 
             isRated={s.status === 'confirmed' && ratedOrders.has(s.id)}
             onOpenRate={() => s.status === 'confirmed' && !ratedOrders.has(s.id) && openRateFor(s)}

@@ -1,45 +1,35 @@
-import React, { useEffect, useRef, useState } from 'react';
-import './MyOrders.css';
+import React from 'react';
 
 export type Status = 'pending' | 'agreed' | 'confirmed' | 'disputed' | string;
 
-export interface Scenario {
+export type Scenario = {
   id: string;
-  description: string | null;
-  donation_amount_usdt: number | null;
-  date: string | null;
-  time: string | null;
-  execution_time?: string | null;
-
-  status: Status;
-  escrow_tx_hash?: string | null;
-
-  // flags
-  is_agreed_by_customer?: boolean;
-  is_agreed_by_executor?: boolean;
-  is_completed_by_customer?: boolean;
-  is_completed_by_executor?: boolean;
-
-  // coords
-  latitude?: number | null;
-  longitude?: number | null;
-
-  // parties
   creator_id: string;
   executor_id: string;
-}
+  description: string | null;
+  donation_amount_usdt: number | null;
+  date: string;
+  time?: string | null;
+  execution_time?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  status: Status;
+  is_agreed_by_customer: boolean;
+  is_agreed_by_executor: boolean;
+  escrow_tx_hash?: string | null;
+  is_completed_by_customer?: boolean;
+  is_completed_by_executor?: boolean;
+};
 
 type Props = {
   role: 'customer' | 'executor';
   s: Scenario;
 
-  // live optimistic updates (локально)
-  onChangeDesc?: (value: string) => void;
-  onChangeAmount?: (value: number | null) => void;
-
-  // commit на blur (оновлення БД)
-  onCommitDesc?: (value: string) => Promise<void> | void;
-  onCommitAmount?: (value: number | null) => Promise<void> | void;
+  // редагування опису/суми
+  onChangeDesc?: (v: string) => void;
+  onCommitDesc?: (v: string) => void | Promise<void>;
+  onChangeAmount?: (v: number | null) => void;
+  onCommitAmount?: (v: number | null) => void | Promise<void>;
 
   // дії
   onAgree?: () => void;
@@ -47,110 +37,114 @@ type Props = {
   onConfirm?: () => void;
   onDispute?: () => void;
   onOpenLocation?: () => void;
-  onOpenRate?: () => void;
 
-  // дозволи
+  // доступності
   canAgree?: boolean;
   canLock?: boolean;
   canConfirm?: boolean;
   canDispute?: boolean;
   hasCoords?: boolean;
 
-  // стани
+  // стан кнопок
   busyAgree?: boolean;
   busyLock?: boolean;
   busyConfirm?: boolean;
 
-  // рейтинг
+  // опціонально приховати деякі кнопки в конкретних етапах
+  hideLock?: boolean;
+  hideConfirm?: boolean;
+  hideDispute?: boolean;
+
+  // рейтинг (якщо використовується)
   isRated?: boolean;
+  onOpenRate?: () => void;
 };
 
 export default function ScenarioCard(props: Props) {
   const {
-    s,
+    s, role,
     onChangeDesc, onCommitDesc,
     onChangeAmount, onCommitAmount,
-    onAgree, onLock, onConfirm, onDispute, onOpenLocation, onOpenRate,
+    onAgree, onLock, onConfirm, onDispute, onOpenLocation,
     canAgree, canLock, canConfirm, canDispute, hasCoords,
     busyAgree, busyLock, busyConfirm,
-    isRated,
+    hideLock, hideConfirm, hideDispute,
+    isRated, onOpenRate,
   } = props;
 
-  // ── READONLY: редагувати можна доки escrow не заблоковано і не confirmed
-  const readOnly = !!s.escrow_tx_hash || s.status === 'confirmed';
+  const confirmed = s.status === 'confirmed';
 
-  // ── ДРАФТИ (щоб реалайм не перетрирав під час набору)
-  const [descDraft, setDescDraft] = useState<string>(s.description ?? '');
-  const [amtDraft, setAmtDraft] = useState<string>(s.donation_amount_usdt != null ? String(s.donation_amount_usdt) : '');
-  const editingDesc = useRef(false);
-  const editingAmt  = useRef(false);
-
-  // Коли приходить оновлення ззовні — підхоплюємо, тільки якщо НЕ редагуємо зараз
-  useEffect(() => {
-    if (!editingDesc.current) setDescDraft(s.description ?? '');
-  }, [s.description]);
-
-  useEffect(() => {
-    if (!editingAmt.current) setAmtDraft(s.donation_amount_usdt != null ? String(s.donation_amount_usdt) : '');
-  }, [s.donation_amount_usdt]);
-
-  // ── Коміти на blur
-  const commitDesc = async () => {
-    const val = descDraft.trim();
-    onChangeDesc?.(val);
-    await onCommitDesc?.(val);
+  // локальні хелпери перетворення значення суми
+  const amountToString = (v: number | null) => (v ?? '') as any;
+  const handleAmountChange = (raw: string) => {
+    if (!onChangeAmount) return;
+    if (raw === '') { onChangeAmount(null); return; }
+    const v = parseFloat(raw);
+    onChangeAmount(Number.isFinite(v) ? v : null);
+  };
+  const handleAmountBlur = (raw: string) => {
+    if (!onCommitAmount) return;
+    if (confirmed) return;
+    if (raw === '') { onCommitAmount(null); return; }
+    const v = parseFloat(raw);
+    onCommitAmount(Number.isFinite(v) ? v : null);
   };
 
-  const commitAmount = async () => {
-    const raw = amtDraft.trim().replace(',', '.');
-    if (raw === '') {
-      onChangeAmount?.(null);
-      await onCommitAmount?.(null);
-      return;
-    }
-    const num = Number(raw);
-    if (!Number.isFinite(num) || num <= 0) {
-      alert('Сума має бути > 0');
-      // не комітимо некоректне
-      setAmtDraft(s.donation_amount_usdt != null ? String(s.donation_amount_usdt) : '');
-      return;
-    }
-    onChangeAmount?.(num);
-    await onCommitAmount?.(num);
+  // стилі (адитивно, без зміни існуючих класів)
+  const hintStyle: React.CSSProperties = {
+    fontSize: 12,
+    lineHeight: '16px',
+    opacity: 0.8,
+    marginBottom: 8,
   };
-
-  // ── Допоміжне: прогрес (залишаємо як було, якщо використовуєте стилі)
-  const stage = (() => {
-    let st = 0;
-    if (s.id) st = 1;
-    if ((s.is_agreed_by_customer && s.is_agreed_by_executor) || s.status === 'agreed') st = 2;
-    if (s.escrow_tx_hash) st = 3;
-    if (s.is_completed_by_executor) st = 4;
-    if (s.is_completed_by_customer) st = 5;
-    if (s.status === 'confirmed') st = 6;
-    return st;
-  })();
-  const percent = Math.max(0, Math.min(100, (stage / 6) * 100));
+  const labelStyle: React.CSSProperties = {
+    fontSize: 13,
+    lineHeight: '18px',
+    marginBottom: 6,
+    opacity: 0.9,
+  };
+  const amountPillStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 9999,
+    padding: '4px 8px',
+  };
+  const amountInputStyle: React.CSSProperties = {
+    borderRadius: 9999,
+    padding: '14px 16px',
+    fontSize: 18,
+    height: 48,
+    outline: 'none',
+  };
 
   return (
     <div className="scenario-card" data-card-id={s.id}>
       <div className="scenario-info">
+
+        {/* 🔔 НАГАДУВАННЯ над полем опису */}
+        <div style={hintStyle}>
+          Опис сценарію і сума добровільного донату редагуються обома учасниками до Погодження угоди.
+        </div>
+
+        {/* ОПИС */}
         <div>
-          <strong>Опис:</strong><br/>
+          <strong>Опис:</strong><br />
           <textarea
-            value={descDraft}
+            value={s.description ?? ''}
             maxLength={1000}
-            onFocus={() => { editingDesc.current = true; }}
-            onBlur={async () => { editingDesc.current = false; await commitDesc(); }}
-            onChange={(e) => setDescDraft(e.currentTarget.value)}
-            disabled={readOnly}
+            onChange={(e) => onChangeDesc?.(e.target.value)}
+            onBlur={(e) => onCommitDesc?.(e.target.value)}
+            disabled={confirmed}
+            style={{ width: '100%' }}
           />
         </div>
 
-        <div className="meta-row">
+        {/* МЕТА (дата/час) */}
+        <div className="meta-row" style={{ marginTop: 8 }}>
           <div className="meta-col">
             <div className="meta-label">Дата:</div>
-            <div className="meta-value">{s.date || '—'}</div>
+            <div className="meta-value">{s.date}</div>
           </div>
           <div className="meta-col">
             <div className="meta-label">Час:</div>
@@ -158,50 +152,89 @@ export default function ScenarioCard(props: Props) {
           </div>
         </div>
 
-        <div className="amount-row">
-          <div className="amount-pill">
+        {/* СУМА */}
+        <div className="amount-row" style={{ marginTop: 10 }}>
+          <label className="amount-label" style={labelStyle}>
+            Сума добровільного донату на підтримку креативності
+          </label>
+          <div className="amount-pill" style={amountPillStyle}>
             <input
               className="amount-input"
-              type="text"
-              inputMode="decimal"
-              lang="en"
+              type="number"
+              step="0.000001"
+              value={amountToString(s.donation_amount_usdt)}
               placeholder="—"
-              value={amtDraft}
-              onFocus={() => { editingAmt.current = true; }}
-              onChange={(e) => setAmtDraft(e.currentTarget.value)}
-              onBlur={async () => { editingAmt.current = false; await commitAmount(); }}
-              disabled={readOnly}
+              onChange={(e) => handleAmountChange((e.target as HTMLInputElement).value)}
+              onBlur={(e) => handleAmountBlur((e.target as HTMLInputElement).value)}
+              disabled={confirmed}
+              style={amountInputStyle}
             />
             <span className="amount-unit">USDT</span>
           </div>
         </div>
-
-        <div className="bmb-progress-wrap" data-stage={stage} aria-label={`Статус: крок ${stage} з 6`}>
-          <div className="bmb-track" />
-          <div className="bmb-fill" style={{ width: `${percent}%` }} />
-          <span className="bmb-cap" style={{ left: `${percent}%` }}>
-            <img src="/bmb-pin.svg" alt="BMB" />
-          </span>
-        </div>
-
-        {/* колишній рядок flags — прибрано */}
       </div>
 
+      {/* КНОПКИ ДІЙ */}
       <div className="scenario-actions">
-        <button className="btn agree" onClick={onAgree} disabled={!canAgree || !!busyAgree}>🤝 Погодити угоду</button>
-        {onLock && (
-          <button className="btn lock" onClick={onLock} disabled={!canLock || !!busyLock}>🔒 Заблокувати кошти</button>
-        )}
-        <button className="btn confirm" onClick={onConfirm} disabled={!canConfirm || !!busyConfirm}>✅ Підтвердити виконання</button>
+        {/* Погодити угоду */}
+        <button
+          className="btn agree"
+          onClick={onAgree}
+          disabled={!canAgree || !!busyAgree}
+        >
+          {busyAgree ? '…' : '🤝 Погодити угоду'}
+        </button>
 
-        {onOpenRate && (
-          <button className="btn rate" onClick={onOpenRate} disabled={props.s.status !== 'confirmed' || !!isRated}>
-            {isRated ? '⭐ Оцінено' : '⭐ Оцінити'}
+        {/* Забронювати кошти (може бути прихована у Виконавця) */}
+        {!hideLock && (
+          <button
+            className="btn lock"
+            onClick={onLock}
+            disabled={!canLock || !!busyLock}
+          >
+            {busyLock ? '…' : '💳 Забронювати кошти'}
           </button>
         )}
 
-        <button className="btn dispute" onClick={onDispute} disabled={!canDispute}>⚖️ Оспорити виконання</button>
-        <button className="btn location" onClick={onOpenLocation} disabled={!hasCoords}>📍 Показати локацію</button>
+        {/* Підтвердити виконання */}
+        {!hideConfirm && (
+          <button
+            className="btn confirm"
+            onClick={onConfirm}
+            disabled={!canConfirm || !!busyConfirm}
+          >
+            {busyConfirm ? '…' : '✅ Підтвердити виконання'}
+          </button>
+        )}
+
+        {/* Оспорити виконання (кнопка тільки коли доступна) */}
+        {!hideDispute && (
+          <button
+            className="btn dispute"
+            onClick={onDispute}
+            disabled={!canDispute}
+          >
+            ⚖️ Оспорити виконання
+          </button>
+        )}
+
+        {/* Локація — завжди активна, якщо є координати */}
+        <button
+          className="btn location"
+          onClick={onOpenLocation}
+          disabled={!hasCoords}
+        >
+          📍 Показати локацію
+        </button>
+
+        {/* Рейтинг (якщо потрібен) */}
+        {s.status === 'confirmed' && onOpenRate && (
+          isRated ? (
+            <span style={{ marginLeft: 8, opacity: 0.85 }}>⭐ Оцінено</span>
+          ) : (
+            <button className="btn" onClick={onOpenRate}>⭐ Оцінити</button>
+          )
+        )}
       </div>
     </div>
   );
