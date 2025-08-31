@@ -1,638 +1,272 @@
-// src/components/Profile.tsx
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+// 📄 src/components/Profile.tsx
+import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import './Profile.css';
-import AddToHomeProfileCard from "./AddToHomeProfileCard"; // ⬅️ ДОДАНО (1/2)
+import { getSigner, ensureBSC } from '../lib/web3';
+import './UserProfileDrawer.css';
 
-const roles = [
-  'Актор','Музикант','Авантюрист','Платонічний Ескорт','Хейтер',
-  'Танцівник','Бодібілдер-охоронець','Філософ','Провидець на виїзді',
-  'Репортер','Пранкер','Лицедій (імпровізатор)','Артист дії','Інфлюенсер','Інше'
-];
-
-const RatingStars: React.FC<{ value: number }> = ({ value }) => {
-  const rounded = Math.round(value);
-  return (
-    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-      {Array.from({ length: 10 }).map((_, i) => {
-        const filled = i < rounded;
-        const color = filled ? '#f5c542' : '#e5e7eb';
-        return (
-          <svg
-            key={i}
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill={filled ? color : 'none'}
-            stroke={color}
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polygon points="12 2 15 9 22 9 16.5 13.5 18.5 21 12 16.8 5.5 21 7.5 13.5 2 9 9 9 12 2" />
-          </svg>
-        );
-      })}
-    </div>
-  );
+type ProfileRow = {
+  user_id: string;
+  email?: string;
+  username?: string | null;
+  role?: string | null;
+  description?: string | null;
+  avatar_url?: string | null;
+  wallet?: string | null;          // ← адреса гаманця
+  referral_code?: string | null;
+  referred_by?: string | null;
+  referrer_wallet?: string | null;
+  kyc_verified?: boolean | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
-/* ===== Auth gate (без редіректів) ===== */
-const ProfileAuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [authReady, setAuthReady] = React.useState(false);
-  const [sessionUser, setSessionUser] = React.useState<any>(null);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (cancelled) return;
-      if (session) setSessionUser(session.user);
-      setAuthReady(true);
-    })();
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_evt, session) => {
-      if (cancelled) return;
-      if (session) { setSessionUser(session.user); setAuthReady(true); }
-    });
-    return () => { cancelled = true; try { subscription?.unsubscribe(); } catch {} };
-  }, []);
-
-  if (!authReady) {
-    return (
-      <div className="profile-container">
-        <h1 className="title">Профіль</h1>
-        <div style={{ padding: 24 }}>Завантаження профілю…</div>
-      </div>
-    );
-  }
-  if (!sessionUser) {
-    return (
-      <div className="profile-container">
-        <h1 className="title">Профіль</h1>
-        <div style={{ padding: 24 }}>
-          Ви ще не авторизовані. Відкрийте лист із магічним посиланням або перейдіть на сторінку «Реєстрація».
-        </div>
-      </div>
-    );
-  }
-  return <>{children}</>;
-};
-
-/* ===== MetaMask helpers ===== */
-function waitForEthereum(ms = 3500): Promise<any | null> {
-  return new Promise((resolve) => {
-    const eth = (window as any).ethereum;
-    if (eth) return resolve(eth);
-    const onInit = () => resolve((window as any).ethereum);
-    window.addEventListener('ethereum#initialized', onInit, { once: true });
-    setTimeout(() => {
-      window.removeEventListener('ethereum#initialized', onInit);
-      resolve((window as any).ethereum || null);
-    }, ms);
-  });
-}
-
-async function getMetaMaskProvider(): Promise<any | null> {
-  const eth = await waitForEthereum();
-  const candidates = eth?.providers?.length ? eth.providers : (eth ? [eth] : []);
-  const mm = candidates?.find((p: any) => p?.isMetaMask) || (eth?.isMetaMask ? eth : null);
-  if (mm) return mm;
-
-  // EIP-6963 discovery
-  const discovered: any[] = [];
-  const onAnnounce = (ev: any) => discovered.push(ev.detail);
-  window.addEventListener('eip6963:announceProvider', onAnnounce);
-  window.dispatchEvent(new Event('eip6963:requestProvider'));
-  await new Promise((r) => setTimeout(r, 300));
-  window.removeEventListener('eip6963:announceProvider', onAnnounce);
-  const mm6963 = discovered.find((d) => d?.provider?.isMetaMask || (d?.info?.rdns || '').toLowerCase().includes('metamask'));
-  return mm6963?.provider || null;
-}
-
-async function ensureBSC(provider: any) {
-  const BSC = {
-    chainId: '0x38',
-    chainName: 'BNB Smart Chain',
-    nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
-    rpcUrls: ['https://bsc-dataseed.binance.org/'],
-    blockExplorerUrls: ['https://bscscan.com'],
-  } as const;
-
-  try {
-    await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BSC.chainId }] });
-  } catch (e: any) {
-    const code = e?.code ?? e?.data?.originalError?.code;
-    if (code === 4902) {
-      await provider.request({ method: 'wallet_addEthereumChain', params: [BSC] });
-    } else {
-      console.warn('BSC switch failed:', e);
-    }
-  }
-}
-
-/* ==== Мобільний deeplink у MetaMask (виправлено) ==== */
-const isMobileUA = () =>
-  /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent);
-
-// офіційний формат диплінка: https://metamask.app.link/dapp/<domain>
-function toDeeplinkUrl() {
-  const env = (import.meta as any)?.env?.VITE_PUBLIC_APP_URL as string | undefined;
-  const origin = env || window.location.origin;      // напр. https://buy-my-behavior.vercel.app
-  const clean  = origin.replace(/^https?:\/\//i, ''); // buy-my-behavior.vercel.app
-  return `https://metamask.app.link/dapp/${clean}`;
-}
+const PINK = '#ffcdd6';
 
 export default function Profile() {
-  const navigate = useNavigate();
+  const [uid, setUid] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [savingDesc, setSavingDesc] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [profile, setProfile] = useState<ProfileRow | null>(null);
+  const [showInstallHint, setShowInstallHint] = useState(false); // ← банер-підказка
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // ⬅️ ГАСИМО залишкові редіректи одразу після монтування (щоб не тягнуло назад на /profile)
-  useEffect(() => {
-    try {
-      localStorage.removeItem('post_auth_next');
-      localStorage.removeItem('justRegistered');
-    } catch {}
-  }, []);
-
-  const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState({
-    username: '', role: '', description: '', wallet: '', avatar_url: '', email: ''
-  });
-  const [customRole, setCustomRole] = useState('');
-  const [avatarPreview, setAvatarPreview] = useState<string>('');
-  const [avatarUploading, setAvatarUploading] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [scenarios, setScenarios] = useState<any[]>([]);
-  const [newScenarioDescription, setNewScenarioDescription] = useState('');
-  const [newScenarioPrice, setNewScenarioPrice] = useState('');
-  const [kycCompleted, setKycCompleted] = useState(false);
-  const [walletConnected, setWalletConnected] = useState(false);
-  const [ratingAvg, setRatingAvg] = useState<number>(10);
-  const [ratingCount, setRatingCount] = useState<number>(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const fetchProfile = async () => {
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) return;
-      setUser(user);
-      if (!user?.id) return;
-
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (!error && data) {
-        setProfile({
-          username: data.name || '',
-          role: data.role || '',
-          description: data.description || '',
-          wallet: data.wallet || '',
-          avatar_url: data.avatar_url || '',
-          email: data.email || user.email || '',
-        });
-
-        if (data.role === 'Інше') setCustomRole('');
-        else if (!roles.includes(data.role)) {
-          setProfile((prev) => ({ ...prev, role: 'Інше' }));
-          setCustomRole(data.role);
-        }
-
-        setKycCompleted(Boolean(data.kyc_verified));
-        if (data.wallet) setWalletConnected(true);
-        setRatingAvg(typeof data.avg_rating === 'number' ? data.avg_rating : 10);
-        setRatingCount(typeof data.rating_count === 'number' ? data.rating_count : 0);
-      } else {
-        setProfile((prev) => ({ ...prev, email: user.email || '' }));
-        await supabase.from('profiles').insert({ user_id: user.id, email: user.email });
-      }
-
-      const { data: scenariosData } = await supabase
-        .from('scenario_drafts')
-        .select('*')
-        .eq('user_id', user.id);
-      setScenarios(scenariosData || []);
-    };
-
-    fetchProfile();
-  }, []);
-
-  // Очищення hash ПІСЛЯ того, як сесія вже є
-  useEffect(() => {
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (
-        session &&
-        (window.location.hash.includes('access_token=') || window.location.hash.includes('refresh_token='))
-      ) {
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      }
-    })();
-
-    if (localStorage.getItem('justRegistered') === 'true') {
-      localStorage.removeItem('justRegistered');
-    }
-  }, []);
-
-  // Реферал → БД (разово)
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        if (localStorage.getItem('referral_persisted') === 'true') return;
-
-        const referred_by = localStorage.getItem('referred_by');
-        const referrer_wallet = localStorage.getItem('referrer_wallet');
-        if (!referred_by && !referrer_wallet) return;
-
-        const { data: prof, error: profErr } = await supabase
-          .from('profiles')
-          .select('referred_by, referrer_wallet')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-        if (profErr) { console.warn('Referral fetch error:', profErr); return; }
-        if (prof?.referred_by || prof?.referrer_wallet) {
-          localStorage.setItem('referral_persisted', 'true');
-          return;
-        }
-
-        const patch: any = { user_id: user.id };
-        if (referred_by) patch.referred_by = referred_by;
-        if (referrer_wallet) patch.referrer_wallet = referrer_wallet;
-
-        const { error: upErr } = await supabase
-          .from('profiles')
-          .upsert(patch, { onConflict: 'user_id' });
-
-        if (upErr) { console.warn('Referral upsert error:', upErr); return; }
-
-        localStorage.setItem('referral_persisted', 'true');
-      } catch (e) {
-        console.warn('Referral persist warning:', e);
-      }
-    })();
-  }, []);
-
-  // Якщо є referred_by, а referrer_wallet ще нема — дотягуємо
+  // ───────────────────────────────────────────────────────────────
+  // Load session & profile
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) { setLoading(false); return; }
+      setUid(user.id);
 
-      const { data: me } = await supabase
-        .from('profiles')
-        .select('referred_by, referrer_wallet')
+      const { data, error } = await supabase
+        .from<ProfileRow>('profiles')
+        .select('*')
         .eq('user_id', user.id)
-        .maybeSingle();
+        .single();
 
-      if (me?.referred_by && !me?.referrer_wallet) {
-        const { data: amb } = await supabase
-          .from('profiles')
-          .select('wallet')
-          .eq('user_id', me.referred_by)
-          .maybeSingle();
-
-        if (amb?.wallet) {
-          await supabase
-            .from('profiles')
-            .update({ referrer_wallet: amb.wallet })
-            .eq('user_id', user.id);
-        }
-      }
+      if (!error && data) setProfile(data);
+      setLoading(false);
     })();
   }, []);
 
-  // Координати
-  useEffect(() => {
-    let intervalId: NodeJS.Timeout | null = null;
-    const fetchAndUpdatePosition = () => {
-      if (navigator.geolocation && user) {
-        navigator.geolocation.getCurrentPosition(
-          async (pos) => {
-            const { latitude, longitude } = pos.coords;
-            await supabase
-              .from('profiles')
-              .update({ latitude, longitude })
-              .eq('user_id', user.id);
-          },
-          () => {},
-          { enableHighAccuracy: true, timeout: 30000, maximumAge: 0 }
-        );
-      }
-    };
-    if (user) {
-      fetchAndUpdatePosition();
-      intervalId = setInterval(fetchAndUpdatePosition, 10000);
-    }
-    return () => { if (intervalId) clearInterval(intervalId); };
-  }, [user]);
+  // ───────────────────────────────────────────────────────────────
+  // Avatar upload (tap on image) + delete previous
+  function onPickAvatar() { fileInputRef.current?.click(); }
 
-  const handleAvatarChange = (file: File) => {
-    if (!file) return;
-    setAvatarPreview(URL.createObjectURL(file));
-  };
+  async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !uid) return;
 
-  const handleSaveProfile = async () => {
-    if (!user) return;
-    const selectedRole = profile.role === 'Інше' ? customRole : profile.role;
-    let finalAvatarUrl = profile.avatar_url;
-
-    if (avatarPreview && fileInputRef.current?.files?.[0]) {
-      setAvatarUploading(true);
+    // 1) remove previous avatar if existed
+    if (profile?.avatar_url) {
       try {
-        const file = fileInputRef.current.files[0];
-        const { data, error } = await supabase.storage
-          .from('avatars')
-          .upload(`${user.id}.jpg`, file, { cacheControl: '0', upsert: true });
-        if (!error && data) {
-          const { data: pub } = supabase.storage.from('avatars').getPublicUrl(data.path);
-          finalAvatarUrl = `${pub.publicUrl}?t=${Date.now()}`;
-          setProfile(prev => ({ ...prev, avatar_url: finalAvatarUrl }));
-          setAvatarPreview('');
+        const prevPath = profile.avatar_url.split('/storage/v1/object/public/')[1];
+        if (prevPath) {
+          const [bucket, ...rest] = prevPath.split('/');
+          const path = rest.join('/');
+          await supabase.storage.from(bucket).remove([path]);
         }
-      } catch {
-        alert('❌ Помилка завантаження аватара');
-      } finally {
-        setAvatarUploading(false);
-      }
+      } catch { /* ignore — не критично */ }
     }
 
-    const updates = {
-      user_id: user.id,
-      name: profile.username,
-      role: selectedRole,
-      description: profile.description,
-      wallet: profile.wallet,
-      avatar_url: finalAvatarUrl,
-      kyc_verified: kycCompleted,
-      email: profile.email,
-    } as const;
+    // 2) upload new one
+    const ext = file.name.split('.').pop() || 'jpg';
+    const objectPath = `${uid}/${Date.now()}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from('avatars')
+      .upload(objectPath, file, { upsert: true });
+    if (upErr) return alert('Помилка завантаження аватару: ' + upErr.message);
 
-    const { error } = await supabase.from('profiles').upsert(updates, { onConflict: 'user_id' });
-    if (!error) {
-      alert('✅ Профіль збережено успішно');
-      navigate('/map', { replace: true }); // після збереження ведемо на "Вибрати виконавця"
-    } else {
-      alert('❌ Помилка при збереженні: ' + JSON.stringify(error, null, 2));
-    }
-  };
+    const { data: publicUrl } = supabase.storage.from('avatars').getPublicUrl(objectPath);
 
-  const handleAddScenario = async () => {
-    if (!newScenarioDescription || !newScenarioPrice || !user) return;
-    const { error } = await supabase.from('scenario_drafts').insert([
-      { user_id: user.id, description: newScenarioDescription, price: parseFloat(newScenarioPrice) },
-    ]);
-    if (!error) {
-      setNewScenarioDescription('');
-      setNewScenarioPrice('');
-      const { data } = await supabase.from('scenario_drafts').select('*').eq('user_id', user.id);
-      setScenarios(data || []);
-    }
-  };
+    // 3) save to profile
+    const { data, error } = await supabase
+      .from<ProfileRow>('profiles')
+      .update({ avatar_url: publicUrl.publicUrl })
+      .eq('user_id', uid)
+      .select()
+      .single();
 
-  const handleDeleteScenario = async (id: number) => {
-    const { error } = await supabase.from('scenario_drafts').delete().eq('id', id);
-    if (!error) setScenarios(scenarios.filter((s) => s.id !== id));
-  };
+    if (!error && data) setProfile(data);
+  }
 
-  const handleHideScenario = async (id: number) => {
-    const { error } = await supabase.from('scenario_drafts').update({ hidden: true }).eq('id', id);
-    if (!error) setScenarios(scenarios.map((s) => (s.id === id ? { ...s, hidden: true } : s)));
-  };
+  // ───────────────────────────────────────────────────────────────
+  // Save description on blur
+  async function onDescBlur(e: React.FocusEvent<HTMLTextAreaElement>) {
+    if (!uid) return;
+    const value = e.currentTarget.value;
+    if (value === profile?.description) return;
 
-  // ⬇️ ОНОВЛЕНА ФУНКЦІЯ ПІДКЛЮЧЕННЯ METAMASK (тільки по кліку)
-  const connectMetamask = async () => {
+    setSavingDesc(true);
+    const { data, error } = await supabase
+      .from<ProfileRow>('profiles')
+      .update({ description: value })
+      .eq('user_id', uid)
+      .select()
+      .single();
+    setSavingDesc(false);
+
+    if (error) alert('Не вдалося зберегти опис: ' + error.message);
+    else if (data) setProfile(data);
+  }
+
+  // ───────────────────────────────────────────────────────────────
+  // MetaMask connect (SDK/deeplink) → ensure BSC → save wallet to profiles.wallet
+  async function connectMetaMask() {
     try {
-      // 1) Спробувати інжектований MetaMask (десктоп або вбудований браузер MetaMask Mobile)
-      const provider = await getMetaMaskProvider();
+      setConnecting(true);
+      setShowInstallHint(false); // ховаємо банер перед спробою
+      await ensureBSC();
+      const signer = await getSigner();
+      const addr = await signer.getAddress();
 
-      // 2) Якщо НЕМає інжекції і це мобільний → відкриваємо MetaMask через deeplink (тільки по кліку)
-      if (!provider) {
-        if (isMobileUA()) {
-          window.location.href = toDeeplinkUrl(); // відкриє MetaMask Mobile і завантажить ваш сайт усередині
-          return;
-        }
-        alert('MetaMask не знайдено. Встановіть розширення MetaMask або відкрийте сайт у MetaMask Mobile.');
-        return;
-      }
+      if (!uid) return;
 
-      // 3) Запит аккаунтів
-      const accounts: string[] = await provider.request({ method: 'eth_requestAccounts' });
-      const address = accounts?.[0] || '';
-      if (!address) {
-        alert('Користувач не надав доступ до акаунта MetaMask.');
-        return;
-      }
+      const { data, error } = await supabase
+        .from<ProfileRow>('profiles')
+        .update({ wallet: addr })      // ← зберігаємо у колонку `wallet`
+        .eq('user_id', uid)
+        .select()
+        .single();
 
-      // 4) Зберігаємо в локальний стан
-      setProfile((prev) => ({ ...prev, wallet: address }));
-      setWalletConnected(true);
-
-      // 5) Перемикаємо/додаємо BSC
-      try {
-        await ensureBSC(provider);
-      } catch (switchErr) {
-        console.warn('BSC switch failed:', switchErr);
-        alert('Не вдалося перемкнути мережу на BSC. Перевірте MetaMask вручну.');
-      }
-
-      // 6) Слухач зміни акаунтів (clean-attach)
-      try {
-        const prev = (window as any).__bmb_acc_handler__;
-        if (prev && typeof prev === 'function' && (provider as any).removeListener) {
-          (provider as any).removeListener('accountsChanged', prev);
-        }
-        const handler = (accs: string[]) => {
-          const a = accs?.[0] || '';
-          setProfile((p) => ({ ...p, wallet: a }));
-          setWalletConnected(Boolean(a));
-        };
-        (window as any).__bmb_acc_handler__ = handler;
-        if ((provider as any).on && typeof (provider as any).on === 'function') {
-          (provider as any).on('accountsChanged', handler);
-        }
-      } catch (e) {
-        console.warn('accountsChanged listener attach failed:', e);
-      }
-
-      // 7) Не пишемо в БД автоматично — збереження лишається на кнопці “Зберегти профіль”
-    } catch (e: any) {
-      const msg =
-        e?.code === 4001
-          ? 'Доступ до акаунта відхилено в MetaMask.'
-          : (e?.message || String(e));
-      console.error('MetaMask connect error:', e);
-      alert('Помилка підключення MetaMask: ' + msg);
+      if (error) alert('Не вдалося зберегти адресу в профілі: ' + error.message);
+      else if (data) setProfile(data);
+    } catch (err: any) {
+      // Показуємо банер лише коли підключення не відбулось
+      setShowInstallHint(true);
+      alert(err?.message || 'Помилка підключення MetaMask');
+    } finally {
+      setConnecting(false);
     }
-  };
+  }
 
-  const getAvatarUrl = () => avatarPreview || profile.avatar_url || null;
-
-  const UserIcon = () => (
-    <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
-      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-      <circle cx="12" cy="7" r="4" />
-    </svg>
-  );
+  if (loading) return <div style={{ padding: 16 }}>Завантаження профілю…</div>;
+  if (!profile) return <div style={{ padding: 16 }}>Профіль не знайдено. Увійди в систему.</div>;
 
   return (
-    <ProfileAuthGate>
-      <main className="profile-page">
-        <div className="profile-container">
-          <h1 className="title">Профіль</h1>
+    <div style={{ padding: '16px 16px 88px 16px' }}>
+      <header style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <div
+          onClick={onPickAvatar}
+          style={{
+            width: 88, height: 88, borderRadius: '50%', overflow: 'hidden',
+            border: `3px solid ${PINK}`, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+            cursor: 'pointer', background: '#fff', flexShrink: 0,
+          }}
+          title="Натисни, щоб змінити фото"
+        >
+          {profile.avatar_url ? (
+            <img src={profile.avatar_url} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : (
+            <div style={{
+              width: '100%', height: '100%', display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              fontWeight: 700, color: '#333', background: '#f7f7f7'
+            }}>+</div>
+          )}
+        </div>
 
-          {/* Аватар */}
-          <div
-            className={`avatar-container ${isDragOver ? 'drag-over' : ''}`}
-            onClick={() => fileInputRef.current?.click()}
-            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-            onDragEnter={(e) => { e.preventDefault(); setIsDragOver(true); }}
-            onDragLeave={(e) => { e.preventDefault(); setIsDragOver(false); }}
-            onDrop={(e) => {
-              e.preventDefault(); setIsDragOver(false);
-              const file = e.dataTransfer.files[0];
-              if (file?.type.startsWith('image/')) handleAvatarChange(file);
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ fontSize: 20, fontWeight: 800 }}>Мій профіль</div>
+          <div style={{ fontSize: 12, color: '#666' }}>{profile.email || '—'}</div>
+
+          <button
+            onClick={connectMetaMask}
+            disabled={connecting}
+            style={{
+              marginTop: 6, padding: '10px 14px', borderRadius: 999, border: 'none',
+              background: PINK, color: '#000', fontWeight: 700,
+              boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
+              display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer'
             }}
           >
-            {getAvatarUrl() ? (
-              <img
-                src={getAvatarUrl()!}
-                alt="Аватар користувача"
-                width={192}
-                height={192}
-                style={{ borderRadius: '50%', objectFit: 'cover', cursor: 'pointer' }}
-              />
-            ) : (
-              <div className="avatar-placeholder">
-                <UserIcon />
-                <span>Додати фото</span>
-              </div>
-            )}
+            {connecting ? 'Підключення…' : (profile.wallet ? 'Пере-підключити MetaMask' : 'Підключити MetaMask')}
+          </button>
 
-            {avatarUploading && <div className="avatar-uploading-spinner"></div>}
-
-            <input
-              type="file"
-              ref={fileInputRef}
-              style={{ display: 'none' }}
-              accept="image/*"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleAvatarChange(file);
-              }}
-            />
-          </div>
-
-          {/* Рейтинг */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', marginTop: 8 }}>
-            <RatingStars value={ratingAvg} />
-            <span style={{ fontSize: 13, color: '#6b7280' }}>{ratingAvg.toFixed(1)} / 10 · {ratingCount} оцінок</span>
-          </div>
-
-          {/* Форма профілю */}
-          <div className="profile-form">
-            <input
-              placeholder="Ім’я або псевдонім"
-              value={profile.username}
-              onChange={(e) => setProfile({ ...profile, username: e.target.value })}
-              className="input"
-            />
-
-            <select
-              value={profile.role}
-              onChange={(e) => setProfile({ ...profile, role: e.target.value })}
-              className="input"
-            >
-              <option value="">Оберіть роль</option>
-              {roles.map((role) => (
-                <option key={role} value={role}>{role}</option>
-              ))}
-            </select>
-
-            {profile.role === 'Інше' && (
-              <input
-                type="text"
-                placeholder="Вкажіть власну роль"
-                value={customRole}
-                onChange={(e) => setCustomRole(e.target.value)}
-                className="input"
-              />
-            )}
-
-            <textarea
-              placeholder="Опиши свої здібності..."
-              value={profile.description}
-              onChange={(e) => setProfile({ ...profile, description: e.target.value })}
-              className="input"
-            />
-
-            <input
-              placeholder="TRC20 гаманець або MetaMask"
-              value={profile.wallet}
-              onChange={(e) => setProfile({ ...profile, wallet: e.target.value })}
-              className="input"
-            />
-
-            <button onClick={connectMetamask} className="button">
-              {walletConnected ? '🟢 MetaMask підключено' : '🦊 Підключити MetaMask'}
-            </button>
-
-            <button onClick={() => setKycCompleted(true)} className="button">
-              {kycCompleted ? '✅ KYC пройдено' : '🛡 Пройти KYC'}
-            </button>
-
-            <button onClick={handleSaveProfile} className="button">💾 Зберегти профіль</button>
-          </div>
-
-          {/* Кнопка: додати іконку на робочий стіл (між верхнім блоком і «Створити сценарій») */}
-          <AddToHomeProfileCard /> {/* ⬅️ ДОДАНО (2/2) */}
-
-          {/* Драфти сценаріїв */}
-          <div className="scenario-form">
-            <h2>Створити сценарій</h2>
-            <textarea
-              placeholder="Опис сценарію"
-              value={newScenarioDescription}
-              onChange={(e) => setNewScenarioDescription(e.target.value)}
-              className="input"
-            />
-            <input
-              type="number"
-              placeholder="Ціна в USDT"
-              value={newScenarioPrice}
-              onChange={(e) => setNewScenarioPrice(e.target.value)}
-              className="input"
-            />
-            <button onClick={handleAddScenario} className="button">Зберегти сценарій</button>
-          </div>
-
-          <div className="scenario-archive">
-            <h2>📝 Твої сценарії</h2>
-            <div className="scenarios-grid">
-              {scenarios.filter((s) => !s.hidden).map((s) => (
-                <div key={s.id} className="scenario-card">
-                  <div className="scenario-content">
-                    <p>{s.description}</p>
-                    <span>{s.price} USDT</span>
-                  </div>
-                  <div className="scenario-actions">
-                    <button onClick={() => handleHideScenario(s.id)}>🙈</button>
-                    <button onClick={() => handleDeleteScenario(s.id)}>🗑️</button>
-                  </div>
-                </div>
-              ))}
-              {scenarios.filter((s) => !s.hidden).length === 0 && (
-                <p>📝 Немає сценаріїв</p>
-              )}
+          {profile.wallet && (
+            <div style={{ fontSize: 12, color: '#444' }}>
+              Підключено: <span style={{ fontFamily: 'monospace' }}>{profile.wallet}</span>
             </div>
+          )}
+
+          {/* ───── Банер-підказка (показуємо ТІЛЬКИ після невдалої спроби підключення) */}
+          {showInstallHint && (
+            <div
+              style={{
+                marginTop: 10,
+                background: '#fff',
+                border: `1px solid ${PINK}`,
+                borderRadius: 14,
+                padding: '10px 12px',
+                boxShadow: '0 6px 14px rgba(0,0,0,0.06)',
+                fontSize: 13,
+                lineHeight: 1.35
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                Не вдалося відкрити MetaMask
+              </div>
+              <div style={{ marginBottom: 6 }}>
+                Якщо додаток MetaMask не відкрився автоматично, встанови його та повернись у браузер:
+              </div>
+              <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+                <li><a href="https://metamask.io/download/" target="_blank" rel="noreferrer">metamask.io/download</a></li>
+                <li>Android: <a href="https://play.google.com/store/apps/details?id=io.metamask" target="_blank" rel="noreferrer">Google Play</a></li>
+                <li>iOS: <a href="https://apps.apple.com/app/metamask/id1438144202" target="_blank" rel="noreferrer">App Store</a></li>
+                <li>Desktop: <a href="https://metamask.io/download/" target="_blank" rel="noreferrer">Розширення для Chrome/Brave</a></li>
+              </ul>
+              <div>
+                Після встановлення повернись сюди та натисни «Підключити MetaMask» ще раз.
+              </div>
+            </div>
+          )}
+        </div>
+      </header>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={onFileChange}
+      />
+
+      <section style={{ display: 'grid', gap: 12 }}>
+        <div style={{ background: '#fff', borderRadius: 16, padding: 12, boxShadow: '0 4px 16px rgba(0,0,0,0.06)' }}>
+          <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Ім’я</div>
+          <div style={{ fontWeight: 700 }}>{profile.username || 'Без імені'}</div>
+        </div>
+
+        <div style={{ background: '#fff', borderRadius: 16, padding: 12, boxShadow: '0 4px 16px rgba(0,0,0,0.06)' }}>
+          <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Роль</div>
+          <div style={{ fontWeight: 700 }}>{profile.role || '—'}</div>
+        </div>
+
+        <div style={{ background: '#fff', borderRadius: 16, padding: 12, boxShadow: '0 4px 16px rgba(0,0,0,0.06)' }}>
+          <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Опиши свої здібності</div>
+          <textarea
+            defaultValue={profile.description || ''}
+            placeholder="Коротко про навички, досвід, що ти пропонуєш…"
+            onBlur={onDescBlur}
+            rows={4}
+            style={{
+              width: '100%', borderRadius: 14, border: '1px solid #e8e8e8',
+              padding: 12, outline: 'none', fontSize: 14, resize: 'vertical'
+            }}
+          />
+          {savingDesc && <div style={{ fontSize: 12, color: '#888', marginTop: 6 }}>Збереження…</div>}
+        </div>
+
+        <div style={{ background: '#fff', borderRadius: 16, padding: 12, boxShadow: '0 4px 16px rgba(0,0,0,0.06)' }}>
+          <div style={{ display: 'grid', gap: 6 }}>
+            <div><b>Мій реферальний код:</b> {profile.referral_code || '—'}</div>
+            <div><b>Амбасадор (referred_by):</b> {profile.referred_by || '—'}</div>
+            <div><b>Гаманець амбасадора:</b> {profile.referrer_wallet || '—'}</div>
+            <div><b>KYC:</b> {profile.kyc_verified ? 'Пройдено' : 'Не пройдено'}</div>
           </div>
         </div>
-      </main>
-    </ProfileAuthGate>
+      </section>
+    </div>
   );
 }

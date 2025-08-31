@@ -1,128 +1,83 @@
-// src/lib/web3.ts
+// 📄 src/lib/web3.ts
 import { ethers } from 'ethers';
+import MetaMaskSDK from '@metamask/sdk';
 
-declare global {
-  interface Window {
-    ethereum?: any;
+const BSC_CHAIN_ID_HEX = '0x38'; // 56
+const BSC_PARAMS = {
+  chainId: BSC_CHAIN_ID_HEX,
+  chainName: 'Binance Smart Chain',
+  nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+  rpcUrls: ['https://bsc-dataseed.binance.org/'],
+  blockExplorerUrls: ['https://bscscan.com/'],
+};
+
+let _sdk: MetaMaskSDK | null = null;
+let _sdkProvider: any | null = null;
+
+function isMobile(): boolean {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+export async function getProvider(): Promise<ethers.BrowserProvider> {
+  if ((window as any).ethereum) {
+    return new ethers.BrowserProvider((window as any).ethereum, 'any');
   }
-}
 
-let _provider: ethers.providers.Web3Provider | null = null;
-
-/** Отримати MetaMask-провайдер або кинути помилку */
-export function getProvider(): ethers.providers.Web3Provider {
-  if (_provider) return _provider;
-  if (typeof window !== 'undefined' && window.ethereum) {
-    _provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
-    return _provider;
+  if (isMobile()) {
+    if (!_sdk) {
+      _sdk = new MetaMaskSDK({
+        dappMetadata: {
+          name: 'Buy My Behavior',
+          url: window.location.origin,
+        },
+        checkInstallationImmediately: false,
+        communicationLayerPreference: 'webrtc',
+        shouldShimWeb3: false,
+        useDeeplink: true,
+        preferDesktop: false,
+      });
+    }
+    if (!_sdkProvider) {
+      _sdkProvider = _sdk.getProvider();
+    }
+    return new ethers.BrowserProvider(_sdkProvider as any, 'any');
   }
-  throw new Error('MetaMask не знайдено. Установіть/увімкніть розширення.');
+
+  throw new Error('MetaMask provider is not available.');
 }
 
-/** Повертає signer; запитує доступ до акаунтів за потреби */
-export async function getSigner(): Promise<ethers.Signer> {
-  const provider = getProvider();
-  await provider.send('eth_requestAccounts', []);
-  return provider.getSigner();
+export async function requestAccounts(): Promise<string[]> {
+  const provider = await getProvider();
+  // @ts-ignore
+  const ethereum = (provider as any).provider || (window as any).ethereum;
+  return await ethereum.request({ method: 'eth_requestAccounts' });
 }
 
-/** Чи підключений гаманець */
-export async function isWalletConnected(): Promise<boolean> {
+export async function ensureBSC(): Promise<void> {
+  const provider = await getProvider();
+  // @ts-ignore
+  const ethereum = (provider as any).provider || (window as any).ethereum;
+
   try {
-    const provider = getProvider();
-    const accs = await provider.listAccounts();
-    return accs.length > 0;
-  } catch {
-    return false;
-  }
-}
-
-/** Перемкнути мережу на BSC (56). Додати, якщо її немає. */
-export async function switchToBSC(): Promise<void> {
-  const eth = window.ethereum;
-  if (!eth?.request) return;
-  try {
-    await eth.request({
+    await ethereum.request({
       method: 'wallet_switchEthereumChain',
-      params: [{ chainId: '0x38' }], // 56
+      params: [{ chainId: BSC_CHAIN_ID_HEX }],
     });
-  } catch (e: any) {
-    if (e?.code === 4902) {
-      await eth.request({
+  } catch (err: any) {
+    if (err?.code === 4902) {
+      await ethereum.request({
         method: 'wallet_addEthereumChain',
-        params: [{
-          chainId: '0x38',
-          chainName: 'Binance Smart Chain',
-          nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
-          rpcUrls: ['https://bsc-dataseed.binance.org/'],
-          blockExplorerUrls: ['https://bscscan.com'],
-        }],
+        params: [BSC_PARAMS],
       });
     } else {
-      throw e;
+      throw err;
     }
   }
 }
 
-/* ------------------ Чернетка ScenarioForm у localStorage ------------------ */
-
-const DRAFT_KEYS = ['scenario_form_draft', 'scenario_draft', 'ScenarioFormDraft'];
-
-/** Видалити чернетку */
-export function clearScenarioFormDraft(): void {
-  try {
-    DRAFT_KEYS.forEach((k) => localStorage.removeItem(k));
-  } catch {
-    /* ignore */
-  }
+export async function getSigner(): Promise<ethers.Signer> {
+  const provider = await getProvider();
+  await ensureBSC();
+  await requestAccounts();
+  return await provider.getSigner();
 }
-
-/** Зберегти чернетку (опційно використовуй у формі) */
-export function saveScenarioFormDraft(obj: any): void {
-  try {
-    localStorage.setItem('scenario_form_draft', JSON.stringify(obj));
-  } catch {
-    /* ignore */
-  }
-}
-
-/** Прочитати чернетку */
-export function loadScenarioFormDraft<T = any>(): T | null {
-  try {
-    const raw =
-      localStorage.getItem('scenario_form_draft') ||
-      localStorage.getItem('scenario_draft') ||
-      localStorage.getItem('ScenarioFormDraft');
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Легасі-місток, якого очікує ScenarioForm.tsx.
- * Просто мержить часткові зміни в чернетку, щоб не ламати існуючі імпорти.
- */
-export async function syncScenarioForm(partial?: Record<string, unknown>): Promise<void> {
-  try {
-    if (!partial) return;
-    const prev = loadScenarioFormDraft<Record<string, unknown>>() || {};
-    saveScenarioFormDraft({ ...prev, ...partial });
-  } catch {
-    /* ignore */
-  }
-}
-
-/** Зручний default-експорт (де-не-де можуть імпортувати як web3) */
-const web3 = {
-  getProvider,
-  getSigner,
-  isWalletConnected,
-  switchToBSC,
-  clearScenarioFormDraft,
-  saveScenarioFormDraft,
-  loadScenarioFormDraft,
-  syncScenarioForm,
-};
-
-export default web3;
