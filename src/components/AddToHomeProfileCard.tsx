@@ -1,4 +1,3 @@
-// src/components/AddToHomeProfileCard.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 
 type BeforeInstallPromptEvent = Event & {
@@ -14,8 +13,15 @@ export default function AddToHomeProfileCard() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
   const [visible, setVisible] = useState(false);
 
-  const seenCount = useMemo(() => Number(localStorage.getItem(INSTALL_SEEN_KEY) || 0), []);
-  const dismissUntil = useMemo(() => Number(localStorage.getItem(DISMISS_UNTIL_KEY) || 0), []);
+  const seenCount = useMemo(() => {
+    try { return Number(localStorage.getItem(INSTALL_SEEN_KEY) || 0); }
+    catch { return 0; }
+  }, []);
+
+  const dismissUntil = useMemo(() => {
+    try { return Number(localStorage.getItem(DISMISS_UNTIL_KEY) || 0); }
+    catch { return 0; }
+  }, []);
 
   const isStandalone = useMemo(() => {
     try {
@@ -36,7 +42,10 @@ export default function AddToHomeProfileCard() {
       setDeferred(e as BeforeInstallPromptEvent);
       setVisible(true);
     };
-    const onInstalled = () => setVisible(false);
+    const onInstalled = () => {
+      setVisible(false);
+      setDeferred(null);
+    };
 
     window.addEventListener('beforeinstallprompt', onBeforeInstall as any);
     window.addEventListener('appinstalled', onInstalled);
@@ -51,8 +60,18 @@ export default function AddToHomeProfileCard() {
     try {
       await deferred.prompt();
       const choice = await deferred.userChoice;
+
       if (choice.outcome === 'accepted') {
-        localStorage.setItem(INSTALL_SEEN_KEY, String(seenCount + 1));
+        try { localStorage.setItem(INSTALL_SEEN_KEY, String(seenCount + 1)); } catch {}
+        setVisible(false);
+        setDeferred(null);
+      } else {
+        // dismissed → «приспимо» на 24 год, щоб не дратувати користувача
+        try {
+          const until = Date.now() + 24 * 60 * 60 * 1000;
+          localStorage.setItem(DISMISS_UNTIL_KEY, String(until));
+          localStorage.setItem(INSTALL_SEEN_KEY, String(seenCount + 1));
+        } catch {}
         setVisible(false);
         setDeferred(null);
       }
@@ -62,29 +81,52 @@ export default function AddToHomeProfileCard() {
   };
 
   const onDismiss = (ms = 2 * 24 * 60 * 60 * 1000) => {
-    const until = Date.now() + ms;
-    localStorage.setItem(DISMISS_UNTIL_KEY, String(until));
-    localStorage.setItem(INSTALL_SEEN_KEY, String(seenCount + 1));
+    try {
+      const until = Date.now() + ms;
+      localStorage.setItem(DISMISS_UNTIL_KEY, String(until));
+      localStorage.setItem(INSTALL_SEEN_KEY, String(seenCount + 1));
+    } catch {}
     setVisible(false);
+    setDeferred(null);
   };
 
   if (isStandalone || !visible || !deferred) return null;
 
   return (
     <div style={{ margin: '16px 0' }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        padding: 12, border: '1px solid #e5e7eb', borderRadius: 16, background: '#f9fafb'
-      }}>
-        <img src="/icons/bmb-192.png" alt="BMB" width={40} height={40} style={{ borderRadius: 10 }} />
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: 12,
+          border: '1px solid #e5e7eb',
+          borderRadius: 16,
+          background: '#f9fafb'
+        }}
+      >
+        <img
+          src="/icons/bmb-192.png"
+          alt="BMB"
+          width={40}
+          height={40}
+          style={{ borderRadius: 10 }}
+          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+        />
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 700 }}>Додайте іконку BMB на головний екран</div>
           <div style={{ fontSize: 12, color: '#6b7280' }}>Запускатиметься без адресного рядка</div>
         </div>
-        <button onClick={onInstall} style={{ padding: '8px 12px', borderRadius: 12, border: '1px solid #ddd' }}>
+        <button
+          onClick={onInstall}
+          style={{ padding: '8px 12px', borderRadius: 12, border: '1px solid #ddd' }}
+        >
           Встановити
         </button>
-        <button onClick={() => onDismiss()} style={{ marginLeft: 8, background: 'transparent', border: 'none', color: '#6b7280' }}>
+        <button
+          onClick={() => onDismiss()}
+          style={{ marginLeft: 8, background: 'transparent', border: 'none', color: '#6b7280' }}
+        >
           Пізніше
         </button>
       </div>
