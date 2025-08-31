@@ -72,6 +72,59 @@ export default function MapView() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
 
+  // ====== свайп для шторки (праворуч -> закриття) ======
+  const drawerWidth = 340; // sync з inline стилями
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const touchStartX = useRef<number | null>(null);
+  const lastX = useRef<number | null>(null);
+  const [dragX, setDragX] = useState(0);
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    lastX.current = touchStartX.current;
+    // плавний «живий» рух
+    const el = panelRef.current;
+    if (el) el.style.transition = 'none';
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (touchStartX.current == null) return;
+    const x = e.touches[0].clientX;
+    lastX.current = x;
+    const deltaX = x - touchStartX.current; // >0 — тягнемо праворуч (до краю)
+    // тягнути можна лише праворуч (0..drawerWidth)
+    const next = Math.max(0, Math.min(deltaX, drawerWidth));
+    setDragX(next);
+  };
+
+  const onTouchEnd = () => {
+    if (touchStartX.current == null || lastX.current == null) {
+      touchStartX.current = null;
+      lastX.current = null;
+      return;
+    }
+    const deltaX = lastX.current - touchStartX.current;
+    const el = panelRef.current;
+    if (el) el.style.transition = 'transform 200ms ease';
+
+    // якщо протягнули праворуч більше 80px — закриваємо
+    if (deltaX > 80) {
+      setDragX(drawerWidth);
+      setTimeout(() => {
+        setDragX(0);
+        setSelectedProfile(null);
+      }, 180);
+    } else {
+      // відкотити назад
+      setDragX(0);
+      if (el) el.style.transform = 'translateX(0)';
+    }
+
+    touchStartX.current = null;
+    lastX.current = null;
+  };
+  // =====================================================
+
   // завантажити користувачів + центр карти
   useEffect(() => {
     const fetchUsers = async () => {
@@ -277,7 +330,7 @@ export default function MapView() {
               position: 'absolute',
               left: '50%',
               top: '50%',
-              transform: 'translate(-50%, -100%)', // трошки вище центру, як реальний пін
+              transform: 'translate(-50%, -100%)',
               width: 26,
               height: 26,
               borderRadius: '50%',
@@ -354,14 +407,46 @@ export default function MapView() {
             top: 0,
             right: 0,
             bottom: 0,
-            width: 340,
+            width: drawerWidth,
             background: 'white',
             boxShadow: '-4px 0 12px rgba(0,0,0,0.2)',
             padding: 20,
-            overflowY: 'auto'
+            overflowY: 'auto',
+            transform: `translateX(${dragX}px)`,
+            transition: 'transform 220ms ease',
+            touchAction: 'pan-y', // дозволяє горизонтальний жест всередині
           }}
+          // клік поза внутрішнім контентом (на сам контейнер) — закриває
           onClick={() => { setSelectedProfile(null); }}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
+          ref={panelRef}
         >
+          {/* кнопка закриття (стрілочка) */}
+          <button
+            type="button"
+            aria-label="Закрити"
+            onClick={(e) => { e.stopPropagation(); setSelectedProfile(null); }}
+            style={{
+              position: 'absolute',
+              top: 10,
+              right: 10,
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              background: 'rgba(0,0,0,0.04)',
+              border: '1px solid rgba(0,0,0,0.08)',
+              display: 'grid',
+              placeItems: 'center',
+              cursor: 'pointer',
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#111" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
+
           <div onClick={(e) => e.stopPropagation()}>
             {selectedProfile.avatar_url && (
               <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
@@ -455,7 +540,7 @@ export default function MapView() {
                         fontSize: 12,
                         fontWeight: 700,
                         whiteSpace: 'nowrap',
-                        border: '1px solid #e5e7eb', // ← виправлено лапки
+                        border: '1px solid #e5e7eb',
                       }}
                     >
                       {s.price} USDT
