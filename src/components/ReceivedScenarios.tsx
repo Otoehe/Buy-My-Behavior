@@ -17,6 +17,9 @@ import type { DisputeRow, ScenarioRow } from '../lib/tables';
 import { getLatestDisputeByScenario, uploadEvidenceAndAttach, ensureDisputeRowForScenario } from '../lib/disputeApi';
 import RateCounterpartyModal from './RateCounterpartyModal';
 
+// ⬇️ додано: класичний степер статусів
+import { StatusStripClassic } from './StatusStripClassic';
+
 type Status = 'pending' | 'agreed' | 'confirmed' | 'disputed' | string;
 interface Scenario extends ScenarioRow {}
 
@@ -194,12 +197,23 @@ export default function ReceivedScenarios() {
   const setLocal = (id: string, patch: Partial<Scenario>) =>
     setScenarios(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
-  // редагування опису/суми (до confirmed): будь-яка зміна → pending + скидання погоджень
+  // редагування опису/суми → pending + скидання погоджень (до confirmed)
   const updateScenarioField = async (id: string, field: keyof Scenario, value: any) => {
-    setLocal(id, { [field]: value as any, is_agreed_by_customer: false, is_agreed_by_executor: false, status: 'pending' });
-    if (field === 'donation_amount_usdt' && value !== '' && value !== null) {
-      const v = Number(value); if (!Number.isFinite(v) || v <= 0) return;
+    // ⬇️ нова перевірка: сума лише ціле >= 0 (нуль дозволено)
+    if (field === 'donation_amount_usdt') {
+      if (value === '' || value === null) {
+        // дозволяємо пусто
+      } else {
+        const n = Number(value);
+        const isInt = Number.isInteger(n);
+        if (!isInt || n < 0) {
+          alert('Сума має бути цілим числом (0,1,2,3,...)');
+          return;
+        }
+      }
     }
+
+    setLocal(id, { [field]: value as any, is_agreed_by_customer: false, is_agreed_by_executor: false, status: 'pending' });
     await supabase.from('scenarios').update({
       [field]: value === '' ? null : value,
       is_agreed_by_customer: false,
@@ -340,32 +354,32 @@ export default function ReceivedScenarios() {
     } finally { setUploading(p => ({ ...p, [s.id]: false })); ev.target.value = ''; }
   };
 
-  // стилі для підказки та овалу (інлайн, щоб не чіпати існуючі CSS)
-  const hintStyle: React.CSSProperties = {
-    fontSize: 12,
-    lineHeight: '16px',
-    opacity: 0.8,
-    marginBottom: 8,
-  };
-  const labelStyle: React.CSSProperties = {
-    fontSize: 13,
-    lineHeight: '18px',
-    marginBottom: 6,
-    opacity: 0.9,
-  };
+  // стилі (інлайн, нічого глобального не чіпаю)
+  const hintStyle: React.CSSProperties = { fontSize: 12, lineHeight: '16px', opacity: 0.8, marginBottom: 8 };
+  const labelStyle: React.CSSProperties = { fontSize: 13, lineHeight: '18px', marginBottom: 6, opacity: 0.9 };
   const amountPillStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
     borderRadius: 9999,
-    padding: '4px 8px',
+    padding: '2px 8px',          // ⬅️ трішки менше
+    background: '#f7f7f7',       // ⬅️ як у полі «обрати сценарій»
   };
   const amountInputStyle: React.CSSProperties = {
     borderRadius: 9999,
-    padding: '14px 16px',
-    fontSize: 18,
-    height: 48,
+    padding: '10px 14px',        // ⬅️ менше
+    fontSize: 16,
+    height: 40,                  // ⬅️ менше
     outline: 'none',
+    border: 'none',              // ⬅️ без рамки
+    background: 'transparent',
+  };
+
+  // ⬇️ утиліта: пропускаємо лише цифри (порожньо = null)
+  const parseDigits = (raw: string): number | null | 'invalid' => {
+    if (raw.trim() === '') return null;
+    if (!/^[0-9]+$/.test(raw.trim())) return 'invalid';
+    return parseInt(raw.trim(), 10);
   };
 
   return (
@@ -384,9 +398,13 @@ export default function ReceivedScenarios() {
 
         return (
           <div key={s.id} className="scenario-card" data-card-id={s.id}>
-            <div className="scenario-info">
+            {/* ⬇️ нове: класичний степер статусу угоди */}
+            <div style={{ marginBottom: 10 }}>
+              <StatusStripClassic state={s} />
+            </div>
 
-              {/* 🔔 НАГАДУВАННЯ над полем опису */}
+            <div className="scenario-info">
+              {/* 🔔 Підказка */}
               <div style={hintStyle}>
                 Опис сценарію і сума добровільного донату редагуються обома учасниками до Погодження угоди.
               </div>
@@ -417,23 +435,24 @@ export default function ReceivedScenarios() {
                 </label>
                 <div className="amount-pill" style={amountPillStyle}>
                   <input
+                    // ⬇️ лише цифри, без десяткових; нуль дозволено
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     className="amount-input"
-                    type="number"
-                    step="0.000001"
-                    value={s.donation_amount_usdt ?? ''}
+                    value={s.donation_amount_usdt === null || s.donation_amount_usdt === undefined ? '' : String(s.donation_amount_usdt)}
                     placeholder="—"
                     onChange={(e) => {
-                      const raw = (e.target as HTMLInputElement).value;
-                      const v = raw === '' ? null : parseFloat(raw);
-                      setLocal(s.id, { donation_amount_usdt: (raw === '' || !Number.isFinite(v as any)) ? null : (v as number) });
+                      const raw = e.target.value;
+                      if (raw === '' || /^[0-9]+$/.test(raw)) {
+                        setLocal(s.id, { donation_amount_usdt: raw === '' ? null : parseInt(raw, 10) });
+                      }
                     }}
                     onBlur={(e) => {
                       if (s.status === 'confirmed') return;
-                      const raw = (e.target as HTMLInputElement).value;
-                      if (raw === '') { updateScenarioField(s.id, 'donation_amount_usdt', null); return; }
-                      const v = parseFloat(raw);
-                      if (Number.isFinite(v) && v > 0) updateScenarioField(s.id, 'donation_amount_usdt', v);
-                      else { alert('Сума має бути > 0'); }
+                      const res = parseDigits((e.target as HTMLInputElement).value);
+                      if (res === 'invalid') { alert('Лише цифри (0,1,2,3,...)'); return; }
+                      updateScenarioField(s.id, 'donation_amount_usdt', res === null ? null : res);
                     }}
                     disabled={s.status === 'confirmed'}
                     style={amountInputStyle}
