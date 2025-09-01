@@ -1,4 +1,3 @@
-// 📄 src/components/ReceivedScenarios.tsx
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import {
@@ -25,15 +24,13 @@ interface Scenario extends ScenarioRow {}
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.85;
 
-// ───────────────── helpers ─────────────────
-
 async function ensureBSCAndGetSigner() {
   await ensureBSC();
   return await getSigner();
 }
 
 function humanizeEthersError(err: any): string {
-  const m = String(err?.shortMessage || err?.reason || err?.error?.message || err?.message || '');
+  const m = String(err?.reason || err?.error?.message || err?.message || '');
   if (!m) return 'Невідома помилка';
   return m.replace(/execution reverted:?/i, '').replace(/\(reason=.*?\)/i, '').trim();
 }
@@ -55,8 +52,6 @@ function reachedExecutionTime(s: Scenario) {
   return !isNaN(dt.getTime()) && new Date() >= dt;
 }
 
-// ───────────────── component ─────────────────
-
 export default function ReceivedScenarios() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [userId, setUserId] = useState('');
@@ -77,9 +72,9 @@ export default function ReceivedScenarios() {
   const rt = useRealtimeNotifications(userId);
 
   function stepOf(s: Scenario) {
-    if (!s.is_agreed_by_executor) return 1; // погодити
-    if (!s.escrow_tx_hash && s.is_agreed_by_customer) return 0; // чекаємо lock
-    if (s.escrow_tx_hash && reachedExecutionTime(s) && !s.is_completed_by_executor) return 2; // підтвердити
+    if (!s.is_agreed_by_executor) return 1;
+    if (!s.escrow_tx_hash && s.is_agreed_by_customer) return 0;
+    if (s.escrow_tx_hash && reachedExecutionTime(s) && !s.is_completed_by_executor) return 2;
     return 0;
   }
   const canAgree   = (s: Scenario) => stepOf(s) === 1 && !agreeBusy[s.id];
@@ -189,12 +184,15 @@ export default function ReceivedScenarios() {
   const setLocal = (id: string, patch: Partial<Scenario>) =>
     setScenarios(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
-  // редагування опису/суми → pending + скидання погоджень
+  // редагування опису/суми
   const updateScenarioField = async (id: string, field: keyof Scenario, value: any) => {
     if (field === 'donation_amount_usdt') {
-      if (!(value === '' || value === null)) {
+      if (value === '' || value === null) {
+        // дозволяємо пусто
+      } else {
         const n = Number(value);
-        if (!Number.isInteger(n) || n < 0) {
+        const isInt = Number.isInteger(n);
+        if (!isInt || n < 0) {
           alert('Сума має бути цілим числом (0,1,2,3,...)');
           return;
         }
@@ -253,7 +251,7 @@ export default function ReceivedScenarios() {
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
       const signer = await ensureBSCAndGetSigner();
-      const who = (await signer.getAddress()).toLowerCase();
+      const who = (await (signer as ethers.Signer).getAddress()).toLowerCase();
       const provider = (signer.provider as ethers.providers.Web3Provider);
 
       const dealBefore = await getDealOnChain(s.id);
@@ -274,8 +272,12 @@ export default function ReceivedScenarios() {
         const b32 = generateScenarioIdBytes32(s.id);
         const abi = ['function confirmCompletion(bytes32)'];
         const c = new ethers.Contract(ESCROW_ADDRESS, abi, signer);
+
         await c.callStatic.confirmCompletion(b32);
-        let gas; try { gas = await c.estimateGas.confirmCompletion(b32); } catch { gas = ethers.BigNumber.from(150000); }
+        let gas;
+        try { gas = await c.estimateGas.confirmCompletion(b32); }
+        catch { gas = ethers.BigNumber.from(150000); }
+
         const tx = await c.confirmCompletion(b32, { gasLimit: gas.mul(12).div(10) });
         await tx.wait();
       } catch {
@@ -309,7 +311,7 @@ export default function ReceivedScenarios() {
     }
   };
 
-  // ——— СПОРИ
+  // СПОРИ
   const loadOpenDispute = useCallback(async (scenarioId: string) => {
     let d = await getLatestDisputeByScenario(scenarioId);
     if (!d) {
@@ -329,29 +331,43 @@ export default function ReceivedScenarios() {
     const file = ev.target.files?.[0]; if (!file) return;
     const d = openDisputes[s.id];
     if (!d || d.status !== 'open' || d.behavior_id) { ev.target.value = ''; return; }
-    setUploading(p => ({ ...p, [s.id]: true })); try {
+    setUploading(p => ({ ...p, [s.id]: true }));
+    try {
       await uploadEvidenceAndAttach(d.id, file, uidRef.current);
       await loadOpenDispute(s.id);
       try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
       await pushNotificationManager.showNotification({
         title: '📹 Відеодоказ завантажено',
-        body: 'Кліп зʼявився в стрічці Behaviors для голосування.',
+        body: 'Кліп зʼявився в Behaviors для голосування.',
         tag: `evidence-uploaded-${s.id}`,
         requireSound: true
       });
     } catch (e:any) {
       alert(e?.message || 'Помилка завантаження відео');
-    } finally { setUploading(p => ({ ...p, [s.id]: false })); ev.target.value = ''; }
+    } finally {
+      setUploading(p => ({ ...p, [s.id]: false }));
+      ev.target.value = '';
+    }
   };
 
-  // стилі
   const hintStyle: React.CSSProperties = { fontSize: 12, lineHeight: '16px', opacity: 0.8, marginBottom: 8 };
   const labelStyle: React.CSSProperties = { fontSize: 13, lineHeight: '18px', marginBottom: 6, opacity: 0.9 };
   const amountPillStyle: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 8, borderRadius: 9999, padding: '2px 8px', background: '#f7f7f7',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 9999,
+    padding: '2px 8px',
+    background: '#f7f7f7',
   };
   const amountInputStyle: React.CSSProperties = {
-    borderRadius: 9999, padding: '10px 14px', fontSize: 16, height: 40, outline: 'none', border: 'none', background: 'transparent',
+    borderRadius: 9999,
+    padding: '10px 14px',
+    fontSize: 16,
+    height: 40,
+    outline: 'none',
+    border: 'none',
+    background: 'transparent',
   };
 
   const parseDigits = (raw: string): number | null | 'invalid' => {
