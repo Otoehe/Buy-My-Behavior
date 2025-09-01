@@ -31,7 +31,6 @@ SOUND.volume = 0.85;
 // helpers
 
 async function ensureBSCAndGetSigner() {
-  // тепер перемикаємо мережу централізовано
   await ensureBSC();
   return await getSigner();
 }
@@ -173,7 +172,7 @@ export default function ReceivedScenarios() {
   }, []);
   useEffect(() => {
     refreshRatedMap(scenarios, userId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, JSON.stringify(scenarios.map(s => ({ id: s.id, status: s.status })))]);
 
   const measureAll = useCallback(() => {
@@ -260,7 +259,7 @@ export default function ReceivedScenarios() {
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
       const signer = await ensureBSCAndGetSigner();
-      const who = (await signer.getAddress()).toLowerCase();
+      const who = (await (signer as any).getAddress()).toLowerCase();
       const provider: any = (signer as any).provider;
 
       const dealBefore = await getDealOnChain(s.id);
@@ -274,7 +273,7 @@ export default function ReceivedScenarios() {
       }
 
       const bal = await provider.getBalance(who); // bigint у v6
-      const minFee = ethers.parseUnits('0.00005', 'ether'); // bigint
+      const minFee = (ethers as any).parseUnits?.('0.00005', 'ether') ?? 50_000_000_000_000n; // 0.00005
       if (typeof bal === 'bigint' ? bal < minFee : (bal as any).lt?.(minFee)) {
         alert('Недостатньо нативної монети для комісії.');
         return;
@@ -283,15 +282,20 @@ export default function ReceivedScenarios() {
       try {
         const b32 = generateScenarioIdBytes32(s.id);
         const abi = ['function confirmCompletion(bytes32)'];
-        const c = new ethers.Contract(ESCROW_ADDRESS, abi, signer);
+        const c = new (ethers as any).Contract(ESCROW_ADDRESS, abi, signer);
 
         // симуляція / dry-run (v6)
-        await c.confirmCompletion.staticCall(b32);
+        if (c?.confirmCompletion?.staticCall) {
+          await c.confirmCompletion.staticCall(b32);
+        }
 
         // оцінка газу (v6 → bigint)
         let gas: bigint;
-        try { gas = await c.confirmCompletion.estimateGas(b32); }
-        catch { gas = 150000n; }
+        try {
+          gas = (await c.confirmCompletion.estimateGas(b32)) as bigint;
+        } catch {
+          gas = 150000n;
+        }
 
         const tx = await c.confirmCompletion(b32, { gasLimit: (gas * 12n) / 10n });
         await tx.wait();
@@ -449,3 +453,79 @@ export default function ReceivedScenarios() {
                     placeholder="—"
                     onChange={(e) => {
                       const raw = e.target.value;
+                      // лише цифри; порожньо = null
+                      if (raw === '' || /^[0-9]+$/.test(raw)) {
+                        setLocal(s.id, { donation_amount_usdt: raw === '' ? null : parseInt(raw, 10) });
+                      }
+                    }}
+                    onBlur={(e) => {
+                      if (s.status === 'confirmed') return;
+                      const res = parseDigits((e.target as HTMLInputElement).value);
+                      if (res === 'invalid') { alert('Лише цифри (0,1,2,3,...)'); return; }
+                      updateScenarioField(s.id, 'donation_amount_usdt', res === null ? null : res);
+                    }}
+                    disabled={s.status === 'confirmed'}
+                    style={amountInputStyle}
+                  />
+                  <span className="amount-unit">USDT</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="scenario-actions">
+              <button className="btn agree"   onClick={() => handleAgree(s)}  disabled={!canAgree(s)}>🤝 Погодити угоду</button>
+              <button className="btn confirm" onClick={() => handleConfirm(s)} disabled={!canConfirm(s)}>✅ Підтвердити виконання</button>
+
+              <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                <RateCounterpartyModal
+                  scenarioId={s.id}
+                  counterpartyId={s.creator_id}
+                  disabled={!(s.status === 'confirmed' && !ratedMap[s.id])}
+                  onDone={() => setRatedMap(prev => ({ ...prev, [s.id]: true }))}
+                />
+                {s.status === 'confirmed' && ratedMap[s.id] && (
+                  <span style={{ opacity: .8 }}>⭐ Оцінено</span>
+                )}
+              </div>
+
+              <input
+                type="file"
+                accept="video/*"
+                ref={el => { fileInputsRef.current[s.id] = el; }}
+                onChange={(ev) => onFileChange(s, ev)}
+                style={{ display: 'none' }}
+              />
+              <button
+                type="button"
+                className="btn dispute"
+                onClick={() => {
+                  const i = fileInputsRef.current[s.id];
+                  if (!i || uploading[s.id]) return;
+                  i.value = '';
+                  i.click();
+                }}
+                disabled={
+                  !openDisputes[s.id] ||
+                  openDisputes[s.id]?.status !== 'open' ||
+                  !!openDisputes[s.id]?.behavior_id ||
+                  !!uploading[s.id]
+                }
+                title={!openDisputes[s.id] ? 'Доступно лише при відкритому спорі' : ''}
+              >
+                {uploading[s.id] ? '…' : '📹 ЗАВАНТАЖИТИ ВІДЕОДОКАЗ'}
+              </button>
+
+              <button
+                className="btn location"
+                onClick={() => hasCoords(s) && window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank')}
+                disabled={!hasCoords(s)}
+              >📍 Показати локацію</button>
+            </div>
+          </div>
+        );
+      })}
+
+      <CelebrationToast open={showFinalToast} variant="executor" onClose={() => setShowFinalToast(false)} />
+    </div>
+  );
+}

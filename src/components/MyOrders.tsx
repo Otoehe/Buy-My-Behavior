@@ -13,6 +13,7 @@ import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 import { StatusStripClassic } from './StatusStripClassic';
+import { initiateDispute } from '../lib/disputeApi';
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
@@ -36,11 +37,11 @@ export default function MyOrders() {
   const [rateScenarioId, setRateScenarioId] = useState<string | null>(null);
   const [ratedOrders, setRatedOrders] = useState<Set<string>>(new Set());
 
-  // нотифікації (як і було)
+  // ініціалізація пушів (як і було)
   useNotifications();
   useRealtimeNotifications();
 
-  // локальні правки у списку + live-редагування у картці
+  // локальні правки прямо у списку
   const setLocal = useCallback((id: string, patch: LocalPatch) => {
     setLocalState(prev => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
     setList(prev => prev.map(s => (s.id === id ? { ...s, ...(patch as any) } : s)));
@@ -76,7 +77,7 @@ export default function MyOrders() {
     if (!error && data) setList(data as Scenario[]);
   }, []);
 
-  // безпечна realtime-підписка (фільтр лише по моїх записах + INSERT/UPDATE/DELETE)
+  // безпечна realtime-підписка (фільтр тільки по моїх записах + INSERT/UPDATE/DELETE)
   useEffect(() => {
     let cancelled = false;
 
@@ -104,12 +105,10 @@ export default function MyOrders() {
                 const delId = payload?.old?.id as string | undefined;
                 return delId ? prev.filter(x => x.id !== delId) : prev;
               }
-
               const row = payload?.new as Scenario | undefined;
               if (!row) return prev;
 
               const i = prev.findIndex(x => x.id === row.id);
-
               if (type === 'INSERT') return i === -1 ? [row, ...prev] : prev;
               if (type === 'UPDATE') {
                 if (i === -1) return prev;
@@ -123,7 +122,6 @@ export default function MyOrders() {
         )
         .subscribe();
 
-      // cleanup
       return () => {
         cancelled = true;
         try { supabase.removeChannel(ch); } catch {}
@@ -212,15 +210,8 @@ export default function MyOrders() {
 
   const handleDispute = useCallback(async (s: Scenario) => {
     try {
-      await supabase.rpc('initiate_dispute_for_scenario', { p_scenario_id: s.id }).catch(async () => {
-        // якщо немає RPC — залишаємо стару дію через REST
-        // @ts-ignore: старий шлях
-        const { initiateDispute } = await import('../lib/disputeApi');
-        await initiateDispute(s.id);
-      });
-
+      await initiateDispute(s.id);
       await supabase.from('scenarios').update({ status: 'disputed' as Status }).eq('id', s.id);
-
       await fetchMyScenarios();
       await pushNotificationManager.showNotification({
         title: '⚠️ Відкрито диспут',
@@ -298,7 +289,7 @@ export default function MyOrders() {
                 });
               }}
 
-              // лише цілі числа >= 0; пусто = null
+              // лише цілі числа ≥ 0; пусто = null
               onChangeAmount={(v) => setLocal(s.id, { donation_amount_usdt: v })}
               onCommitAmount={async (v) => {
                 if (s.status === 'confirmed') return;
