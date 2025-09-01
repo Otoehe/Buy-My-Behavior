@@ -1,20 +1,13 @@
 // 📄 src/components/MyOrders.tsx
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import {
-  lockFunds,
-  confirmCompletionOnChain,
-  getDealOnChain,
-} from '../lib/escrowContract';
+import { lockFunds, confirmCompletionOnChain } from '../lib/escrowContract';
 import { getSigner } from '../lib/web3';
 import { ethers } from 'ethers';
 import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
 import { useRealtimeNotifications } from '../lib/realtimeNotifications';
 import CelebrationToast from './CelebrationToast';
 import './MyOrders.css';
-
-import type { DisputeRow } from '../lib/tables';
-import { initiateDispute, getLatestDisputeByScenario } from '../lib/disputeApi';
 
 import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
@@ -43,9 +36,11 @@ export default function MyOrders() {
   const [rateScenarioId, setRateScenarioId] = useState<string | null>(null);
   const [ratedOrders, setRatedOrders] = useState<Set<string>>(new Set());
 
+  // нотифікації (як і було)
   useNotifications();
   useRealtimeNotifications();
 
+  // локальні правки у списку + live-редагування у картці
   const setLocal = useCallback((id: string, patch: LocalPatch) => {
     setLocalState(prev => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
     setList(prev => prev.map(s => (s.id === id ? { ...s, ...(patch as any) } : s)));
@@ -54,9 +49,10 @@ export default function MyOrders() {
   const hasCoords = (s: Scenario) =>
     typeof s.latitude === 'number' &&
     typeof s.longitude === 'number' &&
-    !Number.isNaN(s.latitude) &&
-    !Number.isNaN(s.longitude);
+    Number.isFinite(s.latitude) &&
+    Number.isFinite(s.longitude);
 
+  // кроки: погодити → заблокувати → підтвердити
   const stepOf = (s: Scenario) => {
     if (!s.is_agreed_by_customer || !s.is_agreed_by_executor) return 1; // agree
     if (!s.is_locked_onchain) return 2; // lock
@@ -66,10 +62,10 @@ export default function MyOrders() {
   const canDispute = (s: Scenario) =>
     s.status !== 'disputed' && s.is_locked_onchain && s.status !== 'confirmed';
 
-  // завантаження сценаріїв (ти = creator_id)
+  // завантаження сценаріїв (ти — creator)
   const fetchMyScenarios = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return setList([]);
+    if (!user) { setList([]); return; }
 
     const { data, error } = await supabase
       .from('scenarios')
@@ -77,48 +73,64 @@ export default function MyOrders() {
       .eq('creator_id', user.id)
       .order('created_at', { ascending: false });
 
-    if (!error && data) setList(data as any as Scenario[]);
+    if (!error && data) setList(data as Scenario[]);
   }, []);
 
+  // безпечна realtime-підписка (фільтр лише по моїх записах + INSERT/UPDATE/DELETE)
   useEffect(() => {
-    fetchMyScenarios();
+    let cancelled = false;
 
-    // 🔒 БЕЗПЕЧНА realtime-підписка: коректно обробляє INSERT / UPDATE / DELETE
-    const ch = supabase
-      .channel('realtime:scenarios-myorders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'scenarios' }, (payload: any) => {
-        const type = payload?.eventType as 'INSERT' | 'UPDATE' | 'DELETE' | undefined;
+    (async () => {
+      await fetchMyScenarios();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-        setList(prev => {
-          if (type === 'DELETE') {
-            const delId = payload?.old?.id as string | undefined;
-            return delId ? prev.filter(x => x.id !== delId) : prev;
+      const ch = supabase
+        .channel('realtime:scenarios-myorders')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'scenarios',
+            filter: `creator_id=eq.${user.id}`,
+          },
+          (payload: any) => {
+            const type = payload?.eventType as 'INSERT' | 'UPDATE' | 'DELETE' | undefined;
+            if (cancelled) return;
+
+            setList(prev => {
+              if (type === 'DELETE') {
+                const delId = payload?.old?.id as string | undefined;
+                return delId ? prev.filter(x => x.id !== delId) : prev;
+              }
+
+              const row = payload?.new as Scenario | undefined;
+              if (!row) return prev;
+
+              const i = prev.findIndex(x => x.id === row.id);
+
+              if (type === 'INSERT') return i === -1 ? [row, ...prev] : prev;
+              if (type === 'UPDATE') {
+                if (i === -1) return prev;
+                const next = [...prev];
+                next[i] = { ...next[i], ...row };
+                return next;
+              }
+              return prev;
+            });
           }
+        )
+        .subscribe();
 
-          const row = payload?.new as Scenario | undefined;
-          if (!row) return prev;
+      // cleanup
+      return () => {
+        cancelled = true;
+        try { supabase.removeChannel(ch); } catch {}
+      };
+    })();
 
-          // тримаємо тільки мої (creator_id = я)
-          // якщо хочеш жорстко фільтрувати тут: const mine = row.creator_id === currentUserId
-          const i = prev.findIndex(x => x.id === row.id);
-
-          if (type === 'INSERT') {
-            return i === -1 ? [row, ...prev] : prev;
-          }
-          if (type === 'UPDATE') {
-            if (i === -1) return prev;
-            const next = [...prev];
-            next[i] = { ...next[i], ...row };
-            return next;
-          }
-          return prev;
-        });
-      })
-      .subscribe();
-
-    return () => {
-      try { supabase.removeChannel(ch); } catch {}
-    };
+    return () => { cancelled = true; };
   }, [fetchMyScenarios]);
 
   // дії
@@ -128,8 +140,8 @@ export default function MyOrders() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Потрібно увійти');
 
-      const patch: any = { is_agreed_by_customer: true, status: 'pending' };
-      if (s.is_agreed_by_executor) patch.status = 'agreed';
+      const patch: Partial<Scenario> = { is_agreed_by_customer: true, status: 'pending' as Status };
+      if (s.is_agreed_by_executor) patch.status = 'agreed' as Status;
 
       await supabase.from('scenarios').update(patch).eq('id', s.id);
 
@@ -157,11 +169,11 @@ export default function MyOrders() {
       }
       const signer = await getSigner();
       const tx = await lockFunds(signer as ethers.Signer, s);
-      await tx.wait?.();
+      await tx?.wait?.();
 
       await supabase.from('scenarios').update({
         is_locked_onchain: true,
-        status: 'agreed'
+        status: 'agreed' as Status
       }).eq('id', s.id);
 
       try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
@@ -185,9 +197,9 @@ export default function MyOrders() {
     try {
       const signer = await getSigner();
       const tx = await confirmCompletionOnChain(signer as ethers.Signer, s);
-      await tx.wait?.();
+      await tx?.wait?.();
 
-      await supabase.from('scenarios').update({ status: 'confirmed' }).eq('id', s.id);
+      await supabase.from('scenarios').update({ status: 'confirmed' as Status }).eq('id', s.id);
 
       setToast(true);
       await fetchMyScenarios();
@@ -200,8 +212,15 @@ export default function MyOrders() {
 
   const handleDispute = useCallback(async (s: Scenario) => {
     try {
-      await initiateDispute(s.id);
-      await supabase.from('scenarios').update({ status: 'disputed' }).eq('id', s.id);
+      await supabase.rpc('initiate_dispute_for_scenario', { p_scenario_id: s.id }).catch(async () => {
+        // якщо немає RPC — залишаємо стару дію через REST
+        // @ts-ignore: старий шлях
+        const { initiateDispute } = await import('../lib/disputeApi');
+        await initiateDispute(s.id);
+      });
+
+      await supabase.from('scenarios').update({ status: 'disputed' as Status }).eq('id', s.id);
+
       await fetchMyScenarios();
       await pushNotificationManager.showNotification({
         title: '⚠️ Відкрито диспут',
@@ -252,6 +271,7 @@ export default function MyOrders() {
 
         return (
           <div key={s.id} style={{ marginBottom: 12 }}>
+            {/* індикатор прогресу над карткою */}
             <div style={{ marginBottom: 10 }}>
               <StatusStripClassic state={s} />
             </div>
@@ -264,7 +284,7 @@ export default function MyOrders() {
                 if (s.status === 'confirmed') return;
                 await supabase.from('scenarios').update({
                   description: v,
-                  status: 'pending',
+                  status: 'pending' as Status,
                   is_agreed_by_customer: false,
                   is_agreed_by_executor: false
                 }).eq('id', s.id);
@@ -278,6 +298,7 @@ export default function MyOrders() {
                 });
               }}
 
+              // лише цілі числа >= 0; пусто = null
               onChangeAmount={(v) => setLocal(s.id, { donation_amount_usdt: v })}
               onCommitAmount={async (v) => {
                 if (s.status === 'confirmed') return;
@@ -291,7 +312,7 @@ export default function MyOrders() {
                 }
                 await supabase.from('scenarios').update({
                   donation_amount_usdt: v,
-                  status: 'pending',
+                  status: 'pending' as Status,
                   is_agreed_by_customer: false,
                   is_agreed_by_executor: false
                 }).eq('id', s.id);
