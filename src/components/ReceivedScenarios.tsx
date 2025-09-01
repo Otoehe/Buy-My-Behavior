@@ -25,16 +25,19 @@ interface Scenario extends ScenarioRow {}
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.85;
 
-// Helpers
+// ───────────────── helpers ─────────────────
+
 async function ensureBSCAndGetSigner() {
   await ensureBSC();
   return await getSigner();
 }
+
 function humanizeEthersError(err: any): string {
   const m = String(err?.shortMessage || err?.reason || err?.error?.message || err?.message || '');
   if (!m) return 'Невідома помилка';
   return m.replace(/execution reverted:?/i, '').replace(/\(reason=.*?\)/i, '').trim();
 }
+
 async function waitForChainRelease(sid: string, tries = 6, delayMs = 1200) {
   for (let i = 0; i < tries; i++) {
     try {
@@ -46,10 +49,13 @@ async function waitForChainRelease(sid: string, tries = 6, delayMs = 1200) {
   }
   return 0;
 }
+
 function reachedExecutionTime(s: Scenario) {
   const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
   return !isNaN(dt.getTime()) && new Date() >= dt;
 }
+
+// ───────────────── component ─────────────────
 
 export default function ReceivedScenarios() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
@@ -64,15 +70,16 @@ export default function ReceivedScenarios() {
   const [openDisputes, setOpenDisputes] = useState<Record<string, DisputeRow | null>>({});
   const [uploading, setUploading] = useState<Record<string, boolean>>({});
   const fileInputsRef = useRef<Record<string, HTMLInputElement | null>>({});
+
   const [ratedMap, setRatedMap] = useState<Record<string, boolean>>({});
 
   const { permissionStatus, requestPermission } = useNotifications();
   const rt = useRealtimeNotifications(userId);
 
   function stepOf(s: Scenario) {
-    if (!s.is_agreed_by_executor) return 1;
-    if (!s.escrow_tx_hash && s.is_agreed_by_customer) return 0;
-    if (s.escrow_tx_hash && reachedExecutionTime(s) && !s.is_completed_by_executor) return 2;
+    if (!s.is_agreed_by_executor) return 1; // погодити
+    if (!s.escrow_tx_hash && s.is_agreed_by_customer) return 0; // чекаємо lock
+    if (s.escrow_tx_hash && reachedExecutionTime(s) && !s.is_completed_by_executor) return 2; // підтвердити
     return 0;
   }
   const canAgree   = (s: Scenario) => stepOf(s) === 1 && !agreeBusy[s.id];
@@ -97,8 +104,10 @@ export default function ReceivedScenarios() {
             if (!s) return prev;
             const mine = s.executor_id === uidRef.current || (s as any).receiver_id === uidRef.current;
             if (!mine) return prev;
+
             const i = prev.findIndex(x => x.id === s.id);
             if (type === 'INSERT') return i === -1 ? [s, ...prev] : prev;
+
             if (type === 'UPDATE' && i !== -1) {
               const next = [...prev];
               if (prev[i].status !== 'confirmed' && s.status === 'confirmed') {
@@ -160,7 +169,7 @@ export default function ReceivedScenarios() {
   }, []);
   useEffect(() => {
     refreshRatedMap(scenarios, userId);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, JSON.stringify(scenarios.map(s => ({ id: s.id, status: s.status })))]);
 
   const measureAll = useCallback(() => {
@@ -180,16 +189,18 @@ export default function ReceivedScenarios() {
   const setLocal = (id: string, patch: Partial<Scenario>) =>
     setScenarios(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
+  // редагування опису/суми → pending + скидання погоджень
   const updateScenarioField = async (id: string, field: keyof Scenario, value: any) => {
     if (field === 'donation_amount_usdt') {
-      if (value === '' || value === null) {
-        // allow empty
-      } else {
+      if (!(value === '' || value === null)) {
         const n = Number(value);
-        const isInt = Number.isInteger(n);
-        if (!isInt || n < 0) { alert('Сума має бути цілим числом (0,1,2,3,...)'); return; }
+        if (!Number.isInteger(n) || n < 0) {
+          alert('Сума має бути цілим числом (0,1,2,3,...)');
+          return;
+        }
       }
     }
+
     setLocal(id, { [field]: value as any, is_agreed_by_customer: false, is_agreed_by_executor: false, status: 'pending' });
     await supabase.from('scenarios').update({
       [field]: value === '' ? null : value,
@@ -197,6 +208,7 @@ export default function ReceivedScenarios() {
       is_agreed_by_executor: false,
       status: 'pending'
     }).eq('id', id);
+
     try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
     await pushNotificationManager.showNotification({
       title: field === 'donation_amount_usdt' ? '💰 Сума USDT оновлена (виконавець)' : '📝 Опис оновлено (виконавець)',
@@ -241,8 +253,8 @@ export default function ReceivedScenarios() {
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
       const signer = await ensureBSCAndGetSigner();
-      const who = (await (signer as any).getAddress()).toLowerCase();
-      const provider: any = (signer as any).provider;
+      const who = (await signer.getAddress()).toLowerCase();
+      const provider = (signer.provider as ethers.providers.Web3Provider);
 
       const dealBefore = await getDealOnChain(s.id);
       const statusOnChain = Number((dealBefore as any).status); // 1 = Locked
@@ -254,23 +266,17 @@ export default function ReceivedScenarios() {
         return;
       }
 
-      const bal = await provider.getBalance(who); // bigint у v6
-      const minFee = (ethers as any).parseUnits?.('0.00005', 'ether') ?? 50_000_000_000_000n;
-      if (typeof bal === 'bigint' ? bal < minFee : (bal as any).lt?.(minFee)) {
-        alert('Недостатньо нативної монети для комісії.');
-        return;
-      }
+      const bal = await provider.getBalance(who);
+      const minFee = ethers.utils.parseUnits('0.00005', 'ether');
+      if (bal.lt(minFee)) { alert('Недостатньо нативної монети для комісії.'); return; }
 
       try {
         const b32 = generateScenarioIdBytes32(s.id);
         const abi = ['function confirmCompletion(bytes32)'];
-        const c = new (ethers as any).Contract(ESCROW_ADDRESS, abi, signer);
-
-        if (c?.confirmCompletion?.staticCall) await c.confirmCompletion.staticCall(b32);
-
-        let gas: bigint;
-        try { gas = (await c.confirmCompletion.estimateGas(b32)) as bigint; } catch { gas = 150000n; }
-        const tx = await c.confirmCompletion(b32, { gasLimit: (gas * 12n) / 10n });
+        const c = new ethers.Contract(ESCROW_ADDRESS, abi, signer);
+        await c.callStatic.confirmCompletion(b32);
+        let gas; try { gas = await c.estimateGas.confirmCompletion(b32); } catch { gas = ethers.BigNumber.from(150000); }
+        const tx = await c.confirmCompletion(b32, { gasLimit: gas.mul(12).div(10) });
         await tx.wait();
       } catch {
         await confirmCompletionOnChain({ scenarioId: s.id });
@@ -303,6 +309,7 @@ export default function ReceivedScenarios() {
     }
   };
 
+  // ——— СПОРИ
   const loadOpenDispute = useCallback(async (scenarioId: string) => {
     let d = await getLatestDisputeByScenario(scenarioId);
     if (!d) {
@@ -337,7 +344,7 @@ export default function ReceivedScenarios() {
     } finally { setUploading(p => ({ ...p, [s.id]: false })); ev.target.value = ''; }
   };
 
-  // Inline styles
+  // стилі
   const hintStyle: React.CSSProperties = { fontSize: 12, lineHeight: '16px', opacity: 0.8, marginBottom: 8 };
   const labelStyle: React.CSSProperties = { fontSize: 13, lineHeight: '18px', marginBottom: 6, opacity: 0.9 };
   const amountPillStyle: React.CSSProperties = {
@@ -346,6 +353,7 @@ export default function ReceivedScenarios() {
   const amountInputStyle: React.CSSProperties = {
     borderRadius: 9999, padding: '10px 14px', fontSize: 16, height: 40, outline: 'none', border: 'none', background: 'transparent',
   };
+
   const parseDigits = (raw: string): number | null | 'invalid' => {
     if (raw.trim() === '') return null;
     if (!/^[0-9]+$/.test(raw.trim())) return 'invalid';
@@ -437,10 +445,10 @@ export default function ReceivedScenarios() {
                 <RateCounterpartyModal
                   scenarioId={s.id}
                   counterpartyId={s.creator_id}
-                  disabled={!(s.status === 'confirmed' && !ratedMap[s.id])}
+                  disabled={!canRate}
                   onDone={() => setRatedMap(prev => ({ ...prev, [s.id]: true }))}
                 />
-                {s.status === 'confirmed' && ratedMap[s.id] && (
+                {!canRate && s.status === 'confirmed' && ratedMap[s.id] && (
                   <span style={{ opacity: .8 }}>⭐ Оцінено</span>
                 )}
               </div>
