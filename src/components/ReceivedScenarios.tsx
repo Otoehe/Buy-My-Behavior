@@ -17,8 +17,6 @@ import './MyOrders.css';
 import type { DisputeRow, ScenarioRow } from '../lib/tables';
 import { getLatestDisputeByScenario, uploadEvidenceAndAttach, ensureDisputeRowForScenario } from '../lib/disputeApi';
 import RateCounterpartyModal from './RateCounterpartyModal';
-
-// індикатор статусів
 import { StatusStripClassic } from './StatusStripClassic';
 
 type Status = 'pending' | 'agreed' | 'confirmed' | 'disputed' | string;
@@ -27,20 +25,16 @@ interface Scenario extends ScenarioRow {}
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.85;
 
-// ———————————————————————————————————————————————————————
-// helpers
-
+// Helpers
 async function ensureBSCAndGetSigner() {
   await ensureBSC();
   return await getSigner();
 }
-
 function humanizeEthersError(err: any): string {
   const m = String(err?.shortMessage || err?.reason || err?.error?.message || err?.message || '');
   if (!m) return 'Невідома помилка';
   return m.replace(/execution reverted:?/i, '').replace(/\(reason=.*?\)/i, '').trim();
 }
-
 async function waitForChainRelease(sid: string, tries = 6, delayMs = 1200) {
   for (let i = 0; i < tries; i++) {
     try {
@@ -52,13 +46,10 @@ async function waitForChainRelease(sid: string, tries = 6, delayMs = 1200) {
   }
   return 0;
 }
-
 function reachedExecutionTime(s: Scenario) {
   const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
   return !isNaN(dt.getTime()) && new Date() >= dt;
 }
-
-// ———————————————————————————————————————————————————————
 
 export default function ReceivedScenarios() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
@@ -73,16 +64,15 @@ export default function ReceivedScenarios() {
   const [openDisputes, setOpenDisputes] = useState<Record<string, DisputeRow | null>>({});
   const [uploading, setUploading] = useState<Record<string, boolean>>({});
   const fileInputsRef = useRef<Record<string, HTMLInputElement | null>>({});
-
   const [ratedMap, setRatedMap] = useState<Record<string, boolean>>({});
 
   const { permissionStatus, requestPermission } = useNotifications();
   const rt = useRealtimeNotifications(userId);
 
   function stepOf(s: Scenario) {
-    if (!s.is_agreed_by_executor) return 1; // погодити
-    if (!s.escrow_tx_hash && s.is_agreed_by_customer) return 0; // чекаємо lock
-    if (s.escrow_tx_hash && reachedExecutionTime(s) && !s.is_completed_by_executor) return 2; // підтвердити
+    if (!s.is_agreed_by_executor) return 1;
+    if (!s.escrow_tx_hash && s.is_agreed_by_customer) return 0;
+    if (s.escrow_tx_hash && reachedExecutionTime(s) && !s.is_completed_by_executor) return 2;
     return 0;
   }
   const canAgree   = (s: Scenario) => stepOf(s) === 1 && !agreeBusy[s.id];
@@ -107,10 +97,8 @@ export default function ReceivedScenarios() {
             if (!s) return prev;
             const mine = s.executor_id === uidRef.current || (s as any).receiver_id === uidRef.current;
             if (!mine) return prev;
-
             const i = prev.findIndex(x => x.id === s.id);
             if (type === 'INSERT') return i === -1 ? [s, ...prev] : prev;
-
             if (type === 'UPDATE' && i !== -1) {
               const next = [...prev];
               if (prev[i].status !== 'confirmed' && s.status === 'confirmed') {
@@ -192,21 +180,16 @@ export default function ReceivedScenarios() {
   const setLocal = (id: string, patch: Partial<Scenario>) =>
     setScenarios(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
-  // редагування опису/суми → pending + скидання погоджень
   const updateScenarioField = async (id: string, field: keyof Scenario, value: any) => {
     if (field === 'donation_amount_usdt') {
       if (value === '' || value === null) {
-        // дозволяємо пусто
+        // allow empty
       } else {
         const n = Number(value);
         const isInt = Number.isInteger(n);
-        if (!isInt || n < 0) {
-          alert('Сума має бути цілим числом (0,1,2,3,...)');
-          return;
-        }
+        if (!isInt || n < 0) { alert('Сума має бути цілим числом (0,1,2,3,...)'); return; }
       }
     }
-
     setLocal(id, { [field]: value as any, is_agreed_by_customer: false, is_agreed_by_executor: false, status: 'pending' });
     await supabase.from('scenarios').update({
       [field]: value === '' ? null : value,
@@ -214,7 +197,6 @@ export default function ReceivedScenarios() {
       is_agreed_by_executor: false,
       status: 'pending'
     }).eq('id', id);
-
     try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
     await pushNotificationManager.showNotification({
       title: field === 'donation_amount_usdt' ? '💰 Сума USDT оновлена (виконавець)' : '📝 Опис оновлено (виконавець)',
@@ -273,7 +255,7 @@ export default function ReceivedScenarios() {
       }
 
       const bal = await provider.getBalance(who); // bigint у v6
-      const minFee = (ethers as any).parseUnits?.('0.00005', 'ether') ?? 50_000_000_000_000n; // 0.00005
+      const minFee = (ethers as any).parseUnits?.('0.00005', 'ether') ?? 50_000_000_000_000n;
       if (typeof bal === 'bigint' ? bal < minFee : (bal as any).lt?.(minFee)) {
         alert('Недостатньо нативної монети для комісії.');
         return;
@@ -284,23 +266,13 @@ export default function ReceivedScenarios() {
         const abi = ['function confirmCompletion(bytes32)'];
         const c = new (ethers as any).Contract(ESCROW_ADDRESS, abi, signer);
 
-        // симуляція / dry-run (v6)
-        if (c?.confirmCompletion?.staticCall) {
-          await c.confirmCompletion.staticCall(b32);
-        }
+        if (c?.confirmCompletion?.staticCall) await c.confirmCompletion.staticCall(b32);
 
-        // оцінка газу (v6 → bigint)
         let gas: bigint;
-        try {
-          gas = (await c.confirmCompletion.estimateGas(b32)) as bigint;
-        } catch {
-          gas = 150000n;
-        }
-
+        try { gas = (await c.confirmCompletion.estimateGas(b32)) as bigint; } catch { gas = 150000n; }
         const tx = await c.confirmCompletion(b32, { gasLimit: (gas * 12n) / 10n });
         await tx.wait();
       } catch {
-        // фолбек на твою утиліту
         await confirmCompletionOnChain({ scenarioId: s.id });
       }
 
@@ -331,7 +303,6 @@ export default function ReceivedScenarios() {
     }
   };
 
-  // ——— СПОРИ
   const loadOpenDispute = useCallback(async (scenarioId: string) => {
     let d = await getLatestDisputeByScenario(scenarioId);
     if (!d) {
@@ -366,27 +337,15 @@ export default function ReceivedScenarios() {
     } finally { setUploading(p => ({ ...p, [s.id]: false })); ev.target.value = ''; }
   };
 
-  // стилі (інлайн)
+  // Inline styles
   const hintStyle: React.CSSProperties = { fontSize: 12, lineHeight: '16px', opacity: 0.8, marginBottom: 8 };
   const labelStyle: React.CSSProperties = { fontSize: 13, lineHeight: '18px', marginBottom: 6, opacity: 0.9 };
   const amountPillStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    borderRadius: 9999,
-    padding: '2px 8px',
-    background: '#f7f7f7',
+    display: 'flex', alignItems: 'center', gap: 8, borderRadius: 9999, padding: '2px 8px', background: '#f7f7f7',
   };
   const amountInputStyle: React.CSSProperties = {
-    borderRadius: 9999,
-    padding: '10px 14px',
-    fontSize: 16,
-    height: 40,
-    outline: 'none',
-    border: 'none',
-    background: 'transparent',
+    borderRadius: 9999, padding: '10px 14px', fontSize: 16, height: 40, outline: 'none', border: 'none', background: 'transparent',
   };
-
   const parseDigits = (raw: string): number | null | 'invalid' => {
     if (raw.trim() === '') return null;
     if (!/^[0-9]+$/.test(raw.trim())) return 'invalid';
@@ -409,7 +368,6 @@ export default function ReceivedScenarios() {
 
         return (
           <div key={s.id} className="scenario-card" data-card-id={s.id}>
-            {/* індикатор статусу угоди */}
             <div style={{ marginBottom: 10 }}>
               <StatusStripClassic state={s} />
             </div>
@@ -453,7 +411,6 @@ export default function ReceivedScenarios() {
                     placeholder="—"
                     onChange={(e) => {
                       const raw = e.target.value;
-                      // лише цифри; порожньо = null
                       if (raw === '' || /^[0-9]+$/.test(raw)) {
                         setLocal(s.id, { donation_amount_usdt: raw === '' ? null : parseInt(raw, 10) });
                       }
