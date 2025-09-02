@@ -18,7 +18,7 @@
     "@walletconnect/ethereum-provider": "^2.21.8",
     "@web3-storage/w3up-client": "^17.3.0",
     "axios": "^1.11.0",
-    "ethers": "^5.8.0",
+    "ethers": "5.7.2",
     "leaflet": "^1.9.4",
     "lodash": "^4.17.21",
     "mapbox-gl": "^3.13.0",
