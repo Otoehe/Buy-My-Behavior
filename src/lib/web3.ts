@@ -1,19 +1,16 @@
-// src/lib/web3.ts — сумісний з ethers v5 + містить draft-хелпери для ScenarioForm
-
+// 📄 src/lib/web3.ts — ethers v5 сумісний
 import { ethers } from 'ethers';
 import MetaMaskSDK from '@metamask/sdk';
 
-// ---------------------- BSC ----------------------
-const BSC_CHAIN_ID_HEX = '0x38';
+const BSC_CHAIN_ID_HEX = '0x38'; // 56
 const BSC_PARAMS = {
   chainId: BSC_CHAIN_ID_HEX,
-  chainName: 'Binance Smart Chain',
+  chainName: 'BNB Smart Chain',
   nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
   rpcUrls: ['https://bsc-dataseed.binance.org/'],
   blockExplorerUrls: ['https://bscscan.com/'],
 };
 
-// ---------------------- SDK ----------------------
 let _sdk: MetaMaskSDK | null = null;
 let _sdkProvider: any | null = null;
 
@@ -21,40 +18,51 @@ function isMobile(): boolean {
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
-async function getSdkProvider() {
-  if (!_sdk) {
-    _sdk = new MetaMaskSDK({
-      dappMetadata: { name: 'Buy My Behavior', url: window.location.origin },
-      checkInstallationImmediately: false,
-      communicationLayerPreference: 'webrtc',
-      shouldShimWeb3: false,
-      useDeeplink: true,
-      preferDesktop: false,
-    });
+function pickInjectedProvider(): any | null {
+  const eth: any = (window as any).ethereum;
+  if (!eth) return null;
+  if (eth.providers?.length) {
+    const mm = eth.providers.find((p: any) => p?.isMetaMask);
+    return mm || eth.providers[0];
   }
-  if (!_sdkProvider) _sdkProvider = _sdk.getProvider();
-  return _sdkProvider;
+  return eth;
 }
 
-// ---------------------- Web3 (ethers v5) ----------------------
+/** ethers v5: повертаємо Web3Provider */
 export async function getProvider(): Promise<ethers.providers.Web3Provider> {
-  const base =
-    (window as any).ethereum ||
-    (isMobile() ? await getSdkProvider() : null);
+  const injected = pickInjectedProvider();
+  if (injected) {
+    return new ethers.providers.Web3Provider(injected, 'any');
+  }
 
-  if (!base) throw new Error('MetaMask provider is not available.');
-  return new ethers.providers.Web3Provider(base, 'any');
+  // мобільний сценарій — MetaMask SDK
+  if (isMobile()) {
+    if (!_sdk) {
+      _sdk = new MetaMaskSDK({
+        dappMetadata: { name: 'Buy My Behavior', url: window.location.origin },
+        checkInstallationImmediately: false,
+        communicationLayerPreference: 'webrtc',
+        shouldShimWeb3: false,
+        useDeeplink: true,
+        preferDesktop: false,
+      });
+    }
+    if (!_sdkProvider) _sdkProvider = _sdk.getProvider();
+    return new ethers.providers.Web3Provider(_sdkProvider as any, 'any');
+  }
+
+  throw new Error('MetaMask provider is not available.');
 }
 
 export async function requestAccounts(): Promise<string[]> {
   const provider = await getProvider();
-  const ethereum = (provider.provider as any) || (window as any).ethereum;
+  const ethereum = (provider as any).provider || (window as any).ethereum;
   return await ethereum.request({ method: 'eth_requestAccounts' });
 }
 
 export async function ensureBSC(): Promise<void> {
   const provider = await getProvider();
-  const ethereum = (provider.provider as any) || (window as any).ethereum;
+  const ethereum = (provider as any).provider || (window as any).ethereum;
 
   try {
     await ethereum.request({
@@ -73,6 +81,7 @@ export async function ensureBSC(): Promise<void> {
   }
 }
 
+/** ethers v5: повертаємо Signer від Web3Provider */
 export async function getSigner(): Promise<ethers.Signer> {
   const provider = await getProvider();
   await ensureBSC();
@@ -80,40 +89,42 @@ export async function getSigner(): Promise<ethers.Signer> {
   return provider.getSigner();
 }
 
-// ---------------------- ScenarioForm draft helpers ----------------------
-// Експортуємо тут, щоб нічого не міняти у ScenarioForm.tsx.
-// Зберігаються у localStorage. Можна викликати з uid або без.
-export type ScenarioDraft = {
+/* -----------------------------------------------------------
+   ДРАФТ ФОРМИ СЦЕНАРІЮ (щоб виправити імпорти в ScenarioForm)
+----------------------------------------------------------- */
+const DRAFT_KEY = 'scenarioFormDraft:v1';
+
+export type ScenarioFormDraft = {
   description?: string;
   donation_amount_usdt?: number | null;
+  date?: string;
+  time?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  [k: string]: any;
 };
 
-const DKEY = (uid?: string) => (uid ? `scenario_draft:${uid}` : 'scenario_draft');
-
-export async function saveScenarioFormDraft(a: any, b?: any) {
-  let uid: string | undefined;
-  let data: ScenarioDraft;
-
-  if (typeof a === 'string') { uid = a; data = b || {}; }
-  else { data = a || {}; }
-
-  try { localStorage.setItem(DKEY(uid), JSON.stringify(data)); } catch {}
+export function saveScenarioFormDraft(draft: ScenarioFormDraft): void {
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch {}
 }
 
-export async function loadScenarioFormDraft(a?: any): Promise<ScenarioDraft | null> {
-  const uid = typeof a === 'string' ? a : undefined;
+export function loadScenarioFormDraft(): ScenarioFormDraft | null {
   try {
-    const raw = localStorage.getItem(DKEY(uid));
-    return raw ? (JSON.parse(raw) as ScenarioDraft) : null;
+    const raw = localStorage.getItem(DRAFT_KEY);
+    return raw ? (JSON.parse(raw) as ScenarioFormDraft) : null;
   } catch {
     return null;
   }
 }
 
-// Залишено як заглушка, щоб не ламати існуючі виклики
-export async function syncScenarioForm() { /* no-op */ }
+/** З мерджем патчу в існуючий драфт */
+export function syncScenarioForm(patch: Partial<ScenarioFormDraft>): ScenarioFormDraft {
+  const current = loadScenarioFormDraft() || {};
+  const next = { ...current, ...patch };
+  saveScenarioFormDraft(next);
+  return next;
+}
 
-export async function clearScenarioFormDraft(a?: any) {
-  const uid = typeof a === 'string' ? a : undefined;
-  try { localStorage.removeItem(DKEY(uid)); } catch {}
+export function clearScenarioFormDraft(): void {
+  try { localStorage.removeItem(DRAFT_KEY); } catch {}
 }
