@@ -6,7 +6,7 @@ import {
   loadScenarioFormDraft,
   syncScenarioForm,
   clearScenarioFormDraft,
-} from "../lib/web3";
+} from "../lib/scenarioFormDraft"; // ✅ ВАЖЛИВО: імпортуємо з scenarioFormDraft
 import "./ScenarioForm.css";
 
 const VISITED_MAP_KEY = "scenario_visited_map";
@@ -34,7 +34,9 @@ export default function ScenarioForm() {
     const draft = loadScenarioFormDraft();
     if (draft) {
       setDescription(draft.description || "");
-      setDonationAmount(draft.price || "");
+      setDonationAmount(
+        draft.price != null ? String(draft.price) : ""
+      );
       setDate(draft.date || "");
       setTime(draft.time || "");
     }
@@ -175,7 +177,7 @@ export default function ScenarioForm() {
               value={description}
               onChange={(e) => {
                 setDescription(e.target.value);
-                syncScenarioForm("description", e.target.value);
+                syncScenarioForm({ description: e.target.value }); // ✅ передаємо об’єкт-патч
               }}
             />
           </label>
@@ -190,7 +192,7 @@ export default function ScenarioForm() {
               value={donationAmount}
               onChange={(e) => {
                 setDonationAmount(e.target.value);
-                syncScenarioForm("price", e.target.value);
+                syncScenarioForm({ price: e.target.value }); // ✅ об’єкт-патч
               }}
             />
           </label>
@@ -202,7 +204,7 @@ export default function ScenarioForm() {
               value={date}
               onChange={(e) => {
                 setDate(e.target.value);
-                syncScenarioForm("date", e.target.value);
+                syncScenarioForm({ date: e.target.value }); // ✅
               }}
             />
           </label>
@@ -214,7 +216,7 @@ export default function ScenarioForm() {
               value={time}
               onChange={(e) => {
                 setTime(e.target.value);
-                syncScenarioForm("time", e.target.value);
+                syncScenarioForm({ time: e.target.value }); // ✅
               }}
             />
           </label>
