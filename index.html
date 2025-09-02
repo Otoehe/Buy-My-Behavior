@@ -1,11 +1,12 @@
 <!doctype html>
 <html lang="uk">
   <head>
-    <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
-    />
+    <meta charset="utf-8" />
+    <!-- Адаптив + safe area для мобільних -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+    <!-- Канонічна адреса (для SEO) -->
+    <link rel="canonical" href="https://www.buymybehavior.com/" />
 
     <!-- PWA -->
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -14,31 +15,46 @@
     <!-- Android / Chrome -->
     <meta name="mobile-web-app-capable" content="yes" />
 
-    <!-- iOS PWA підтримка -->
+    <!-- iOS PWA -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="BMB" />
-    <!-- Якщо маєш окремі iOS-іконки — додай їх нижче; інакше лишаємо загальний 192px -->
     <link rel="apple-touch-icon" href="/icons/bmb-192.png" />
 
-    <!-- SEO / базове -->
-    <title>Buy My Behavior</title>
-    <meta name="description" content="BMB — Web3 платформа взаємодії та escrow на BSC" />
+    <!-- Базова SEO -->
+    <title>Buy My Behavior — BMB</title>
+    <meta name="description" content="BMB — Web3 платформа взаємодії та escrow на BSC." />
 
-    <!-- Favicons (не обов'язково, але бажано) -->
+    <!-- Open Graph / соцмережі -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Buy My Behavior — BMB" />
+    <meta property="og:description" content="Web3 платформа взаємодії та escrow на BSC." />
+    <meta property="og:url" content="https://www.buymybehavior.com/" />
+    <meta property="og:image" content="/icons/bmb-512.png" />
+
+    <!-- Favicons -->
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/bmb-192.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/bmb-192.png" />
     <link rel="icon" type="image/png" sizes="512x512" href="/icons/bmb-512.png" />
 
-    <!-- Вказівка браузеру не підміняти кольори -->
+    <!-- Системна тема лише світла (як у тебе було) -->
     <meta name="color-scheme" content="light only" />
+
+    <!-- Краще UX на мобільних -->
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- Важливо для SPA з глибокими маршрутами (/received, /profile) -->
+    <base href="/" />
   </head>
 
   <body>
     <noscript>Для роботи застосунку потрібен увімкнений JavaScript.</noscript>
     <div id="root"></div>
 
-    <!-- Vite entry -->
+    <!-- Патч для деяких web3-пакетів, яким потрібен global (не заважає іншим) -->
+    <script>window.global = window.global || window;</script>
+
+    <!-- Вхідна точка Vite/React -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
