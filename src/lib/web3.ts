@@ -1,4 +1,4 @@
-// src/lib/web3.ts — сумісний з ethers v5 і експортує драфт-функції для ScenarioForm
+// src/lib/web3.ts — сумісний з ethers v5 + містить draft-хелпери для ScenarioForm
 
 import { ethers } from 'ethers';
 import MetaMaskSDK from '@metamask/sdk';
@@ -81,8 +81,8 @@ export async function getSigner(): Promise<ethers.Signer> {
 }
 
 // ---------------------- ScenarioForm draft helpers ----------------------
-// Щоб не правити імпорт у ScenarioForm.tsx, експортуємо тут.
-// Працюють через localStorage. Можна викликати з uid або без.
+// Експортуємо тут, щоб нічого не міняти у ScenarioForm.tsx.
+// Зберігаються у localStorage. Можна викликати з uid або без.
 export type ScenarioDraft = {
   description?: string;
   donation_amount_usdt?: number | null;
