@@ -1,393 +1,342 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { lockFunds, confirmCompletionOnChain } from '../lib/escrowContract';
-import { getSigner } from '../lib/web3';
-import { ethers } from 'ethers';
+import { lockFunds, confirmCompletionOnChain, getDealOnChain } from '../lib/escrowContract';
 import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
 import { useRealtimeNotifications } from '../lib/realtimeNotifications';
 import CelebrationToast from './CelebrationToast';
 import './MyOrders.css';
 
+import type { DisputeRow } from '../lib/tables';
+import { initiateDispute, getLatestDisputeByScenario } from '../lib/disputeApi';
+
 import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 
-// Класичний степер над карткою
-import { StatusStripClassic } from './StatusStripClassic';
-
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
-<<<<<<< HEAD
-=======
-// ───────────────────────────────────────────────────────────────
-// Допоміжні типи
->>>>>>> parent of a8093be (1)
-type BusyMap = Record<string, boolean>;
-type LocalPatch = Partial<Pick<Scenario,
-  'description' | 'donation_amount_usdt'
->>;
+async function waitForChainRelease(scenarioId: string, tries = 6, delayMs = 1200): Promise<number> {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const deal = await getDealOnChain(scenarioId);
+      const st = Number((deal as any).status);
+      if (st === 3 || st === 4) return st;
+    } catch {}
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+  return 0;
+}
 
-<<<<<<< HEAD
-=======
-// ───────────────────────────────────────────────────────────────
-// Основний компонент
->>>>>>> parent of a8093be (1)
 export default function MyOrders() {
+  const [userId, setUserId] = useState('');
   const [list, setList] = useState<Scenario[]>([]);
-  const [agreeBusy, setAgreeBusy] = useState<BusyMap>({});
-  const [lockBusy, setLockBusy] = useState<BusyMap>({});
-  const [confirmBusy, setConfirmBusy] = useState<BusyMap>({});
+  const [agreeBusy, setAgreeBusy] = useState<Record<string, boolean>>({});
+  const [confirmBusy, setConfirmBusy] = useState<Record<string, boolean>>({});
+  const [lockBusy, setLockBusy] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState(false);
-
-  // рейтинг
-  const [rateOpen, setRateOpen] = useState(false);
-  const [rateBusy, setRateBusy] = useState(false);
-  const [rateScore, setRateScore] = useState<number>(10);
-  const [rateComment, setRateComment] = useState<string>('');
-  const [rateScenarioId, setRateScenarioId] = useState<string | null>(null);
+  const [openDisputes, setOpenDisputes] = useState<Record<string, DisputeRow | null>>({});
   const [ratedOrders, setRatedOrders] = useState<Set<string>>(new Set());
 
-  // Пуші / Realtime (нічого не змінюю — просто ініціюємо хуки)
-  useNotifications();
-  useRealtimeNotifications();
+  // rating modal state
+  const [rateOpen, setRateOpen] = useState(false);
+  const [rateFor, setRateFor] = useState<{ scenarioId: string, counterpartyId: string } | null>(null);
+  const [rateScore, setRateScore] = useState(10);
+  const [rateComment, setRateComment] = useState('');
+  const [rateBusy, setRateBusy] = useState(false);
 
-  // ── локальні правки у стейті картки
-  const setLocal = useCallback((id: string, patch: LocalPatch) => {
-<<<<<<< HEAD
-    setList(prev => prev.map(s => (s.id === id ? { ...s, ...(patch as any) } : s)));
-=======
-    setLocalState(prev => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
-    setList(prev =>
-      prev.map(s => s.id === id ? { ...s, ...(patch as any) } : s)
-    );
->>>>>>> parent of a8093be (1)
-  }, []);
+  const { permissionStatus, requestPermission } = useNotifications();
+  const rt = useRealtimeNotifications(userId);
 
-  // ── чи є координати
+  const setLocal = (id: string, patch: Partial<Scenario>) =>
+    setList(prev => prev.map(x => x.id === id ? { ...x, ...patch } : x));
+
   const hasCoords = (s: Scenario) =>
-    typeof s.latitude === 'number' &&
-    typeof s.longitude === 'number' &&
-    !Number.isNaN(s.latitude) &&
-    !Number.isNaN(s.longitude);
+    typeof s.latitude === 'number' && Number.isFinite(s.latitude) &&
+    typeof s.longitude === 'number' && Number.isFinite(s.longitude);
 
-  // ── крок угоди
-  const stepOf = (s: Scenario) => {
-    if (!s.is_agreed_by_customer || !s.is_agreed_by_executor) return 1; // agree
-    if (!s.is_locked_onchain) return 2; // lock
-    return 3; // confirm
+  const canAgree = (s: Scenario) => s.status === 'pending' && !s.is_agreed_by_customer;
+
+  const canConfirm = (s: Scenario) => {
+    if (!s.escrow_tx_hash) return false;
+    if (s.is_completed_by_customer) return false;
+    const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
+    return !Number.isNaN(dt.getTime()) && new Date() >= dt;
   };
 
-  // ── чи можна відкривати диспут
-  const canDispute = (s: Scenario) =>
-    s.status !== 'disputed' && s.is_locked_onchain && s.status !== 'confirmed';
+  const loadOpenDispute = useCallback(async (scenarioId: string) => {
+    const d = await getLatestDisputeByScenario(scenarioId);
+    setOpenDisputes(prev => ({ ...prev, [scenarioId]: d && d.status === 'open' ? d : null }));
+  }, []);
 
-<<<<<<< HEAD
-  // завантаження сценаріїв (creator_id = я)
-=======
-  // ── завантаження моїх сценаріїв
->>>>>>> parent of a8093be (1)
-  const fetchMyScenarios = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return setList([]);
-
-    // ⚠️ За потреби підкоригуй фільтр:
-    // якщо у тебе інше поле автора, зміни customer_id → твоє поле
+  const load = useCallback(async (uid: string) => {
     const { data, error } = await supabase
       .from('scenarios')
       .select('*')
-<<<<<<< HEAD
-      .eq('creator_id', user.id)
-=======
-      .eq('customer_id', user.id)
->>>>>>> parent of a8093be (1)
+      .eq('creator_id', uid)
       .order('created_at', { ascending: false });
+    if (error) console.error(error);
+    setList(((data || []) as Scenario[]).filter(s => s.creator_id === uid));
+  }, []);
 
-    if (!error && data) {
-      setList(data as any as Scenario[]);
-    }
+  // fetch rated orders for current user
+  const refreshRated = useCallback(async (uid: string, items: Scenario[]) => {
+    if (!uid || items.length === 0) { setRatedOrders(new Set()); return; }
+    const ids = items.map(s => s.id);
+    const { data } = await supabase.from('ratings').select('order_id').eq('rater_id', uid).in('order_id', ids);
+    setRatedOrders(new Set((data || []).map((r: any) => r.order_id)));
   }, []);
 
   useEffect(() => {
-    fetchMyScenarios();
-<<<<<<< HEAD
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      const uid = data?.user?.id; if (!uid) return;
+      setUserId(uid);
+      await load(uid);
 
-    const ch = supabase
-      .channel('realtime:scenarios-myorders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'scenarios' }, (payload: any) => {
-        const type = payload?.eventType as 'INSERT' | 'UPDATE' | 'DELETE' | undefined;
-        setList(prev => {
-          if (type === 'DELETE') {
-            const delId = payload?.old?.id as string | undefined;
-            return delId ? prev.filter(x => x.id !== delId) : prev;
-          }
-          const row = payload?.new as Scenario | undefined;
-          if (!row) return prev;
-          const i = prev.findIndex(x => x.id === row.id);
-          if (type === 'INSERT') return i === -1 ? [row, ...prev] : prev;
-          if (type === 'UPDATE' && i !== -1) {
-            const next = [...prev];
-            next[i] = { ...next[i], ...row };
-            return next;
-          }
-          return prev;
-        });
-      })
-      .subscribe();
+      const ch = supabase
+        .channel('realtime:myorders')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'scenarios' }, async p => {
+          const ev = p.eventType as 'INSERT'|'UPDATE'|'DELETE';
+          const s = (p as any).new as Scenario | undefined;
+          const oldId = (p as any).old?.id as string | undefined;
 
-    return () => { try { supabase.removeChannel(ch); } catch {} };
-  }, [fetchMyScenarios]);
-
-  // дії
-=======
-    // Підписка Realtime: якщо вже є у тебе — залишай свою
-    const ch = supabase.channel('realtime:scenarios-myorders')
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'scenarios' },
-        (payload) => {
-          const row = payload.new as any as Scenario;
           setList(prev => {
-            const i = prev.findIndex(x => x.id === row.id);
-            if (i === -1) return prev;
-            const next = [...prev];
-            next[i] = { ...prev[i], ...row };
-            return next;
+            if (ev === 'DELETE' && oldId) return prev.filter(x => x.id !== oldId);
+            if (!s) return prev;
+
+            if (s.creator_id !== uid) return prev.filter(x => x.id !== s.id);
+
+            const i = prev.findIndex(x => x.id === s.id);
+            if (ev === 'INSERT') {
+              if (i === -1) return [s, ...prev];
+              const cp = [...prev]; cp[i] = { ...cp[i], ...s }; return cp;
+            }
+            if (ev === 'UPDATE') {
+              if (i === -1) return prev;
+              const before = prev[i];
+              const after = { ...before, ...s };
+              if (before.status !== 'confirmed' && after.status === 'confirmed') {
+                (async () => {
+                  try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
+                  await pushNotificationManager.showNotification({
+                    title: '🎉 Виконання підтверджено',
+                    body: 'Escrow розподілив кошти.',
+                    tag: `confirm-${after.id}`,
+                    requireSound: true
+                  });
+                })();
+                setToast(true);
+              }
+              const cp = [...prev]; cp[i] = after; return cp;
+            }
+            return prev;
           });
+
+          setTimeout(() => refreshRated(uid, (s ? [s] : [])), 0);
         })
-      .subscribe();
-    return () => { void supabase.removeChannel(ch); };
-  }, [fetchMyScenarios]);
+        .subscribe();
 
-  // ───────────────────────────────────────────────────────────────
-  // ДІЇ
+      const chRatings = supabase
+        .channel(`ratings:my:${uid}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'ratings', filter: `rater_id=eq.${uid}` }, async () => {
+          await refreshRated(uid, list);
+        })
+        .subscribe();
 
-  // Погодження
->>>>>>> parent of a8093be (1)
-  const handleAgree = useCallback(async (s: Scenario) => {
-    setAgreeBusy(v => ({ ...v, [s.id]: true }));
+      return () => {
+        try { supabase.removeChannel(ch); } catch {}
+        try { supabase.removeChannel(chRatings); } catch {}
+      };
+    })();
+  }, [load, list, refreshRated]);
+
+  useEffect(() => {
+    if (!userId) return;
+    refreshRated(userId, list);
+    list.forEach(s => { if (s?.id) loadOpenDispute(s.id); });
+  }, [userId, list, loadOpenDispute, refreshRated]);
+
+  const handleAgree = async (s: Scenario) => {
+    if (agreeBusy[s.id] || !canAgree(s)) return;
+    setAgreeBusy(p => ({ ...p, [s.id]: true }));
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Потрібно увійти');
+      const { data: rec, error } = await supabase
+        .from('scenarios')
+        .update({ is_agreed_by_customer: true, status: (s.is_agreed_by_executor ? 'agreed' : 'pending') as Status })
+        .eq('id', s.id)
+        .eq('is_agreed_by_customer', false)
+        .select().single();
+      if (error && error.code !== 'PGRST116') throw error;
 
-      // Позначаємо згоду замовника
-      const patch: any = { is_agreed_by_customer: true, status: 'pending' };
-
-      // Якщо обидві сторони погодили — статус agreed
-      if (s.is_agreed_by_executor) patch.status = 'agreed';
-
-      await supabase.from('scenarios').update(patch).eq('id', s.id);
-
-      try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
-      await pushNotificationManager.showNotification({
-        title: '🤝 Угоду погоджено',
-        body: 'Можна переходити до бронювання коштів',
-        tag: `scenario-agree-${s.id}`,
-        requireSound: true
-      });
-
-      await fetchMyScenarios();
-    } catch (e: any) {
-      alert(e?.message || 'Помилка погодження');
+      setLocal(s.id, { is_agreed_by_customer: true, status: rec?.status || s.status });
+    } catch (e:any) {
+      alert(e?.message || 'Помилка погодження.');
     } finally {
-      setAgreeBusy(v => ({ ...v, [s.id]: false }));
+      setAgreeBusy(p => ({ ...p, [s.id]: false }));
     }
-  }, [fetchMyScenarios]);
+  };
 
-  // Бронювання коштів у смартконтракті
-  const handleLock = useCallback(async (s: Scenario) => {
-    setLockBusy(v => ({ ...v, [s.id]: true }));
+  const handleLock = async (s: Scenario) => {
+    if (lockBusy[s.id]) return;
+    if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) { alert('Сума має бути > 0'); return; }
+    if (!(s.is_agreed_by_customer && s.is_agreed_by_executor)) { alert('Спершу потрібні дві згоди.'); return; }
+    if (s.escrow_tx_hash) return;
+
+    setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      if (!Number.isFinite(s.donation_amount_usdt as any)) {
-        throw new Error('Сума USDT не задана');
+      const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
+      await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
+      setLocal(s.id, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
+    } catch (e:any) {
+      alert(e?.message || 'Не вдалося заблокувати кошти.');
+    } finally {
+      setLockBusy(p => ({ ...p, [s.id]: false }));
+    }
+  };
+
+  const handleConfirm = async (s: Scenario) => {
+    if (confirmBusy[s.id] || !canConfirm(s)) return;
+    setConfirmBusy(p => ({ ...p, [s.id]: true }));
+    try {
+      await confirmCompletionOnChain({ scenarioId: s.id });
+
+      setLocal(s.id, { is_completed_by_customer: true });
+      await supabase.from('scenarios')
+        .update({ is_completed_by_customer: true })
+        .eq('id', s.id)
+        .eq('is_completed_by_customer', false);
+
+      const deal = await getDealOnChain(s.id);
+      if (Number((deal as any).status) === 3) {
+        await supabase.from('scenarios').update({ status: 'confirmed' }).eq('id', s.id);
+        setToast(true);
+      } else {
+        const st = await waitForChainRelease(s.id);
+        if (st === 3) {
+          await supabase.from('scenarios').update({ status: 'confirmed' }).eq('id', s.id);
+          setToast(true);
+        }
       }
-      const signer = await getSigner();
-      const tx = await lockFunds(signer as ethers.Signer, s); // твоя реалізація у lib/escrowContract
-      await tx.wait?.();
-
-      await supabase.from('scenarios').update({
-        is_locked_onchain: true,
-        status: 'agreed'
-      }).eq('id', s.id);
-
-      try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
-      await pushNotificationManager.showNotification({
-        title: '🔒 Кошти заброньовано',
-        body: 'Escrow активовано на смартконтракті',
-        tag: `scenario-lock-${s.id}`,
-        requireSound: true
-      });
-
-      await fetchMyScenarios();
-    } catch (e: any) {
-      alert(e?.message || 'Помилка бронювання коштів');
+    } catch (e:any) {
+      alert(e?.message || 'Помилка підтвердження.');
     } finally {
-      setLockBusy(v => ({ ...v, [s.id]: false }));
+      setConfirmBusy(p => ({ ...p, [s.id]: false }));
     }
-  }, [fetchMyScenarios]);
+  };
 
-  // Підтвердження виконання
-  const handleConfirm = useCallback(async (s: Scenario) => {
-    setConfirmBusy(v => ({ ...v, [s.id]: true }));
+  const canDispute = (s: Scenario) => {
+    const notFinal = s.status !== 'confirmed';
+    const escrowLocked = !!s.escrow_tx_hash;
+    const noOpenDispute = !openDisputes[s.id];
+    const iAmCustomer = userId === s.creator_id;
+    return notFinal && escrowLocked && noOpenDispute && iAmCustomer;
+  };
+
+  const handleDispute = async (s: Scenario) => {
     try {
-      const signer = await getSigner();
-      const tx = await confirmCompletionOnChain(signer as ethers.Signer, s);
-      await tx.wait?.();
-
-      await supabase.from('scenarios').update({
-        status: 'confirmed'
-      }).eq('id', s.id);
-
-      setToast(true);
-      await fetchMyScenarios();
-    } catch (e: any) {
-      alert(e?.message || 'Помилка підтвердження');
-    } finally {
-      setConfirmBusy(v => ({ ...v, [s.id]: false }));
+      const d = await initiateDispute({ id: s.id, creator_id: s.creator_id, executor_id: s.executor_id });
+      setLocal(s.id, { status: 'disputed' } as any);
+      setOpenDisputes(prev => ({ ...prev, [s.id]: d }));
+    } catch (e:any) {
+      alert(e?.message || 'Не вдалося створити спір');
     }
-  }, [fetchMyScenarios]);
+  };
 
-  // Диспут
-  const handleDispute = useCallback(async (s: Scenario) => {
-    try {
-      // твій бек оформлює диспут окремо; тут тільки статус
-      await supabase.from('scenarios').update({ status: 'disputed' }).eq('id', s.id);
-      await fetchMyScenarios();
-      await pushNotificationManager.showNotification({
-        title: '⚠️ Відкрито диспут',
-        body: 'Додайте відеодоказ та стежте за голосуванням',
-        tag: `scenario-dispute-${s.id}`,
-        requireSound: true
-      });
-    } catch (e: any) {
-      alert(e?.message || 'Не вдалося створити диспут');
-    }
-  }, [fetchMyScenarios]);
-
-  // рейтинг
+  // rating actions (customer rates executor)
   const openRateFor = (s: Scenario) => {
-    setRateScenarioId(s.id);
     setRateScore(10);
     setRateComment('');
+    setRateFor({ scenarioId: s.id, counterpartyId: s.executor_id });
     setRateOpen(true);
   };
 
   const saveRating = async () => {
-    if (!rateScenarioId) return;
+    if (!rateFor) return;
     setRateBusy(true);
     try {
-      await upsertRating({ scenario_id: rateScenarioId, score: rateScore, comment: rateComment, role: 'customer' });
-      setRatedOrders(prev => new Set([...prev, rateScenarioId]));
+      await upsertRating({
+        scenarioId: rateFor.scenarioId,
+        rateeId: rateFor.counterpartyId,
+        score: rateScore,
+        comment: rateComment,
+      });
       setRateOpen(false);
+      setRatedOrders(prev => new Set([...Array.from(prev), rateFor.scenarioId]));
+      window.dispatchEvent(new CustomEvent('ratings:updated', { detail: { userId: rateFor.counterpartyId } }));
+      alert('Рейтинг збережено ✅');
     } catch (e: any) {
-      alert(e?.message || 'Не вдалося зберегти оцінку');
+      alert(e?.message ?? 'Помилка під час збереження рейтингу');
     } finally {
       setRateBusy(false);
     }
   };
 
-<<<<<<< HEAD
-=======
-  // ───────────────────────────────────────────────────────────────
-  // Рендер
->>>>>>> parent of a8093be (1)
+  const headerRight = useMemo(() => (
+    <div className="scenario-status-panel">
+      <span>🔔 {permissionStatus === 'granted' ? 'Увімкнено' : permissionStatus === 'denied' ? 'Не підключено' : 'Не запитано'}</span>
+      <span>📡 {rt.isListening ? `${rt.method} активний` : 'Не підключено'}</span>
+      {permissionStatus !== 'granted' && <button className="notify-btn" onClick={requestPermission}>🔔 Дозволити</button>}
+    </div>
+  ), [permissionStatus, requestPermission, rt.isListening, rt.method]);
+
   return (
     <div className="scenario-list">
       <div className="scenario-header">
         <h2>Мої замовлення</h2>
-        {/* ВАЖЛИВО: ніяких headerRight — це ламає прод */}
+        {headerRight}
       </div>
 
       {list.length === 0 && <div className="empty-hint">Немає активних замовлень.</div>}
 
-      {list.map(s => {
-        const step = stepOf(s);
-        const onlyAgree   = step === 1;
-        const onlyLock    = step === 2;
-        const onlyConfirm = step === 3;
+      {list.map(s => (
+        <ScenarioCard
+          key={s.id}
+          role="customer"
+          s={s}
 
-        return (
-          <div key={s.id} style={{ marginBottom: 12 }}>
-            <div style={{ marginBottom: 10 }}>
-              <StatusStripClassic state={s} />
-            </div>
+          onChangeDesc={(v) => setLocal(s.id, { description: v })}
+          onCommitDesc={async (v) => {
+            if (s.escrow_tx_hash || s.status === 'confirmed') return;
+            await supabase.from('scenarios').update({
+              description: v,
+              status: 'pending',
+              is_agreed_by_customer: false,
+              is_agreed_by_executor: false
+            }).eq('id', s.id);
+          }}
 
-            <ScenarioCard
-              role="customer"
-              s={s}
-              // редагування опису — скидає погодження
-              onChangeDesc={(v) => setLocal(s.id, { description: v })}
-              onCommitDesc={async (v) => {
-                if (s.status === 'confirmed') return;
-                await supabase.from('scenarios').update({
-                  description: v,
-                  status: 'pending',
-                  is_agreed_by_customer: false,
-                  is_agreed_by_executor: false
-                }).eq('id', s.id);
+          onChangeAmount={(v) => setLocal(s.id, { donation_amount_usdt: v })}
+          onCommitAmount={async (v) => {
+            if (s.escrow_tx_hash || s.status === 'confirmed') return;
+            if (v !== null && (!Number.isFinite(v) || v <= 0)) { alert('Сума має бути > 0'); setLocal(s.id, { donation_amount_usdt: null }); return; }
+            await supabase.from('scenarios').update({
+              donation_amount_usdt: v,
+              status: 'pending',
+              is_agreed_by_customer: false,
+              is_agreed_by_executor: false
+            }).eq('id', s.id);
+          }}
 
-                try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
-                await pushNotificationManager.showNotification({
-                  title: '📝 Опис оновлено (замовник)',
-                  body: 'Потрібно знову погодити угоду.',
-                  tag: `scenario-update-${s.id}-desc`,
-                  requireSound: true
-                });
-              }}
+          onAgree={() => handleAgree(s)}
+          onLock={() => handleLock(s)}
+          onConfirm={() => handleConfirm(s)}
+          onDispute={() => handleDispute(s)}
+          onOpenLocation={() => hasCoords(s) && window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank')}
 
-              // сума: дозволяємо тільки ціле >= 0 (нуль ок)
-              onChangeAmount={(v) => setLocal(s.id, { donation_amount_usdt: v })}
-              onCommitAmount={async (v) => {
-                if (s.status === 'confirmed') return;
-                if (v !== null) {
-                  const isInt = Number.isInteger(v);
-                  if (!isInt || v < 0) {
-                    alert('Сума має бути цілим числом (0,1,2,3,...)');
-                    setLocal(s.id, { donation_amount_usdt: null });
-                    return;
-                  }
-                }
-                await supabase.from('scenarios').update({
-                  donation_amount_usdt: v,
-                  status: 'pending',
-                  is_agreed_by_customer: false,
-                  is_agreed_by_executor: false
-                }).eq('id', s.id);
+          canAgree={canAgree(s)}
+          canLock={(s.is_agreed_by_customer && s.is_agreed_by_executor && !s.escrow_tx_hash) || false}
+          canConfirm={canConfirm(s)}
+          canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
+          hasCoords={hasCoords(s)}
+          busyAgree={!!agreeBusy[s.id]}
+          busyLock={!!lockBusy[s.id]}
+          busyConfirm={!!confirmBusy[s.id]}
 
-                try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
-                await pushNotificationManager.showNotification({
-                  title: '💰 Сума USDT оновлена (замовник)',
-                  body: 'Потрібно знову погодити угоду.',
-                  tag: `scenario-update-${s.id}-amount`,
-                  requireSound: true
-                });
-              }}
-
-              onAgree={() => handleAgree(s)}
-              onLock={() => handleLock(s)}
-              onConfirm={() => handleConfirm(s)}
-              onDispute={() => handleDispute(s)}
-              onOpenLocation={() => hasCoords(s) && window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank')}
-
-              canAgree={onlyAgree && !agreeBusy[s.id]}
-              canLock={onlyLock && !lockBusy[s.id]}
-              canConfirm={onlyConfirm && !confirmBusy[s.id]}
-              canDispute={canDispute(s)}
-
-              hasCoords={hasCoords(s)}
-              busyAgree={!!agreeBusy[s.id]}
-              busyLock={!!lockBusy[s.id]}
-              busyConfirm={!!confirmBusy[s.id]}
-
-              hideLock={!onlyLock}
-              hideConfirm={!onlyConfirm}
-              hideDispute={!canDispute(s)}
-
-              isRated={s.status === 'confirmed' && ratedOrders.has(s.id)}
-              onOpenRate={() => s.status === 'confirmed' && !ratedOrders.has(s.id) && openRateFor(s)}
-            />
-          </div>
-        );
-      })}
+          isRated={ratedOrders.has(s.id)}
+          onOpenRate={() => openRateFor(s)}
+        />
+      ))}
 
       <CelebrationToast open={toast} variant="customer" onClose={() => setToast(false)} />
 
