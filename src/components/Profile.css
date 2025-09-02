@@ -1,6 +1,5 @@
 /* src/components/Profile.css */
 
-/* Контейнер та базова типографіка */
 .profile-container {
   max-width: 800px;
   margin: 0 auto;
@@ -23,7 +22,45 @@
   max-width: 600px;
 }
 
-/* Аватар */
+/* ==== A2HS (Add to Home Screen) ==== */
+.a2hs-card{
+  width: 100%;
+  max-width: 600px;
+  background: #fff;
+  border: 1px solid #fff;               /* біла окантовка */
+  border-radius: 16px;
+  box-shadow: 0 18px 40px rgba(255, 131, 176, .18), 0 4px 10px rgba(0,0,0,.06); /* рожева тінь */
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+.a2hs-row{ display:flex; align-items:center; gap:.75rem; }
+.a2hs-emoji{ font-size: 1.5rem; }
+.a2hs-text{ font-weight: 600; color:#111827; }
+.a2hs-sub{ font-weight: 500; color:#6b7280; font-size:.9rem; }
+.a2hs-actions{ margin-top:.75rem; display:flex; justify-content:flex-end; }
+
+/* Сіра кнопка з рожевою іконкою */
+.a2hs-btn{
+  background:#f5f6f8 !important;
+  color:#0e0e0e !important;
+  border:1.5px solid #fff !important;     /* біла окантовка */
+  border-radius: 999px !important;
+  display:inline-flex !important;
+  align-items:center; gap:.5rem;
+  padding: 12px 16px !important;
+  box-shadow: 0 14px 28px rgba(255,131,176,.22), 0 2px 8px rgba(0,0,0,.06) !important; /* рожева тінь */
+}
+.a2hs-btn:hover{ transform: translateY(-1px); box-shadow: 0 18px 36px rgba(255,131,176,.26), 0 4px 10px rgba(0,0,0,.08) !important; }
+.btn-icon{ display:inline-flex; }
+
+/* Підказка для iOS */
+.a2hs-hint{
+  margin-top:.75rem; font-size:.9rem; color:#374151; background:#f9fafb;
+  border:1px dashed #e5e7eb; padding:.75rem; border-radius:12px;
+}
+.a2hs-share{ display:inline-block; background:#111827; color:#fff; padding:.05rem .4rem; border-radius:6px; margin:0 .25rem; }
+
+/* ==== Avatar ==== */
 .avatar-container {
   position: relative;
   margin-bottom: 2rem;
@@ -36,6 +73,16 @@
 }
 .avatar-container:hover { transform: scale(1.03); }
 
+/* Фото з білою обводкою і рожевою тінню */
+.avatar-photo{
+  border-radius: 50%;
+  outline: 6px solid #fff; /* біла окантовка */
+  box-shadow:
+    0 22px 50px rgba(255, 131, 176, .28),  /* рожева мʼяка тінь */
+    0 4px 12px rgba(0, 0, 0, .08);
+}
+
+/* Плейсхолдер */
 .avatar-placeholder {
   display: flex; align-items: center; justify-content: center;
   width: 180px; height: 180px; border-radius: 50%;
@@ -43,11 +90,10 @@
   color: #64748b;
   transition: all .3s ease;
 }
-.avatar-container.drag-over .avatar-placeholder {
-  border-color: #22c55e; background: #ecfdf5;
-}
+.avatar-container.drag-over .avatar-placeholder { border-color: #22c55e; background: #ecfdf5; }
 .user-icon { color: #667eea; }
 
+/* Лоадер */
 .avatar-uploading-spinner {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
 }
@@ -57,7 +103,7 @@
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Форми */
+/* ==== Форми ==== */
 .profile-form,
 .scenario-form {
   display: flex; flex-direction: column; gap: 1.2rem;
@@ -65,37 +111,43 @@
   margin: 1rem auto; padding: 2rem; border-radius: 16px;
   border: 1px solid #e2e8f0; box-shadow: 0 8px 32px rgba(0,0,0,0.06);
 }
-
-.input {
-  padding: 1rem 1.25rem; border-radius: 12px; border: 1.5px solid #e2e8f0;
-  font-size: 1rem; background: #fff; outline: none; transition: all .2s ease;
-}
+.input { padding: 1rem 1.25rem; border-radius: 12px; border: 1.5px solid #e2e8f0; font-size: 1rem; background: #fff; outline: none; transition: all .2s ease; }
 .input:focus { border-color: #667eea; box-shadow: 0 0 0 6px rgba(102,126,234,.10); }
 
+/* Базова бренд-кнопка (інше місце в профілі) */
 .button {
-  background: var(--bmb-pink, #ffcdd6); color: var(--bmb-text, #0e0e0e);
-  padding: 12px 16px; border: 1px solid rgba(0,0,0,.06); border-radius: 999px;
-  font-weight: 700; cursor: pointer; transition: transform .06s ease, box-shadow .2s ease;
+  background: var(--bmb-pink, #ffcdd6);
+  color: var(--bmb-text, #0e0e0e);
+  padding: 12px 16px;
+  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 999px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform .06s ease, box-shadow .2s ease;
   box-shadow: 0 12px 28px rgba(0,0,0,.08);
 }
 .button:hover { transform: translateY(-1px); box-shadow: 0 16px 36px rgba(0,0,0,.10); }
 .button:active { transform: translateY(0); box-shadow: none; }
 
-/* Сценарії */
+/* ==== Сценарії ==== */
 .scenario-archive {
   max-width: 600px; width: 100%; margin: 2rem auto; padding: 2rem;
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-  border-radius: 16px; border: 1px solid #e9ecef; box-shadow: 0 4px 20px rgba(0,0,0,.08);
+  background: #fff;
+  border-radius: 16px; border: 1px solid #fff;                /* біла рамка */
+  box-shadow: 0 18px 40px rgba(255, 131, 176, .18), 0 4px 10px rgba(0,0,0,.06); /* рожева тінь */
 }
 .scenarios-grid { display: grid; gap: 1rem; grid-template-columns: 1fr; width: 100%; }
 
 .scenario-card {
-  background: #fff; border-radius: 12px; padding: 1.5rem;
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.5rem;
   display: flex; justify-content: space-between; align-items: center;
-  border: 1px solid #e9ecef; box-shadow: 0 2px 10px rgba(0,0,0,.05);
+  border: 1px solid #fff;                                       /* біла окантовка */
+  box-shadow: 0 14px 28px rgba(255, 131, 176, .18), 0 2px 8px rgba(0,0,0,.06); /* рожева тінь */
   transition: transform .2s ease, box-shadow .2s ease;
 }
-.scenario-card:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,0,0,.1); }
+.scenario-card:hover { transform: translateY(-2px); box-shadow: 0 18px 36px rgba(255,131,176,.22), 0 4px 10px rgba(0,0,0,.08); }
 
 .scenario-description { font-size: 1rem; color: #495057; margin-bottom: .5rem; line-height: 1.4; }
 .scenario-price {
@@ -104,20 +156,25 @@
   border: 1px solid #e9ecef;
 }
 
+/* Кнопки дій: СІРІ з білою окантовкою та рожевою тінню */
 .scenario-actions { display: flex; gap: .5rem; align-items: center; }
 .action-btn {
-  width: 40px; height: 40px; border: none; border-radius: 12px; cursor: pointer; font-size: 1.1rem;
+  width: 40px; height: 40px; border-radius: 12px; cursor: pointer; font-size: 1.1rem;
   display: flex; align-items: center; justify-content: center; transition: transform .2s ease, box-shadow .2s ease;
-  background: #f1f2f4; border: 1px solid #e9ecef; box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  background: #f5f6f8;                       /* сіра кнопка */
+  border: 1.5px solid #fff;                  /* біла окантовка */
+  box-shadow: 0 12px 26px rgba(255,131,176,.22), 0 2px 8px rgba(0,0,0,.06); /* рожева тінь */
+  color: #111;
 }
-.action-btn:hover { transform: translateY(-2px); }
+.action-btn:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(255,131,176,.26), 0 4px 10px rgba(0,0,0,.08); }
 
-.hide-btn  { background: linear-gradient(135deg,#ffc107 0%,#ff8c00 100%); color: #fff; }
-.delete-btn{ background: linear-gradient(135deg,#dc3545 0%,#c82333 100%); color: #fff; }
+/* (класи лишаємо, щоб не чіпати TSX — обидві однакові нейтральні) */
+.hide-btn { }
+.delete-btn { }
 
 .empty-scenarios { text-align: center; padding: 2rem 1rem; color: #6c757d; }
 
-/* Адаптив */
+/* ==== Адаптив ==== */
 @media (max-width: 767px) {
   .profile-container { padding: 1rem; }
   .profile-form, .scenario-form, .scenario-archive { padding: 1.5rem; }
