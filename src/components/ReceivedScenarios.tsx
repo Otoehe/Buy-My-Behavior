@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 // 📄 src/components/ReceivedScenarios.tsx
 // ------------------------------------------------------------
 // Canvas-safe version with local shims for ../lib/* imports.
@@ -12,10 +13,27 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 // import { StatusStripClassic } from './StatusStripClassic';
 // import RateCounterpartyModal from './RateCounterpartyModal';
 // import './MyOrders.css';
+=======
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { supabase } from '../lib/supabase';
+import {
+  confirmCompletion as confirmCompletionOnChain,
+  getDealOnChain,
+  ESCROW_ADDRESS,
+  generateScenarioIdBytes32,
+} from '../lib/escrowContract';
+import { getSigner } from '../lib/web3';
+import { ethers } from 'ethers';
+import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
+import { useRealtimeNotifications } from '../lib/realtimeNotifications';
+import CelebrationToast from './CelebrationToast';
+import './MyOrders.css';
+>>>>>>> parent of a8093be (1)
 
 const CelebrationToast: React.FC<{ open: boolean; variant?: string; onClose: () => void }>
   = () => null;
 
+<<<<<<< HEAD
 const StatusStripClassic: React.FC<{ state: any }>
   = ({ state }) => (
     <div style={{
@@ -29,6 +47,10 @@ const StatusStripClassic: React.FC<{ state: any }>
       статус: {String(state?.status ?? '—')}
     </div>
   );
+=======
+// ⬇️ додано: класичний степер статусів
+import { StatusStripClassic } from './StatusStripClassic';
+>>>>>>> parent of a8093be (1)
 
 const RateCounterpartyModal: React.FC<{
   scenarioId: string;
@@ -137,11 +159,29 @@ interface Scenario extends ScenarioRow {}
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.85;
 
+<<<<<<< HEAD
 // ———————————————————————————————————————————————————————
 // helpers
 async function ensureBSCAndGetSigner() { await ensureBSC(); return await getSigner(); }
+=======
+// MetaMask + BSC
+async function ensureBSCAndGetSigner() {
+  let signer = await getSigner();
+  const provider = signer.provider as ethers.providers.Web3Provider;
+  const net = await provider.getNetwork();
+  if (Number(net.chainId) !== 56 && (window as any).ethereum?.request) {
+    await (window as any).ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: '0x38' }],
+    });
+    signer = await getSigner();
+  }
+  return signer;
+}
+
+>>>>>>> parent of a8093be (1)
 function humanizeEthersError(err: any): string {
-  const m = String(err?.shortMessage || err?.reason || err?.error?.message || err?.message || '');
+  const m = String(err?.reason || err?.error?.message || err?.message || '');
   if (!m) return 'Невідома помилка';
   return m.replace(/execution reverted:?/i, '').replace(/\(reason=.*?\)/i, '').trim();
 }
@@ -152,7 +192,13 @@ async function waitForChainRelease(sid: string, tries = 6, delayMs = 1200) {
   }
   return 0;
 }
+<<<<<<< HEAD
 export function reachedExecutionTime(s: Scenario) {
+=======
+
+// чи настав час виконання
+function reachedExecutionTime(s: Scenario) {
+>>>>>>> parent of a8093be (1)
   const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
   return !isNaN(dt.getTime()) && new Date() >= dt;
 }
@@ -288,8 +334,9 @@ export default function ReceivedScenarios() {
   const setLocal = (id: string, patch: Partial<Scenario>) =>
     setScenarios(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
-  // редагування опису/суми → pending + скидання погоджень
+  // редагування опису/суми → pending + скидання погоджень (до confirmed)
   const updateScenarioField = async (id: string, field: keyof Scenario, value: any) => {
+    // ⬇️ нова перевірка: сума лише ціле >= 0 (нуль дозволено)
     if (field === 'donation_amount_usdt') {
       if (value === '' || value === null) {
         // allow empty
@@ -349,9 +396,15 @@ export default function ReceivedScenarios() {
     if (!canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
+<<<<<<< HEAD
       const signer: any = await ensureBSCAndGetSigner();
       const who = signer?.getAddress ? (await signer.getAddress()).toLowerCase() : '';
       const provider: any = signer?.provider;
+=======
+      const signer = await ensureBSCAndGetSigner();
+      const who = (await signer.getAddress()).toLowerCase();
+      const provider = signer.provider as ethers.providers.Web3Provider;
+>>>>>>> parent of a8093be (1)
 
       const dealBefore = await getDealOnChain(s.id);
       const statusOnChain = Number((dealBefore as any).status); // 1 = Locked
@@ -362,6 +415,7 @@ export default function ReceivedScenarios() {
         alert(`Підключений гаманець не є виконавцем цього сценарію.\nОчікується: ${executorOnChain}\nПідключено: ${who}`);
         return;
       }
+<<<<<<< HEAD
 
       if (provider?.getBalance && typeof provider.getBalance === 'function') {
         const bal = await provider.getBalance(who);
@@ -378,6 +432,19 @@ export default function ReceivedScenarios() {
         if (!IS_CANVAS) {
           // place for real tx call with ethers.Contract
         }
+=======
+      const bal = await provider.getBalance(who);
+      if (bal.lt(ethers.utils.parseUnits('0.00005', 'ether'))) { alert('Недостатньо нативної монети для комісії.'); return; }
+
+      try {
+        const b32 = generateScenarioIdBytes32(s.id);
+        const abi = ['function confirmCompletion(bytes32)'];
+        const c = new ethers.Contract(ESCROW_ADDRESS, abi, signer);
+        await c.callStatic.confirmCompletion(b32);
+        let gas; try { gas = await c.estimateGas.confirmCompletion(b32); } catch { gas = ethers.BigNumber.from(150000); }
+        const tx = await c.confirmCompletion(b32, { gasLimit: gas.mul(12).div(10) });
+        await tx.wait();
+>>>>>>> parent of a8093be (1)
       } catch {
         await confirmCompletionOnChain({ scenarioId: s.id });
       }
@@ -401,7 +468,7 @@ export default function ReceivedScenarios() {
     }
   };
 
-  // ——— СПОРИ
+  // СПОРИ
   const loadOpenDispute = useCallback(async (scenarioId: string) => {
     let d = await getLatestDisputeByScenario(scenarioId);
     if (!d) {
@@ -427,12 +494,33 @@ export default function ReceivedScenarios() {
     } finally { setUploading(p => ({ ...p, [s.id]: false })); ev.target.value = ''; }
   };
 
-  // стилі (інлайн)
+  // стилі (інлайн, нічого глобального не чіпаю)
   const hintStyle: React.CSSProperties = { fontSize: 12, lineHeight: '16px', opacity: 0.8, marginBottom: 8 };
   const labelStyle: React.CSSProperties = { fontSize: 13, lineHeight: '18px', marginBottom: 6, opacity: 0.9 };
+<<<<<<< HEAD
   const amountPillStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, borderRadius: 9999, padding: '2px 8px', background: '#f7f7f7' };
   const amountInputStyle: React.CSSProperties = { borderRadius: 9999, padding: '10px 14px', fontSize: 16, height: 40, outline: 'none', border: 'none', background: 'transparent' };
+=======
+  const amountPillStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 9999,
+    padding: '2px 8px',          // ⬅️ трішки менше
+    background: '#f7f7f7',       // ⬅️ як у полі «обрати сценарій»
+  };
+  const amountInputStyle: React.CSSProperties = {
+    borderRadius: 9999,
+    padding: '10px 14px',        // ⬅️ менше
+    fontSize: 16,
+    height: 40,                  // ⬅️ менше
+    outline: 'none',
+    border: 'none',              // ⬅️ без рамки
+    background: 'transparent',
+  };
+>>>>>>> parent of a8093be (1)
 
+  // ⬇️ утиліта: пропускаємо лише цифри (порожньо = null)
   const parseDigits = (raw: string): number | null | 'invalid' => {
     if (raw.trim() === '') return null; if (!/^[0-9]+$/.test(raw.trim())) return 'invalid'; return parseInt(raw.trim(), 10);
   };
@@ -452,9 +540,23 @@ export default function ReceivedScenarios() {
         const canRate = s.status === 'confirmed' && !ratedMap[s.id];
         return (
           <div key={s.id} className="scenario-card" data-card-id={s.id}>
+<<<<<<< HEAD
             <div style={{ marginBottom: 10 }}><StatusStripClassic state={s} /></div>
             <div className="scenario-info">
               <div style={hintStyle}>Опис сценарію і сума добровільного донату редагуються обома учасниками до Погодження угоди.</div>
+=======
+            {/* ⬇️ нове: класичний степер статусу угоди */}
+            <div style={{ marginBottom: 10 }}>
+              <StatusStripClassic state={s} />
+            </div>
+
+            <div className="scenario-info">
+              {/* 🔔 Підказка */}
+              <div style={hintStyle}>
+                Опис сценарію і сума добровільного донату редагуються обома учасниками до Погодження угоди.
+              </div>
+
+>>>>>>> parent of a8093be (1)
               <div>
                 <strong>Опис:</strong><br/>
                 <textarea
@@ -475,6 +577,7 @@ export default function ReceivedScenarios() {
                 <div className="amount-pill" style={amountPillStyle}>
                   {/* FIX: closed handlers & input tag */}
                   <input
+                    // ⬇️ лише цифри, без десяткових; нуль дозволено
                     type="text"
                     inputMode="numeric"
                     pattern="[0-9]*"
@@ -493,6 +596,10 @@ export default function ReceivedScenarios() {
                       if (res === 'invalid') { alert('Лише цифри (0,1,2,3,...)'); return; }
                       updateScenarioField(s.id, 'donation_amount_usdt', res === null ? null : res);
                     }}
+<<<<<<< HEAD
+=======
+                    disabled={s.status === 'confirmed'}
+>>>>>>> parent of a8093be (1)
                     style={amountInputStyle}
                   />
                   <span className="amount-unit">USDT</span>
@@ -501,6 +608,7 @@ export default function ReceivedScenarios() {
             </div>
 
             <div className="scenario-actions">
+<<<<<<< HEAD
               <button className="btn agree" onClick={() => handleAgree(s)} disabled={!canAgree(s)}>🤝 Погодити угоду</button>
               <button className="btn confirm" onClick={() => handleConfirm(s)} disabled={!canConfirm(s)}>✅ Підтвердити виконання</button>
               <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
@@ -514,6 +622,55 @@ export default function ReceivedScenarios() {
                 {uploading[s.id] ? '…' : '📹 ЗАВАНТАЖИТИ ВІДЕОДОКАЗ'}
               </button>
               <button className="btn location" onClick={() => hasCoords(s) && window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank')} disabled={!hasCoords(s)}>📍 Показати локацію</button>
+=======
+              <button className="btn agree"   onClick={() => handleAgree(s)}  disabled={!canAgree(s)}>🤝 Погодити угоду</button>
+              <button className="btn confirm" onClick={() => handleConfirm(s)} disabled={!canConfirm(s)}>✅ Підтвердити виконання</button>
+
+              <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                <RateCounterpartyModal
+                  scenarioId={s.id}
+                  counterpartyId={s.creator_id}
+                  disabled={!canRate}
+                  onDone={() => setRatedMap(prev => ({ ...prev, [s.id]: true }))}
+                />
+                {!canRate && s.status === 'confirmed' && ratedMap[s.id] && (
+                  <span style={{ opacity: .8 }}>⭐ Оцінено</span>
+                )}
+              </div>
+
+              <input
+                type="file"
+                accept="video/*"
+                ref={el => { fileInputsRef.current[s.id] = el; }}
+                onChange={(ev) => onFileChange(s, ev)}
+                style={{ display: 'none' }}
+              />
+              <button
+                type="button"
+                className="btn dispute"
+                onClick={() => {
+                  const i = fileInputsRef.current[s.id];
+                  if (!i || uploading[s.id]) return;
+                  i.value = '';
+                  i.click();
+                }}
+                disabled={
+                  !openDisputes[s.id] ||
+                  openDisputes[s.id]?.status !== 'open' ||
+                  !!openDisputes[s.id]?.behavior_id ||
+                  !!uploading[s.id]
+                }
+                title={!openDisputes[s.id] ? 'Доступно лише при відкритому спорі' : ''}
+              >
+                {uploading[s.id] ? '…' : '📹 ЗАВАНТАЖИТИ ВІДЕОДОКАЗ'}
+              </button>
+
+              <button
+                className="btn location"
+                onClick={() => hasCoords(s) && window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank')}
+                disabled={!hasCoords(s)}
+              >📍 Показати локацію</button>
+>>>>>>> parent of a8093be (1)
             </div>
           </div>
         );
@@ -523,6 +680,7 @@ export default function ReceivedScenarios() {
     </div>
   );
 }
+<<<<<<< HEAD
 
 // ────────────────────────────────────────────────────────────
 // Lightweight self-tests for pure helpers (kept inside the file)
@@ -547,3 +705,5 @@ export function runSelfTests() {
   console.log('[ReceivedScenarios self-tests] reachedExecutionTime(past) =>', nowOk);
   return { r1, nowOk };
 }
+=======
+>>>>>>> parent of a8093be (1)

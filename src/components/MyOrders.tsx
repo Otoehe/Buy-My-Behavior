@@ -11,14 +11,28 @@ import './MyOrders.css';
 import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
+
+// Класичний степер над карткою
 import { StatusStripClassic } from './StatusStripClassic';
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
+<<<<<<< HEAD
+=======
+// ───────────────────────────────────────────────────────────────
+// Допоміжні типи
+>>>>>>> parent of a8093be (1)
 type BusyMap = Record<string, boolean>;
-type LocalPatch = Partial<Pick<Scenario, 'description' | 'donation_amount_usdt'>>;
+type LocalPatch = Partial<Pick<Scenario,
+  'description' | 'donation_amount_usdt'
+>>;
 
+<<<<<<< HEAD
+=======
+// ───────────────────────────────────────────────────────────────
+// Основний компонент
+>>>>>>> parent of a8093be (1)
 export default function MyOrders() {
   const [list, setList] = useState<Scenario[]>([]);
   const [agreeBusy, setAgreeBusy] = useState<BusyMap>({});
@@ -34,44 +48,69 @@ export default function MyOrders() {
   const [rateScenarioId, setRateScenarioId] = useState<string | null>(null);
   const [ratedOrders, setRatedOrders] = useState<Set<string>>(new Set());
 
+  // Пуші / Realtime (нічого не змінюю — просто ініціюємо хуки)
   useNotifications();
   useRealtimeNotifications();
 
+  // ── локальні правки у стейті картки
   const setLocal = useCallback((id: string, patch: LocalPatch) => {
+<<<<<<< HEAD
     setList(prev => prev.map(s => (s.id === id ? { ...s, ...(patch as any) } : s)));
+=======
+    setLocalState(prev => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
+    setList(prev =>
+      prev.map(s => s.id === id ? { ...s, ...(patch as any) } : s)
+    );
+>>>>>>> parent of a8093be (1)
   }, []);
 
+  // ── чи є координати
   const hasCoords = (s: Scenario) =>
     typeof s.latitude === 'number' &&
     typeof s.longitude === 'number' &&
     !Number.isNaN(s.latitude) &&
     !Number.isNaN(s.longitude);
 
+  // ── крок угоди
   const stepOf = (s: Scenario) => {
     if (!s.is_agreed_by_customer || !s.is_agreed_by_executor) return 1; // agree
     if (!s.is_locked_onchain) return 2; // lock
     return 3; // confirm
   };
 
+  // ── чи можна відкривати диспут
   const canDispute = (s: Scenario) =>
     s.status !== 'disputed' && s.is_locked_onchain && s.status !== 'confirmed';
 
+<<<<<<< HEAD
   // завантаження сценаріїв (creator_id = я)
+=======
+  // ── завантаження моїх сценаріїв
+>>>>>>> parent of a8093be (1)
   const fetchMyScenarios = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return setList([]);
 
+    // ⚠️ За потреби підкоригуй фільтр:
+    // якщо у тебе інше поле автора, зміни customer_id → твоє поле
     const { data, error } = await supabase
       .from('scenarios')
       .select('*')
+<<<<<<< HEAD
       .eq('creator_id', user.id)
+=======
+      .eq('customer_id', user.id)
+>>>>>>> parent of a8093be (1)
       .order('created_at', { ascending: false });
 
-    if (!error && data) setList(data as any as Scenario[]);
+    if (!error && data) {
+      setList(data as any as Scenario[]);
+    }
   }, []);
 
   useEffect(() => {
     fetchMyScenarios();
+<<<<<<< HEAD
 
     const ch = supabase
       .channel('realtime:scenarios-myorders')
@@ -100,13 +139,40 @@ export default function MyOrders() {
   }, [fetchMyScenarios]);
 
   // дії
+=======
+    // Підписка Realtime: якщо вже є у тебе — залишай свою
+    const ch = supabase.channel('realtime:scenarios-myorders')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'scenarios' },
+        (payload) => {
+          const row = payload.new as any as Scenario;
+          setList(prev => {
+            const i = prev.findIndex(x => x.id === row.id);
+            if (i === -1) return prev;
+            const next = [...prev];
+            next[i] = { ...prev[i], ...row };
+            return next;
+          });
+        })
+      .subscribe();
+    return () => { void supabase.removeChannel(ch); };
+  }, [fetchMyScenarios]);
+
+  // ───────────────────────────────────────────────────────────────
+  // ДІЇ
+
+  // Погодження
+>>>>>>> parent of a8093be (1)
   const handleAgree = useCallback(async (s: Scenario) => {
     setAgreeBusy(v => ({ ...v, [s.id]: true }));
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Потрібно увійти');
 
+      // Позначаємо згоду замовника
       const patch: any = { is_agreed_by_customer: true, status: 'pending' };
+
+      // Якщо обидві сторони погодили — статус agreed
       if (s.is_agreed_by_executor) patch.status = 'agreed';
 
       await supabase.from('scenarios').update(patch).eq('id', s.id);
@@ -127,6 +193,7 @@ export default function MyOrders() {
     }
   }, [fetchMyScenarios]);
 
+  // Бронювання коштів у смартконтракті
   const handleLock = useCallback(async (s: Scenario) => {
     setLockBusy(v => ({ ...v, [s.id]: true }));
     try {
@@ -134,7 +201,7 @@ export default function MyOrders() {
         throw new Error('Сума USDT не задана');
       }
       const signer = await getSigner();
-      const tx = await lockFunds(signer as ethers.Signer, s);
+      const tx = await lockFunds(signer as ethers.Signer, s); // твоя реалізація у lib/escrowContract
       await tx.wait?.();
 
       await supabase.from('scenarios').update({
@@ -158,6 +225,7 @@ export default function MyOrders() {
     }
   }, [fetchMyScenarios]);
 
+  // Підтвердження виконання
   const handleConfirm = useCallback(async (s: Scenario) => {
     setConfirmBusy(v => ({ ...v, [s.id]: true }));
     try {
@@ -165,7 +233,9 @@ export default function MyOrders() {
       const tx = await confirmCompletionOnChain(signer as ethers.Signer, s);
       await tx.wait?.();
 
-      await supabase.from('scenarios').update({ status: 'confirmed' }).eq('id', s.id);
+      await supabase.from('scenarios').update({
+        status: 'confirmed'
+      }).eq('id', s.id);
 
       setToast(true);
       await fetchMyScenarios();
@@ -176,6 +246,7 @@ export default function MyOrders() {
     }
   }, [fetchMyScenarios]);
 
+  // Диспут
   const handleDispute = useCallback(async (s: Scenario) => {
     try {
       // твій бек оформлює диспут окремо; тут тільки статус
@@ -214,6 +285,11 @@ export default function MyOrders() {
     }
   };
 
+<<<<<<< HEAD
+=======
+  // ───────────────────────────────────────────────────────────────
+  // Рендер
+>>>>>>> parent of a8093be (1)
   return (
     <div className="scenario-list">
       <div className="scenario-header">
@@ -238,6 +314,7 @@ export default function MyOrders() {
             <ScenarioCard
               role="customer"
               s={s}
+              // редагування опису — скидає погодження
               onChangeDesc={(v) => setLocal(s.id, { description: v })}
               onCommitDesc={async (v) => {
                 if (s.status === 'confirmed') return;
@@ -257,6 +334,7 @@ export default function MyOrders() {
                 });
               }}
 
+              // сума: дозволяємо тільки ціле >= 0 (нуль ок)
               onChangeAmount={(v) => setLocal(s.id, { donation_amount_usdt: v })}
               onCommitAmount={async (v) => {
                 if (s.status === 'confirmed') return;

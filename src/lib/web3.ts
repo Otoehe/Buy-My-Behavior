@@ -2,8 +2,9 @@
 import { ethers } from 'ethers';
 import MetaMaskSDK from '@metamask/sdk';
 
-// ───────────────────────────────────────────────────────────
-// BSC connection helpers (як і було)
+// ─────────────────────────────────────────────
+// BSC network params
+// ─────────────────────────────────────────────
 const BSC_CHAIN_ID_HEX = '0x38'; // 56
 const BSC_PARAMS = {
   chainId: BSC_CHAIN_ID_HEX,
@@ -17,22 +18,23 @@ let _sdk: MetaMaskSDK | null = null;
 let _sdkProvider: any | null = null;
 
 function isMobile(): boolean {
-  return /Android|iPhone|iPad|iPod/i.test(
-    typeof navigator !== 'undefined' ? navigator.userAgent : ''
-  );
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
+// ─────────────────────────────────────────────
+// Provider / Signer
+// ─────────────────────────────────────────────
 export async function getProvider(): Promise<ethers.BrowserProvider> {
-  if (typeof window !== 'undefined' && (window as any).ethereum) {
+  if ((window as any).ethereum) {
     return new ethers.BrowserProvider((window as any).ethereum, 'any');
   }
 
-  if (typeof window !== 'undefined' && isMobile()) {
+  if (isMobile()) {
     if (!_sdk) {
       _sdk = new MetaMaskSDK({
         dappMetadata: {
           name: 'Buy My Behavior',
-          url: typeof window !== 'undefined' ? window.location.origin : '',
+          url: window.location.origin,
         },
         checkInstallationImmediately: false,
         communicationLayerPreference: 'webrtc',
@@ -53,16 +55,14 @@ export async function getProvider(): Promise<ethers.BrowserProvider> {
 export async function requestAccounts(): Promise<string[]> {
   const provider = await getProvider();
   // @ts-ignore
-  const ethereum = (provider as any).provider || (typeof window !== 'undefined' ? (window as any).ethereum : null);
-  if (!ethereum) return [];
+  const ethereum = (provider as any).provider || (window as any).ethereum;
   return await ethereum.request({ method: 'eth_requestAccounts' });
 }
 
 export async function ensureBSC(): Promise<void> {
   const provider = await getProvider();
   // @ts-ignore
-  const ethereum = (provider as any).provider || (typeof window !== 'undefined' ? (window as any).ethereum : null);
-  if (!ethereum) return;
+  const ethereum = (provider as any).provider || (window as any).ethereum;
 
   try {
     await ethereum.request({
@@ -88,60 +88,64 @@ export async function getSigner(): Promise<ethers.Signer> {
   return await provider.getSigner();
 }
 
-// ───────────────────────────────────────────────────────────
-// ✅ Draft helpers for ScenarioForm (саме їх не вистачало)
-//    Прості збереження чернетки у localStorage
-//    Безпечні для SSR/білда — перевіряємо window/localStorage
-// ───────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// ScenarioForm draft helpers
+// (Потрібні для src/components/ScenarioForm.tsx)
+// Безпечні для SSR: не чіпають window/localStorage під час імпорту
+// ─────────────────────────────────────────────
+export type ScenarioFormDraft = Record<string, any>;
+const SCENARIO_FORM_DRAFT_KEY = 'scenario_form_draft_v1';
 
-type Draft = Record<string, any>;
-const DRAFT_KEY = 'scenario_form_draft_v1';
-
-function hasStorage(): boolean {
-  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+export function saveScenarioFormDraft(draft: ScenarioFormDraft): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(SCENARIO_FORM_DRAFT_KEY, JSON.stringify(draft));
+  } catch {}
 }
 
-/** Завантажити чернетку форми сценарію з localStorage */
-export function loadScenarioFormDraft<T extends Draft = Draft>(): T | null {
-  if (!hasStorage()) return null;
+export function loadScenarioFormDraft<T = ScenarioFormDraft>(): T | null {
+  if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(DRAFT_KEY);
+    const raw = localStorage.getItem(SCENARIO_FORM_DRAFT_KEY);
     return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
   }
 }
 
-/** Зберегти чернетку форми сценарію в localStorage */
-export function saveScenarioFormDraft<T extends Draft = Draft>(draft: T): void {
-  if (!hasStorage()) return;
-  try {
-    window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-  } catch {
-    /* ignore quota errors */
-  }
-}
-
-/** Очистити чернетку */
 export function clearScenarioFormDraft(): void {
-  if (!hasStorage()) return;
+  if (typeof window === 'undefined') return;
   try {
-    window.localStorage.removeItem(DRAFT_KEY);
-  } catch {
-    /* ignore */
-  }
+    localStorage.removeItem(SCENARIO_FORM_DRAFT_KEY);
+  } catch {}
 }
 
 /**
- * Синхронізація стану форми з чернеткою:
- * повертає оновлений об’єкт, збережений у storage.
- * Виклик зручний типу: setState(prev => syncScenarioForm(prev, patch))
+ * syncScenarioForm:
+ * 1) Одноразово підтягує чернетку (onLoad),
+ * 2) Далі раз на intervalMs зберігає getCurrent()
+ * Повертає cleanup().
  */
-export function syncScenarioForm<T extends Draft = Draft>(
-  prevDraft: T | null | undefined,
-  patch: Partial<T>
-): T {
-  const next = { ...(prevDraft || ({} as T)), ...(patch as T) } as T;
-  saveScenarioFormDraft(next);
-  return next;
+export function syncScenarioForm<T = ScenarioFormDraft>(
+  getCurrent: () => T,
+  onLoad?: (draft: T) => void,
+  intervalMs = 1500
+): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  const draft = loadScenarioFormDraft<T>();
+  if (draft && onLoad) onLoad(draft);
+
+  const save = () => {
+    try { saveScenarioFormDraft(getCurrent()); } catch {}
+  };
+
+  const id = window.setInterval(save, intervalMs);
+  const beforeUnload = () => save();
+  window.addEventListener('beforeunload', beforeUnload);
+
+  return () => {
+    clearInterval(id);
+    window.removeEventListener('beforeunload', beforeUnload);
+  };
 }
