@@ -473,6 +473,7 @@ export default function ReceivedScenarios() {
               <div className="amount-row" style={{ marginTop: 10 }}>
                 <label className="amount-label" style={labelStyle}>Сума добровільного донату на підтримку креативності</label>
                 <div className="amount-pill" style={amountPillStyle}>
+                  {/* FIX: closed handlers & input tag */}
                   <input
                     type="text"
                     inputMode="numeric"
