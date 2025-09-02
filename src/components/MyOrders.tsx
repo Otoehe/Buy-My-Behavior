@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { lockFunds, confirmCompletionOnChain, getDealOnChain } from '../lib/escrowContract';
 import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
