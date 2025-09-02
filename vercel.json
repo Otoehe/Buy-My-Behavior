@@ -3,11 +3,7 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "build": {
-    "env": {
-      "NODE_VERSION": "20"
-    }
-  },
+  "build": { "env": { "NODE_VERSION": "20" } },
   "rewrites": [
     { "source": "/assets/(.*)", "destination": "/assets/$1" },
     { "source": "/(.*\\.(?:js|css|png|jpg|jpeg|svg|gif|ico|txt|webmanifest|map|json|woff|woff2|eot|ttf|otf))", "destination": "/$1" },
