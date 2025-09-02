@@ -1,7 +1,9 @@
-// src/lib/web3.ts — сумісно з ethers v5
+// src/lib/web3.ts — сумісний з ethers v5 і експортує драфт-функції для ScenarioForm
+
 import { ethers } from 'ethers';
 import MetaMaskSDK from '@metamask/sdk';
 
+// ---------------------- BSC ----------------------
 const BSC_CHAIN_ID_HEX = '0x38';
 const BSC_PARAMS = {
   chainId: BSC_CHAIN_ID_HEX,
@@ -11,6 +13,7 @@ const BSC_PARAMS = {
   blockExplorerUrls: ['https://bscscan.com/'],
 };
 
+// ---------------------- SDK ----------------------
 let _sdk: MetaMaskSDK | null = null;
 let _sdkProvider: any | null = null;
 
@@ -33,6 +36,7 @@ async function getSdkProvider() {
   return _sdkProvider;
 }
 
+// ---------------------- Web3 (ethers v5) ----------------------
 export async function getProvider(): Promise<ethers.providers.Web3Provider> {
   const base =
     (window as any).ethereum ||
@@ -74,4 +78,42 @@ export async function getSigner(): Promise<ethers.Signer> {
   await ensureBSC();
   await requestAccounts();
   return provider.getSigner();
+}
+
+// ---------------------- ScenarioForm draft helpers ----------------------
+// Щоб не правити імпорт у ScenarioForm.tsx, експортуємо тут.
+// Працюють через localStorage. Можна викликати з uid або без.
+export type ScenarioDraft = {
+  description?: string;
+  donation_amount_usdt?: number | null;
+};
+
+const DKEY = (uid?: string) => (uid ? `scenario_draft:${uid}` : 'scenario_draft');
+
+export async function saveScenarioFormDraft(a: any, b?: any) {
+  let uid: string | undefined;
+  let data: ScenarioDraft;
+
+  if (typeof a === 'string') { uid = a; data = b || {}; }
+  else { data = a || {}; }
+
+  try { localStorage.setItem(DKEY(uid), JSON.stringify(data)); } catch {}
+}
+
+export async function loadScenarioFormDraft(a?: any): Promise<ScenarioDraft | null> {
+  const uid = typeof a === 'string' ? a : undefined;
+  try {
+    const raw = localStorage.getItem(DKEY(uid));
+    return raw ? (JSON.parse(raw) as ScenarioDraft) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Залишено як заглушка, щоб не ламати існуючі виклики
+export async function syncScenarioForm() { /* no-op */ }
+
+export async function clearScenarioFormDraft(a?: any) {
+  const uid = typeof a === 'string' ? a : undefined;
+  try { localStorage.removeItem(DKEY(uid)); } catch {}
 }
