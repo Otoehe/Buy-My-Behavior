@@ -17,6 +17,9 @@ import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 
+// ⬇️ НОВЕ: splash
+import SplashScreen    from './components/SplashScreen';
+
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
 const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
@@ -35,11 +38,10 @@ function RequireAuth({
 }) {
   const location = useLocation();
 
-  // ⬅️ Поки не знаємо стан авторизації — НІЧОГО не редіректимо
-  if (user === undefined) return null; // можна підставити легкий спінер
+  // ⬅️ показуємо splash, поки не знаємо стан авторизації
+  if (user === undefined) return <SplashScreen />;
 
   if (user === null) {
-    // запам'ятаємо, куди хотіли зайти (може знадобитися)
     return <Navigate to="/register" replace state={{ from: location.pathname }} />;
   }
   return children;
@@ -52,7 +54,7 @@ function RedirectIfAuthed({
   user: User | null | undefined;
   children: React.ReactElement;
 }) {
-  if (user === undefined) return null; // не стрибаємо, поки вантажиться
+  if (user === undefined) return <SplashScreen />; // теж аплікуємо заставку під час boot
   if (user) return <Navigate to="/map" replace />;
   return children;
 }
@@ -72,7 +74,7 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
 
-    // 1) швидке отримання сесії (швидше й стабільніше для першого рендера)
+    // 1) швидке отримання сесії
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
       setUser(data.session?.user ?? null);
@@ -89,6 +91,11 @@ export default function App() {
     };
   }, []);
 
+  // Поки «booting» — показуємо тільки splash (без Navbar/роутів)
+  if (user === undefined) {
+    return <SplashScreen />;
+  }
+
   return (
     <>
       <A2HS />
@@ -98,7 +105,7 @@ export default function App() {
       {/* NavigationBar не змінюємо */}
       <NavigationBar />
 
-      <Suspense fallback={null}>
+      <Suspense fallback={<SplashScreen />}>
         <Routes>
           {/* Домівка → публічна карта */}
           <Route path="/" element={<HomeGate />} />

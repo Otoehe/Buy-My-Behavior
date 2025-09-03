@@ -1,0 +1,29 @@
+/* src/components/SplashScreen.css */
+.bmb-splash {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 100dvh;
+  background: #fff;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bmb-splash__logo {
+  width: 104px;
+  height: 104px;
+  border-radius: 24%;        /* ефект «іконки додатку» (не ідеальне коло) */
+  box-shadow: 0 2px 14px rgba(0,0,0,.08);
+  image-rendering: -webkit-optimize-contrast;
+}
+
+.bmb-splash__title {
+  margin: 0;
+  font-family: inherit;      /* як у NavigationBar */
+  font-weight: 700;          /* жирно, як у Navbar-хедері */
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  color: #000;
+}
