@@ -17,8 +17,8 @@ import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 
-// ⬇️ НОВЕ: splash
-import SplashScreen    from './components/SplashScreen';
+// ⛔️ SplashScreen більше не використовуємо (видалено)
+// import SplashScreen from './components/SplashScreen';
 
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
@@ -27,7 +27,7 @@ const Manifest          = lazy(() => import('./components/Manifest'));
 const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
 
 // ───────────────────────────────────────────────────────────────────────────────
-// Guards, що враховують "loading" стан (user === undefined)
+// Guards
 // ───────────────────────────────────────────────────────────────────────────────
 function RequireAuth({
   user,
@@ -38,8 +38,8 @@ function RequireAuth({
 }) {
   const location = useLocation();
 
-  // ⬅️ показуємо splash, поки не знаємо стан авторизації
-  if (user === undefined) return <SplashScreen />;
+  // Поки не відомо — нічого не показуємо (HTML pre-splash з index.html вже на екрані)
+  if (user === undefined) return null;
 
   if (user === null) {
     return <Navigate to="/register" replace state={{ from: location.pathname }} />;
@@ -54,12 +54,11 @@ function RedirectIfAuthed({
   user: User | null | undefined;
   children: React.ReactElement;
 }) {
-  if (user === undefined) return <SplashScreen />; // теж аплікуємо заставку під час boot
+  if (user === undefined) return null;
   if (user) return <Navigate to="/map" replace />;
   return children;
 }
 
-/** Домашня: публічна карта */
 function HomeGate() {
   return <Navigate to="/map" replace />;
 }
@@ -68,19 +67,17 @@ export default function App() {
   useViewportVH();
   useGlobalImageHints();
 
-  // ⬅️ undefined = loading, null = неавторизований, User = авторизований
+  // undefined = loading, null = неавторизований, User = авторизований
   const [user, setUser] = useState<User | null | undefined>(undefined);
 
   useEffect(() => {
     let mounted = true;
 
-    // 1) швидке отримання сесії
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
       setUser(data.session?.user ?? null);
     });
 
-    // 2) підписка на всі події логіну/логауту
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
     });
@@ -91,9 +88,9 @@ export default function App() {
     };
   }, []);
 
-  // Поки «booting» — показуємо тільки splash (без Navbar/роутів)
+  // Під час boot показуємо нічого — HTML pre-splash ховається у main.tsx
   if (user === undefined) {
-    return <SplashScreen />;
+    return null;
   }
 
   return (
@@ -102,10 +99,9 @@ export default function App() {
       <NetworkToast />
       <SWUpdateToast />
 
-      {/* NavigationBar не змінюємо */}
       <NavigationBar />
 
-      <Suspense fallback={<SplashScreen />}>
+      <Suspense fallback={null}>
         <Routes>
           {/* Домівка → публічна карта */}
           <Route path="/" element={<HomeGate />} />
@@ -116,7 +112,7 @@ export default function App() {
           <Route path="/behaviors"  element={<BehaviorsFeed />} />
           <Route path="/manifest"   element={<Manifest />} />
 
-          {/* Реєстрація: відкрита. Якщо вже залогінений — повертаємо на карту. */}
+          {/* Реєстрація */}
           <Route
             path="/register"
             element={
