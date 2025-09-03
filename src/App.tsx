@@ -17,7 +17,7 @@ import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 
-// ⛔️ SplashScreen більше не використовуємо (видалено)
+// ⛔️ SplashScreen більше не використовуємо
 // import SplashScreen from './components/SplashScreen';
 
 const MapView           = lazy(() => import('./components/MapView'));
@@ -38,7 +38,7 @@ function RequireAuth({
 }) {
   const location = useLocation();
 
-  // Поки не відомо — нічого не показуємо (HTML pre-splash з index.html вже на екрані)
+  // Поки стан авторизації невідомий — нічого (OS/HTML splash уже на екрані)
   if (user === undefined) return null;
 
   if (user === null) {
@@ -67,7 +67,6 @@ export default function App() {
   useViewportVH();
   useGlobalImageHints();
 
-  // undefined = loading, null = неавторизований, User = авторизований
   const [user, setUser] = useState<User | null | undefined>(undefined);
 
   useEffect(() => {
@@ -88,7 +87,6 @@ export default function App() {
     };
   }, []);
 
-  // Під час boot показуємо нічого — HTML pre-splash ховається у main.tsx
   if (user === undefined) {
     return null;
   }
@@ -98,12 +96,10 @@ export default function App() {
       <A2HS />
       <NetworkToast />
       <SWUpdateToast />
-
       <NavigationBar />
 
       <Suspense fallback={null}>
         <Routes>
-          {/* Домівка → публічна карта */}
           <Route path="/" element={<HomeGate />} />
 
           {/* Публічні сторінки */}
@@ -156,7 +152,6 @@ export default function App() {
             }
           />
 
-          {/* Фолбек */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
