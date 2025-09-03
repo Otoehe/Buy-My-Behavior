@@ -6,7 +6,7 @@ import {
   loadScenarioFormDraft,
   syncScenarioForm,
   clearScenarioFormDraft,
-} from "../lib/scenarioFormDraft"; // ✅ ВАЖЛИВО: імпортуємо з scenarioFormDraft
+} from "../lib/scenarioFormDraft"; // ✅ важливо: робота з чернеткою
 import "./ScenarioForm.css";
 
 const VISITED_MAP_KEY = "scenario_visited_map";
@@ -15,7 +15,7 @@ export default function ScenarioForm() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // executor_id беремо з query або з локального кешу (інпут видалено)
+  // executor_id із query або з локального кешу
   const searchParams = new URLSearchParams(location.search);
   const urlExecutorId = searchParams.get("executor_id") || "";
   const storedExecutorId = localStorage.getItem("scenario_receiverId") || "";
@@ -34,9 +34,7 @@ export default function ScenarioForm() {
     const draft = loadScenarioFormDraft();
     if (draft) {
       setDescription(draft.description || "");
-      setDonationAmount(
-        draft.price != null ? String(draft.price) : ""
-      );
+      setDonationAmount(draft.price != null ? String(draft.price) : "");
       setDate(draft.date || "");
       setTime(draft.time || "");
     }
@@ -50,7 +48,7 @@ export default function ScenarioForm() {
     }
   }, [urlExecutorId, storedExecutorId]);
 
-  // Перевірка координат тільки якщо у цій вкладці вже переходили на мапу
+  // Перевірка координат тільки якщо в цій вкладці переходили на мапу
   const refreshLocationSet = () => {
     const lat = Number(localStorage.getItem("latitude"));
     const lng = Number(localStorage.getItem("longitude"));
@@ -79,8 +77,8 @@ export default function ScenarioForm() {
       localStorage.setItem("scenario_receiverId", id);
       // позначаємо, що з цієї вкладки перейшли на мапу
       sessionStorage.setItem(VISITED_MAP_KEY, "1");
-      // ✅ окрема карта з фірмовим маячком у центрі, режим вибору
-      navigate(`/scenario/location?executor_id=${encodeURIComponent(id)}&mode=select`);
+      // ✅ відкриваємо існуючий маршрут карти у РЕЖИМІ ВИБОРУ
+      navigate(`/map?pick=1&executor_id=${encodeURIComponent(id)}`);
     } else {
       setError("Виконавець не визначений.");
     }
@@ -177,7 +175,7 @@ export default function ScenarioForm() {
               value={description}
               onChange={(e) => {
                 setDescription(e.target.value);
-                syncScenarioForm({ description: e.target.value }); // ✅ передаємо об’єкт-патч
+                syncScenarioForm({ description: e.target.value }); // ✅ об’єкт-патч
               }}
             />
           </label>
