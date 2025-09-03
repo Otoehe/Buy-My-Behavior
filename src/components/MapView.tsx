@@ -62,7 +62,11 @@ function MoveOnClickLayer() {
 export default function MapView() {
   const navigate = useNavigate();
   const location = useLocation();
-  const isSelectMode = location.pathname === '/select-location';
+
+  // ✅ селектор вмикається І на /map/select, І на /map?pick=1
+  const params = new URLSearchParams(location.search);
+  const isSelectMode =
+    location.pathname === '/map/select' || params.get('pick') === '1';
 
   const mapRef = useRef<L.Map | null>(null);
 
@@ -279,7 +283,6 @@ export default function MapView() {
       sessionStorage.setItem('scenario_visited_map', '1');
     } catch {}
 
-    const params = new URLSearchParams(location.search);
     const executorId =
       params.get('executor_id') ||
       localStorage.getItem('scenario_receiverId') ||
@@ -287,7 +290,7 @@ export default function MapView() {
 
     navigate(
       `/scenario/new${executorId ? `?executor_id=${encodeURIComponent(executorId)}` : ''}`,
-      { replace: true, state: { from: '/select-location' } }
+      { replace: true, state: { from: '/map/select' } }
     );
   };
 
@@ -425,7 +428,7 @@ export default function MapView() {
             inset: 0,
             zIndex: 1999,
             background: 'rgba(0,0,0,0.35)',
-            opacity: 0.35, // стартове значення; під час свайпу змінюється через setTransform
+            opacity: 0.35,
             transition: 'opacity 200ms ease',
           }}
         />
@@ -447,11 +450,10 @@ export default function MapView() {
             boxShadow: '-8px 0 24px rgba(0,0,0,0.22)',
             padding: 20,
             overflowY: 'auto',
-            transform: 'translate3d(0,0,0)', // буде мінятися у RAF
+            transform: 'translate3d(0,0,0)',
             transition: 'transform 200ms cubic-bezier(.2,.8,.2,1)',
             touchAction: 'pan-y',
             willChange: 'transform',
-            // невидимий «градієнт-край» ліворуч, щоб відчувалась глибина
             backgroundImage:
               'linear-gradient(90deg, rgba(0,0,0,0.04) 0, rgba(0,0,0,0) 24px), linear-gradient(#fff,#fff)',
             backgroundRepeat: 'no-repeat',
@@ -459,14 +461,12 @@ export default function MapView() {
             backgroundPosition: 'left top, left top',
           }}
           onClick={(e) => {
-            // клік на порожнє місце шторки — не закриваємо; для закриття є бекдроп
             e.stopPropagation();
           }}
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
         >
-          {/* кнопка закриття (стрілочка) */}
           <button
             type="button"
             aria-label="Закрити"
@@ -490,7 +490,6 @@ export default function MapView() {
             </svg>
           </button>
 
-          {/* Контент шторки */}
           <DrawerContent
             selectedProfile={selectedProfile}
             scenarios={scenarios}
@@ -501,7 +500,6 @@ export default function MapView() {
         </div>
       )}
 
-      {/* МОДАЛКА ВІДГУКІВ — відкривається тільки по кнопці */}
       {reviewsOpen && selectedProfile && (
         <ReviewsModal
           targetUserId={selectedProfile.user_id}
@@ -512,7 +510,6 @@ export default function MapView() {
   );
 }
 
-/* Виніс в окремий компонент, щоб не загромаджувати і не перерендерити шторку під час свайпу */
 function DrawerContent({
   selectedProfile,
   scenarios,
@@ -623,7 +620,7 @@ function DrawerContent({
                   fontSize: 12,
                   fontWeight: 700,
                   whiteSpace: 'nowrap',
-                  border: '1px solid #e5e7eb',
+                  border: '1px solid '#e5e7eb',
                 }}
               >
                 {s.price} USDT

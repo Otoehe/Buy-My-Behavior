@@ -6,7 +6,7 @@ import {
   loadScenarioFormDraft,
   syncScenarioForm,
   clearScenarioFormDraft,
-} from "../lib/scenarioFormDraft"; // ✅ важливо: робота з чернеткою
+} from "../lib/scenarioFormDraft";
 import "./ScenarioForm.css";
 
 const VISITED_MAP_KEY = "scenario_visited_map";
@@ -15,7 +15,6 @@ export default function ScenarioForm() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // executor_id із query або з локального кешу
   const searchParams = new URLSearchParams(location.search);
   const urlExecutorId = searchParams.get("executor_id") || "";
   const storedExecutorId = localStorage.getItem("scenario_receiverId") || "";
@@ -29,7 +28,6 @@ export default function ScenarioForm() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // Відновлюємо чернетку
   useEffect(() => {
     const draft = loadScenarioFormDraft();
     if (draft) {
@@ -40,7 +38,6 @@ export default function ScenarioForm() {
     }
   }, []);
 
-  // Якщо executor_id прийшов у URL — синхронізуємо з localStorage
   useEffect(() => {
     if (urlExecutorId && urlExecutorId !== storedExecutorId) {
       localStorage.setItem("scenario_receiverId", urlExecutorId);
@@ -48,7 +45,6 @@ export default function ScenarioForm() {
     }
   }, [urlExecutorId, storedExecutorId]);
 
-  // Перевірка координат тільки якщо в цій вкладці переходили на мапу
   const refreshLocationSet = () => {
     const lat = Number(localStorage.getItem("latitude"));
     const lng = Number(localStorage.getItem("longitude"));
@@ -61,27 +57,25 @@ export default function ScenarioForm() {
     refreshLocationSet();
   }, [location.state]);
 
-  // При поверненні фокусом на сторінку теж перевіряємо (після вибору точки)
   useEffect(() => {
     const onFocus = () => refreshLocationSet();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  // Перехід на карту ВИБОРУ місця (зберігаємо чернетку)
   const handleGoToMap = () => {
     saveScenarioFormDraft({ description, price: donationAmount, date, time });
 
     const id = executorId || localStorage.getItem("scenario_receiverId") || urlExecutorId;
-    if (id) {
-      localStorage.setItem("scenario_receiverId", id);
-      // позначаємо, що з цієї вкладки перейшли на мапу
-      sessionStorage.setItem(VISITED_MAP_KEY, "1");
-      // ✅ відкриваємо існуючий маршрут карти у РЕЖИМІ ВИБОРУ
-      navigate(`/map?pick=1&executor_id=${encodeURIComponent(id)}`);
-    } else {
+    if (!id) {
       setError("Виконавець не визначений.");
+      return;
     }
+    localStorage.setItem("scenario_receiverId", id);
+    sessionStorage.setItem(VISITED_MAP_KEY, "1");
+
+    // ✅ ідемо на спеціальний шлях селектора
+    navigate(`/map/select?executor_id=${encodeURIComponent(id)}`);
   };
 
   const handleSubmit = async () => {
@@ -94,7 +88,6 @@ export default function ScenarioForm() {
       return;
     }
 
-    // executor_id беремо лише із URL або localStorage
     const currentExecutorId =
       new URLSearchParams(window.location.search).get("executor_id") ||
       localStorage.getItem("scenario_receiverId") ||
@@ -148,7 +141,6 @@ export default function ScenarioForm() {
       if (error) throw error;
 
       clearScenarioFormDraft();
-      // залишаємо scenario_receiverId — може знадобитись для наступного сценарію
       localStorage.removeItem("latitude");
       localStorage.removeItem("longitude");
       sessionStorage.removeItem(VISITED_MAP_KEY);
@@ -175,7 +167,7 @@ export default function ScenarioForm() {
               value={description}
               onChange={(e) => {
                 setDescription(e.target.value);
-                syncScenarioForm({ description: e.target.value }); // ✅ об’єкт-патч
+                syncScenarioForm({ description: e.target.value });
               }}
             />
           </label>
@@ -190,7 +182,7 @@ export default function ScenarioForm() {
               value={donationAmount}
               onChange={(e) => {
                 setDonationAmount(e.target.value);
-                syncScenarioForm({ price: e.target.value }); // ✅ об’єкт-патч
+                syncScenarioForm({ price: e.target.value });
               }}
             />
           </label>
@@ -202,7 +194,7 @@ export default function ScenarioForm() {
               value={date}
               onChange={(e) => {
                 setDate(e.target.value);
-                syncScenarioForm({ date: e.target.value }); // ✅
+                syncScenarioForm({ date: e.target.value });
               }}
             />
           </label>
@@ -214,7 +206,7 @@ export default function ScenarioForm() {
               value={time}
               onChange={(e) => {
                 setTime(e.target.value);
-                syncScenarioForm({ time: e.target.value }); // ✅
+                syncScenarioForm({ time: e.target.value });
               }}
             />
           </label>
