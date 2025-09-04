@@ -620,7 +620,7 @@ function DrawerContent({
                   fontSize: 12,
                   fontWeight: 700,
                   whiteSpace: 'nowrap',
-                  border: '1px solid '#e5e7eb',
+                  border: '1px solid #e5e7eb',
                 }}
               >
                 {s.price} USDT
