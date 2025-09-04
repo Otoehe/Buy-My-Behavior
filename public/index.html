@@ -1,35 +1,50 @@
-<!DOCTYPE html>
-<html lang="uk">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#ffcdd6" />
-    <title>Buy My Behavior</title>
+<!-- Title/description -->
+<title>Buy My Behavior — Web3 платформа для угод з поведінками (USDT, BSC, escrow 90/5/5)</title>
+<meta name="description" content="BMB — платформа, де замовники та виконавці укладають угоди щодо 'поведінок'. Захист угоди — escrow у USDT на Binance Smart Chain: 90% виконавцю, 5% рефералу, 5% платформі.">
 
-    <!-- ✅ Підключення Font Awesome -->
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-      integrity="sha512-papb+z1lmgC6XR8J5kkw1lvIeY2Ebnxgi1iH5UXxGJLY9pr3+TUNiP8gdBqNYtE8NeNNnNw1Z8JYhP9FYzKg=="
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
-    />
+<!-- Дозвіл індексації -->
+<meta name="robots" content="index,follow">
 
-    <!-- ✅ favicon -->
-    <link rel="icon" type="image/png" href="/favicon.ico" />
+<!-- Мова + канонічна адреса -->
+<link rel="canonical" href="https://www.buymybehavior.com/">
+<link rel="alternate" href="https://www.buymybehavior.com/" hreflang="uk" />
+<link rel="alternate" href="https://www.buymybehavior.com/" hreflang="x-default" />
 
-    <!-- ✅ PWA Manifest -->
-    <link rel="manifest" href="/manifest.json?v=2" />
+<!-- Open Graph / Twitter -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.buymybehavior.com/">
+<meta property="og:title" content="Buy My Behavior — Web3 платформа для угод з поведінками">
+<meta property="og:description" content="Escrow у USDT на BSC: 90% виконавцю, 5% рефералу, 5% платформі. Геолокація, реферальна система, смартконтракт.">
+<meta property="og:image" content="https://www.buymybehavior.com/og-cover.jpg"> <!-- поклади og-cover.jpg у public/ -->
 
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Buy My Behavior — Web3 платформа">
+<meta name="twitter:description" content="Escrow у USDT на BSC: 90/5/5.">
+<meta name="twitter:image" content="https://www.buymybehavior.com/og-cover.jpg">
 
-    <!-- iOS PWA -->
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png" />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+<!-- (Опціонально) верифікація Search Console: вставиш свій токен -->
+<!-- <meta name="google-site-verification" content="PASTE_TOKEN_HERE" /> -->
+
+<!-- JSON-LD: Organization + WebSite -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "Buy My Behavior",
+  "url": "https://www.buymybehavior.com/",
+  "logo": "https://www.buymybehavior.com/icons/icon-512x512.png"
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "Buy My Behavior",
+  "url": "https://www.buymybehavior.com/",
+  "potentialAction": {
+    "@type": "SearchAction",
+    "target": "https://www.buymybehavior.com/search?q={query}",
+    "query-input": "required name=query"
+  }
+}
+</script>

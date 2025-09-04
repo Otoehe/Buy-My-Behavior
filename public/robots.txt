@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+
+# Закриті/приватні розділи
+Disallow: /profile
+Disallow: /my-orders
+Disallow: /received
+Disallow: /auth/
+Disallow: /manifest
+
+Sitemap: https://www.buymybehavior.com/sitemap.xml
