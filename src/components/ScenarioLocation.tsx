@@ -15,7 +15,7 @@ import "leaflet/dist/leaflet.css";
 import { supabase } from "../lib/supabase";
 
 const VISITED_MAP_KEY = "scenario_visited_map";
-const PIN_SVG_URL = "/bmb-pin.svg";           // файл у /public
+const PIN_SVG_URL = "/bmb-pin.svg";
 const KYIV: [number, number] = [50.4501, 30.5234];
 
 const MAPBOX_ACCESS_TOKEN =
@@ -28,44 +28,24 @@ function useQuery() {
 
 const isFiniteLatLng = (lat: number, lng: number) =>
   Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
-const isNullIsland = (lat: number, lng: number) =>
-  Math.abs(lat) < 0.001 && Math.abs(lng) < 0.001;
-const isSane = (lat: number, lng: number) =>
-  isFiniteLatLng(lat, lng) && !isNullIsland(lat, lng);
+const isNullIsland = (lat: number, lng: number) => Math.abs(lat) < 0.001 && Math.abs(lng) < 0.001;
+const isSane = (lat: number, lng: number) => isFiniteLatLng(lat, lng) && !isNullIsland(lat, lng);
 
-// ✅ Наш круглий пін (біле коло + біла обводка + тінь; лого всередині)
+// ── наш білий круглий пін з логотипом
 function makeBmbIcon(size = 33, logoUrl = PIN_SVG_URL) {
-  const ring = 2;                 // товщина білої обводки
-  const total = size + ring * 2;  // загальний розмір divIcon
-
+  const ring = 2;
+  const total = size + ring * 2;
   return L.divIcon({
     className: "bmb-pin",
     html: `
-      <div class="bmb-pin-inner"
-           style="width:${total}px;height:${total + 10}px;pointer-events:none;">
-        <div class="bmb-pin-ring"
-             style="
-               width:${size}px !important;
-               height:${size}px !important;
-               border:${ring}px solid #ffffff !important;   /* біла обводка */
-               border-radius:50% !important;
-               box-shadow:0 6px 18px rgba(0,0,0,.22) !important;
-               background:#ffffff !important;                /* білий фон кола */
-               overflow:hidden !important;
-               display:flex !important;
-               align-items:center !important;
-               justify-content:center !important;
-             ">
-          <img class="bmb-pin-logo"
-               src="${logoUrl}"
-               alt="bmb"
-               draggable="false"
-               style="
-                 width:100% !important;
-                 height:100% !important;
-                 object-fit:contain !important;              /* не обрізаємо логотип */
-                 padding:4px !important;                     /* трохи повітря всередині */
-               " />
+      <div style="width:${total}px;height:${total + 10}px;pointer-events:none;">
+        <div style="
+          width:${size}px !important;height:${size}px !important;
+          border:${ring}px solid #fff !important;border-radius:50% !important;
+          box-shadow:0 6px 18px rgba(0,0,0,.22) !important;background:#fff !important;
+          overflow:hidden !important;display:flex !important;align-items:center !important;justify-content:center !important;">
+          <img src="${logoUrl}" alt="bmb" draggable="false"
+               style="width:100% !important;height:100% !important;object-fit:contain !important;padding:4px !important;" />
         </div>
       </div>
     `,
@@ -81,26 +61,20 @@ const CenterMap: React.FC<{ center: [number, number] }> = ({ center }) => {
   return null;
 };
 
-// ✅ Ставіть пін саме туди, де натиснули
 function ClickToPlace({ onPick }: { onPick: (latlng: L.LatLng) => void }) {
-  useMapEvents({
-    click(e) { onPick(e.latlng); },
-  });
+  useMapEvents({ click(e) { onPick(e.latlng); } });
   return null;
 }
 
-/** ✅ Кнопка через портал у <body>, щоб ніщо не перехоплювало кліки */
-function ConfirmButtonPortal({
-  onClick,
-}: {
-  onClick: () => void;
-}) {
+// кнопка в порталі, щоб мапа не з’їдала кліки
+function ConfirmButtonPortal({ onClick }: { onClick: () => void }) {
   return createPortal(
     <button
       type="button"
       onClick={onClick}
-      onPointerDown={(e) => { e.stopPropagation(); }}
-      onClickCapture={(e) => { e.stopPropagation(); }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClickCapture={(e) => e.stopPropagation()}
       aria-label="Підтвердити це місце"
       style={{
         position: "fixed",
@@ -117,7 +91,7 @@ function ConfirmButtonPortal({
         fontWeight: 800,
         border: 0,
         boxShadow: "0 12px 28px rgba(0,0,0,.28)",
-        zIndex: 2147483647,               // максимальний шар
+        zIndex: 2147483647,
         cursor: "pointer",
         WebkitTapHighlightColor: "transparent",
         pointerEvents: "auto",
@@ -132,18 +106,18 @@ function ConfirmButtonPortal({
 
 export default function ScenarioLocation() {
   const q = useQuery();
+  const location = useLocation();
   const navigate = useNavigate();
   const mapRef = useRef<L.Map | null>(null);
 
-  const mode = (q.get("mode") || "").toLowerCase(); // "view" щоб лише дивитись
+  const mode = (q.get("mode") || "").toLowerCase(); // "view" → тільки перегляд
   const latQ = Number(q.get("lat"));
   const lngQ = Number(q.get("lng"));
   const querySane = isSane(latQ, lngQ);
 
-  const executorId =
-    q.get("executor_id") || localStorage.getItem("scenario_receiverId") || "";
+  const executorId = q.get("executor_id") || localStorage.getItem("scenario_receiverId") || "";
 
-  // === Центр карти ===
+  // центр карти
   const [center, setCenter] = useState<[number, number]>(() => {
     if (querySane) return [latQ, lngQ];
     const lsLat = Number(localStorage.getItem("latitude"));
@@ -152,7 +126,7 @@ export default function ScenarioLocation() {
     return KYIV;
   });
 
-  // === Вибраний пін ===
+  // вибраний маркер
   const [picked, setPicked] = useState<L.LatLng | null>(() => {
     if (querySane) return new L.LatLng(latQ, lngQ);
     const lsLat = Number(localStorage.getItem("latitude"));
@@ -161,7 +135,7 @@ export default function ScenarioLocation() {
     return new L.LatLng(KYIV[0], KYIV[1]);
   });
 
-  // Fallback: якщо Mapbox не вантажиться — OSM
+  // fallback на OSM
   const [useOsm, setUseOsm] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setUseOsm((prev) => prev || true), 1500);
@@ -173,9 +147,9 @@ export default function ScenarioLocation() {
   useEffect(() => { if (querySane) setCenter([latQ, lngQ]); }, [querySane, latQ, lngQ]);
 
   const iconMedium = useMemo(() => makeBmbIcon(33), []);
-  const isSelectMode = mode !== "view"; // за замовчуванням — режим вибору
+  const isSelectMode = mode !== "view";
 
-  // Автопочаток: LS → GPS → профіль → Київ
+  // авто-початок: LS → GPS → профіль → Київ
   const [triedAutoPick, setTriedAutoPick] = useState(false);
   useEffect(() => {
     if (!isSelectMode || triedAutoPick) return;
@@ -187,10 +161,7 @@ export default function ScenarioLocation() {
         const uid = auth?.user?.id;
         if (!uid) { setPicked(new L.LatLng(KYIV[0], KYIV[1])); setCenter(KYIV); return; }
         const { data } = await supabase
-          .from("profiles")
-          .select("latitude, longitude")
-          .eq("user_id", uid)
-          .single();
+          .from("profiles").select("latitude, longitude").eq("user_id", uid).single();
         if (data && isSane(data.latitude, data.longitude)) {
           const ll = new L.LatLng(data.latitude, data.longitude);
           setPicked(ll); setCenter([data.latitude, data.longitude]);
@@ -220,33 +191,34 @@ export default function ScenarioLocation() {
     }
   }, [isSelectMode, picked, triedAutoPick]);
 
-  // ✅ Підтвердити → назад у форму (ScenarioForm зчитує LS та state)
+  // підтвердити → зберегти координати та перейти на форму сценарію
   const confirmSelection = () => {
     const point = picked ?? mapRef.current?.getCenter();
     if (!point) return;
     localStorage.setItem("latitude", String(point.lat));
     localStorage.setItem("longitude", String(point.lng));
     sessionStorage.setItem(VISITED_MAP_KEY, "1");
-    navigate(
-      `/scenario/new${executorId ? `?executor_id=${encodeURIComponent(executorId)}` : ""}`,
-      { replace: true, state: { from: "/scenario/location" } }
-    );
+
+    const qs = executorId ? `?executor_id=${encodeURIComponent(executorId)}` : "";
+    // важливо: НЕ replace, щоб гарантовано відбулося перемикання роуту
+    navigate(`/scenario/new${qs}`, { state: { from: location.pathname } });
   };
 
   return (
     <div
       style={{
+        // повна висота екрана і без нижніх відступів — карта “до самого низу”
         height: "calc(var(--vh, 1vh) * 100)",
+        // як запасний варіант для деяких мобільних браузерів:
+        minHeight: "100dvh",
         width: "100%",
         position: "relative",
-        paddingBottom: "80px",
-        boxSizing: "border-box",
       }}
     >
       <MapContainer
         center={center}
         zoom={16}
-        style={{ height: "100%" }}
+        style={{ height: "100%", width: "100%" }}
         whenCreated={(m) => { mapRef.current = m; }}
         scrollWheelZoom
       >
@@ -270,12 +242,7 @@ export default function ScenarioLocation() {
 
         {isSelectMode && (
           <>
-            <ClickToPlace
-              onPick={(ll) => {
-                setPicked(ll);
-                setCenter([ll.lat, ll.lng]);
-              }}
-            />
+            <ClickToPlace onPick={(ll) => { setPicked(ll); setCenter([ll.lat, ll.lng]); }} />
             {picked && (
               <Marker
                 position={picked}
@@ -299,7 +266,6 @@ export default function ScenarioLocation() {
         )}
       </MapContainer>
 
-      {/* ✅ Кнопка тепер поза DOM-деревом мапи — нічого не блокує кліки */}
       {isSelectMode && <ConfirmButtonPortal onClick={confirmSelection} />}
     </div>
   );
