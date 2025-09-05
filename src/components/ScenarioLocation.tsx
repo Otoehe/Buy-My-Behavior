@@ -32,10 +32,11 @@ const isNullIsland = (lat: number, lng: number) =>
 const isSane = (lat: number, lng: number) =>
   isFiniteLatLng(lat, lng) && !isNullIsland(lat, lng);
 
-// 👇 Пін 33px (з інлайновим !important, щоб зовнішні CSS не змінювали розмір)
+// ✅ Наш круглий пін (біле коло + біла обводка + тінь; лого всередині)
 function makeBmbIcon(size = 33, logoUrl = PIN_SVG_URL) {
-  const border = 2;
-  const total = size + border * 2; // 37px
+  const ring = 2;                 // товщина білої обводки
+  const total = size + ring * 2;  // загальний розмір divIcon
+
   return L.divIcon({
     className: "bmb-pin",
     html: `
@@ -45,25 +46,30 @@ function makeBmbIcon(size = 33, logoUrl = PIN_SVG_URL) {
              style="
                width:${size}px !important;
                height:${size}px !important;
-               border:${border}px solid #fff !important;
+               border:${ring}px solid #ffffff !important;   /* біла обводка */
                border-radius:50% !important;
-               box-shadow:0 6px 18px rgba(0,0,0,.2) !important;
+               box-shadow:0 6px 18px rgba(0,0,0,.22) !important;
+               background:#ffffff !important;                /* білий фон кола */
                overflow:hidden !important;
                display:flex !important;
                align-items:center !important;
                justify-content:center !important;
-               background:#ffdbe6 !important;
              ">
           <img class="bmb-pin-logo"
                src="${logoUrl}"
                alt="bmb"
                draggable="false"
-               style="width:100% !important;height:100% !important;object-fit:cover !important;" />
+               style="
+                 width:100% !important;
+                 height:100% !important;
+                 object-fit:contain !important;              /* не обрізаємо логотип */
+                 padding:4px !important;                     /* трохи повітря всередині */
+               " />
         </div>
       </div>
     `,
     iconSize: [total, total + 10],
-    iconAnchor: [total / 2, total + 5], // нижній “хвостик”
+    iconAnchor: [total / 2, total + 5],
     popupAnchor: [0, -total / 2],
   });
 }
@@ -74,8 +80,11 @@ const CenterMap: React.FC<{ center: [number, number] }> = ({ center }) => {
   return null;
 };
 
+// ✅ Ставіть пін саме туди, де натиснули
 function ClickToPlace({ onPick }: { onPick: (latlng: L.LatLng) => void }) {
-  useMapEvents({ click(e) { onPick(e.latlng); } });
+  useMapEvents({
+    click(e) { onPick(e.latlng); },
+  });
   return null;
 }
 
@@ -122,10 +131,9 @@ export default function ScenarioLocation() {
   useEffect(() => { if (querySane) setCenter([latQ, lngQ]); }, [querySane, latQ, lngQ]);
 
   const iconMedium = useMemo(() => makeBmbIcon(33), []);
-  // За замовчуванням — SELECT MODE (кнопка є). Щоб сховати кнопку: ?mode=view
-  const isSelectMode = mode !== "view";
+  const isSelectMode = mode !== "view"; // за замовчуванням — режим вибору
 
-  // Авто-старт: LS → GPS → профіль → Київ
+  // Автопочаток: LS → GPS → профіль → Київ
   const [triedAutoPick, setTriedAutoPick] = useState(false);
   useEffect(() => {
     if (!isSelectMode || triedAutoPick) return;
@@ -170,7 +178,7 @@ export default function ScenarioLocation() {
     }
   }, [isSelectMode, picked, triedAutoPick]);
 
-  // Підтвердити → назад у форму
+  // ✅ Підтвердити → назад у форму (ScenarioForm зчитує LS та state)
   const confirmSelection = () => {
     const point = picked ?? mapRef.current?.getCenter();
     if (!point) return;
@@ -186,9 +194,12 @@ export default function ScenarioLocation() {
   return (
     <div
       style={{
-        height: "calc(var(--vh, 1vh) * 100)", // коректна висота на мобілках
+        height: "calc(var(--vh, 1vh) * 100)",
         width: "100%",
         position: "relative",
+        // невеликий відступ знизу, щоб ніщо не перекривалось кнопкою
+        paddingBottom: "80px",
+        boxSizing: "border-box",
       }}
     >
       <MapContainer
@@ -218,7 +229,12 @@ export default function ScenarioLocation() {
 
         {isSelectMode && (
           <>
-            <ClickToPlace onPick={(ll) => { setPicked(ll); setCenter([ll.lat, ll.lng]); }} />
+            <ClickToPlace
+              onPick={(ll) => {
+                setPicked(ll);
+                setCenter([ll.lat, ll.lng]);
+              }}
+            />
             {picked && (
               <Marker
                 position={picked}
@@ -242,19 +258,20 @@ export default function ScenarioLocation() {
         )}
       </MapContainer>
 
-      {/* Кнопка 33px */}
+      {/* ✅ Кнопка завжди видима: fixed + safe-area + високий z-index */}
       {isSelectMode && (
         <button
           type="button"
           onClick={confirmSelection}
+          aria-label="Підтвердити це місце"
           style={{
-            position: "absolute",
+            position: "fixed",
             left: "50%",
-            bottom: "calc(12px + env(safe-area-inset-bottom, 0px))",
             transform: "translateX(-50%)",
-            height: "33px",
-            lineHeight: "33px",
-            padding: "0 16px",
+            bottom: "calc(env(safe-area-inset-bottom, 0px) + 72px)", // підняв вище, щоб завжди було видно
+            height: "36px",
+            lineHeight: "36px",
+            padding: "0 18px",
             fontSize: "14px",
             borderRadius: 999,
             background: "#000",
@@ -262,9 +279,10 @@ export default function ScenarioLocation() {
             fontWeight: 800,
             border: 0,
             boxShadow: "0 12px 28px rgba(0,0,0,.28)",
-            zIndex: 5000,
+            zIndex: 9999,
             cursor: "pointer",
             WebkitTapHighlightColor: "transparent",
+            pointerEvents: "auto",
           }}
         >
           ✅ Підтвердити це місце
