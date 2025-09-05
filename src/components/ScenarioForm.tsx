@@ -74,8 +74,8 @@ export default function ScenarioForm() {
     localStorage.setItem("scenario_receiverId", id);
     sessionStorage.setItem(VISITED_MAP_KEY, "1");
 
-    // ✅ ідемо на спеціальний шлях селектора
-    navigate(`/map/select?executor_id=${encodeURIComponent(id)}`);
+    // ✅ Правильний маршрут вибору місця:
+    navigate(`/map?pick=1&executor_id=${encodeURIComponent(id)}`);
   };
 
   const handleSubmit = async () => {
