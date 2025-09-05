@@ -1,5 +1,6 @@
 // 📁 src/components/ScenarioLocation.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   MapContainer,
@@ -86,6 +87,47 @@ function ClickToPlace({ onPick }: { onPick: (latlng: L.LatLng) => void }) {
     click(e) { onPick(e.latlng); },
   });
   return null;
+}
+
+/** ✅ Кнопка через портал у <body>, щоб ніщо не перехоплювало кліки */
+function ConfirmButtonPortal({
+  onClick,
+}: {
+  onClick: () => void;
+}) {
+  return createPortal(
+    <button
+      type="button"
+      onClick={onClick}
+      onPointerDown={(e) => { e.stopPropagation(); }}
+      onClickCapture={(e) => { e.stopPropagation(); }}
+      aria-label="Підтвердити це місце"
+      style={{
+        position: "fixed",
+        left: "50%",
+        transform: "translateX(-50%)",
+        bottom: "calc(env(safe-area-inset-bottom, 0px) + 72px)",
+        height: "36px",
+        lineHeight: "36px",
+        padding: "0 18px",
+        fontSize: "14px",
+        borderRadius: 999,
+        background: "#000",
+        color: "#fff",
+        fontWeight: 800,
+        border: 0,
+        boxShadow: "0 12px 28px rgba(0,0,0,.28)",
+        zIndex: 2147483647,               // максимальний шар
+        cursor: "pointer",
+        WebkitTapHighlightColor: "transparent",
+        pointerEvents: "auto",
+        touchAction: "manipulation",
+      }}
+    >
+      ✅ Підтвердити це місце
+    </button>,
+    document.body
+  );
 }
 
 export default function ScenarioLocation() {
@@ -197,7 +239,6 @@ export default function ScenarioLocation() {
         height: "calc(var(--vh, 1vh) * 100)",
         width: "100%",
         position: "relative",
-        // невеликий відступ знизу, щоб ніщо не перекривалось кнопкою
         paddingBottom: "80px",
         boxSizing: "border-box",
       }}
@@ -258,36 +299,8 @@ export default function ScenarioLocation() {
         )}
       </MapContainer>
 
-      {/* ✅ Кнопка завжди видима: fixed + safe-area + високий z-index */}
-      {isSelectMode && (
-        <button
-          type="button"
-          onClick={confirmSelection}
-          aria-label="Підтвердити це місце"
-          style={{
-            position: "fixed",
-            left: "50%",
-            transform: "translateX(-50%)",
-            bottom: "calc(env(safe-area-inset-bottom, 0px) + 72px)", // підняв вище, щоб завжди було видно
-            height: "36px",
-            lineHeight: "36px",
-            padding: "0 18px",
-            fontSize: "14px",
-            borderRadius: 999,
-            background: "#000",
-            color: "#fff",
-            fontWeight: 800,
-            border: 0,
-            boxShadow: "0 12px 28px rgba(0,0,0,.28)",
-            zIndex: 9999,
-            cursor: "pointer",
-            WebkitTapHighlightColor: "transparent",
-            pointerEvents: "auto",
-          }}
-        >
-          ✅ Підтвердити це місце
-        </button>
-      )}
+      {/* ✅ Кнопка тепер поза DOM-деревом мапи — нічого не блокує кліки */}
+      {isSelectMode && <ConfirmButtonPortal onClick={confirmSelection} />}
     </div>
   );
 }
