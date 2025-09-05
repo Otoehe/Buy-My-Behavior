@@ -18,7 +18,7 @@ import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 
 // ⛔️ SplashScreen більше не використовуємо
-// import SplashScreen from './components/SplashScreen';
+// import SplashScreen from './components/SplashScreen');
 
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
@@ -104,9 +104,10 @@ export default function App() {
 
           {/* Публічні сторінки */}
           <Route path="/auth/callback" element={<AuthCallback />} />
-          <Route path="/map"        element={<MapView />} />
-          <Route path="/behaviors"  element={<BehaviorsFeed />} />
-          <Route path="/manifest"   element={<Manifest />} />
+          <Route path="/map"         element={<MapView />} />
+          <Route path="/map/select"  element={<MapView />} /> {/* ✅ alias для режиму вибору */}
+          <Route path="/behaviors"   element={<BehaviorsFeed />} />
+          <Route path="/manifest"    element={<Manifest />} />
 
           {/* Реєстрація */}
           <Route
