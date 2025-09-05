@@ -1,4 +1,3 @@
-// src/App.tsx
 import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import type { User } from '@supabase/supabase-js';
@@ -20,15 +19,16 @@ import SWUpdateToast        from './components/SWUpdateToast';
 // ⛔️ SplashScreen більше не використовуємо
 // import SplashScreen from './components/SplashScreen');
 
-const MapView           = lazy(() => import('./components/MapView'));
-const MyOrders          = lazy(() => import('./components/MyOrders'));
-const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
-const Manifest          = lazy(() => import('./components/Manifest'));
-const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
+const MapView            = lazy(() => import('./components/MapView'));
+const MyOrders           = lazy(() => import('./components/MyOrders'));
+const ReceivedScenarios  = lazy(() => import('./components/ReceivedScenarios'));
+const Manifest           = lazy(() => import('./components/Manifest'));
+const ScenarioForm       = lazy(() => import('./components/ScenarioForm'));
+const ScenarioLocation   = lazy(() => import('./components/ScenarioLocation')); // ✅
 
-// ───────────────────────────────────────────────────────────────────────────────
-// Guards
-// ───────────────────────────────────────────────────────────────────────────────
+/* ────────────────────────────────────────────────────────────────────────────
+   Guards
+   ──────────────────────────────────────────────────────────────────────────── */
 function RequireAuth({
   user,
   children,
@@ -37,10 +37,7 @@ function RequireAuth({
   children: React.ReactElement;
 }) {
   const location = useLocation();
-
-  // Поки стан авторизації невідомий — нічого (OS/HTML splash уже на екрані)
   if (user === undefined) return null;
-
   if (user === null) {
     return <Navigate to="/register" replace state={{ from: location.pathname }} />;
   }
@@ -61,6 +58,18 @@ function RedirectIfAuthed({
 
 function HomeGate() {
   return <Navigate to="/map" replace />;
+}
+
+/** ✅ Роут для карти:
+ *  якщо ?pick=1 І є executor_id → сторінка вибору локації,
+ *  інакше — звичайна карта з виконавцями.
+ */
+function MapOrSelect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const isPick =
+    params.get('pick') === '1' && !!params.get('executor_id'); // важливо: має бути executor_id
+  return isPick ? <ScenarioLocation /> : <MapView />;
 }
 
 export default function App() {
@@ -104,10 +113,10 @@ export default function App() {
 
           {/* Публічні сторінки */}
           <Route path="/auth/callback" element={<AuthCallback />} />
-          <Route path="/map"         element={<MapView />} />
-          <Route path="/map/select"  element={<MapView />} /> {/* ✅ alias для режиму вибору */}
-          <Route path="/behaviors"   element={<BehaviorsFeed />} />
-          <Route path="/manifest"    element={<Manifest />} />
+          <Route path="/map"          element={<MapOrSelect />} />      {/* ✅ */}
+          <Route path="/map/select"   element={<ScenarioLocation />} /> {/* ✅ alias */}
+          <Route path="/behaviors"    element={<BehaviorsFeed />} />
+          <Route path="/manifest"     element={<Manifest />} />
 
           {/* Реєстрація */}
           <Route
