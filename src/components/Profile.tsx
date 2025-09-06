@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import './Profile.css';
 
-// ✅ NEW: централізований конектор (MetaMask + WalletConnect, реентрансі-safe)
+// Централізований конектор (MetaMask + WalletConnect, реентрансі-safe)
 import { connectWallet, ensureBSC as ensureBSCChain, type Eip1193Provider } from '../lib/wallet';
 
 /** Ролі */
@@ -38,7 +38,7 @@ const RatingStars: React.FC<{ value: number }> = ({ value }) => {
   );
 };
 
-/** MetaMask helpers (залишаємо для сумісності; конектор нижче) */
+/** MetaMask helpers (залишаємо для сумісності; основний конектор нижче) */
 function waitForEthereum(ms = 3500): Promise<any | null> {
   return new Promise((resolve) => {
     if (typeof window === 'undefined') return resolve(null);
@@ -311,11 +311,11 @@ export default function Profile() {
     if (!error) setScenarios(scenarios.map((s) => (s.id === id ? { ...s, hidden: true } : s)));
   };
 
-  // MetaMask — ОНОВЛЕНО: єдиний конектор (desktop + mobile + WC), без дубль-запитів
+  // MetaMask — централізований конектор (desktop + mobile + WC)
   const connectMetamask = async () => {
     try {
-      const { provider, accounts } = await connectWallet(); // реентрансі-лок усередині
-      await ensureBSCChain(provider as Eip1193Provider);   // гарантуємо BSC
+      const { provider, accounts } = await connectWallet(); // реентрансі-лок
+      await ensureBSCChain(provider as Eip1193Provider);   // гарантія BSC
 
       const list: string[] =
         accounts && accounts.length
@@ -419,7 +419,7 @@ export default function Profile() {
           </div>
         )}
 
-        {avatarUploading && <div className="avatar-uploading-spinner></div>}
+        {avatarUploading && <div className="avatar-uploading-spinner"></div>}
 
         <input
           type="file"
