@@ -2,25 +2,119 @@ import React from 'react';
 import './Manifest.css';
 
 export default function Manifest() {
+  // ── UI tokens (адитивно; без зміни існуючого CSS) ─────────────────────────────
+  const PINK = '#ffcdd6';
+  const PINK_SOFT = '#ffeef3';
+  const BLACK = '#000000';
+  const BORDER = 'rgba(0,0,0,0.06)';
+
+  const styles: Record<string, React.CSSProperties> = {
+    pageFont: {
+      // Використати той самий шрифт, що й у навігації (через CSS-змінну)
+      fontFamily: 'var(--nav-font, inherit)',
+      color: BLACK,
+    },
+    hero: {
+      backgroundImage: `
+        radial-gradient(1200px 420px at 12% -12%, ${PINK_SOFT}, transparent 55%),
+        linear-gradient(180deg, #ffffff 0%, ${PINK_SOFT} 100%)
+      `,
+      border: `1px solid ${BORDER}`,
+      borderRadius: 28,
+      boxShadow: '0 12px 28px rgba(0,0,0,0.06)',
+      padding: '36px 22px 28px',
+      margin: '0 auto',
+      maxWidth: 1120,
+    },
+    kicker: {
+      display: 'inline-block',
+      padding: '6px 12px',
+      borderRadius: 999,
+      background: '#ffffff',
+      border: `1px solid ${BORDER}`,
+      boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+      fontSize: 'clamp(12px, 2.4vw, 14px)',
+      fontWeight: 600,
+      letterSpacing: '0.02em',
+      marginBottom: 12,
+    },
+    title: {
+      margin: 0,
+      fontWeight: 800,
+      letterSpacing: '-0.02em',
+      lineHeight: 1.1,
+      fontSize: 'clamp(28px, 6.2vw, 56px)',
+      textShadow: '0 1px 0 rgba(255,255,255,0.6)',
+    },
+    divider: {
+      height: 1,
+      background: 'linear-gradient(90deg, transparent, rgba(0,0,0,0.06), transparent)',
+      margin: '16px 0 12px',
+    },
+    lead: {
+      margin: 0,
+      fontSize: 'clamp(14px, 2.8vw, 18px)',
+      lineHeight: 1.6,
+      opacity: 0.9,
+    },
+    pills: {
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap',
+      marginTop: 14,
+    },
+    pill: {
+      display: 'inline-block',
+      padding: '8px 12px',
+      borderRadius: 999,
+      background: '#fff',
+      border: `1px solid ${BORDER}`,
+      fontSize: 'clamp(12px, 2.6vw, 14px)',
+      fontWeight: 600,
+      boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+    },
+    shelf: {
+      height: 10,
+      margin: '0 10px',
+      background: `linear-gradient(180deg, rgba(0,0,0,0.06), transparent 70%)`,
+      borderRadius: '0 0 24px 24px',
+      filter: 'blur(6px)',
+      transform: 'translateY(-8px)',
+      opacity: 0.4,
+      maxWidth: 1120,
+    },
+  };
+
   return (
-    <div className="mf-page">
+    <div className="mf-page" style={styles.pageFont}>
       {/* HERO */}
-      <header className="mf-hero">
-        <div className="mf-container">
-          <h1 className="mf-hero-title">
-            Маніфест <span className="mf-hero-badge">BMB</span>
+      <header className="mf-hero" aria-label="Маніфест Buy My Behavior">
+        <div className="mf-container" style={styles.hero}>
+          {/* легкий “кікер” замість бейджа BMB */}
+          <span style={styles.kicker}>Маніфест</span>
+
+          {/* повна назва замість «BMB» */}
+          <h1 className="mf-hero-title" style={styles.title}>
+            Маніфест Buy My Behavior
           </h1>
-          <p className="mf-hero-lead">
+
+          <div style={styles.divider} />
+
+          <p className="mf-hero-lead" style={styles.lead}>
             Buy My Behavior — цифровий Web3-простір, де люди обмінюються сценаріями поведінки,
             узгоджують умови та захищають угоди ескроу-смартконтрактом.
           </p>
 
-          <div className="mf-pills">
-            <span className="mf-pill">Web3</span>
-            <span className="mf-pill">Escrow Smart-Contract</span>
-            <span className="mf-pill">Open Source</span>
+          {/* акуратні піллі з мікротінню */}
+          <div className="mf-pills" style={styles.pills}>
+            <span className="mf-pill" style={styles.pill}>Web3</span>
+            <span className="mf-pill" style={styles.pill}>Escrow Smart-Contract</span>
+            <span className="mf-pill" style={styles.pill}>Open Source</span>
           </div>
         </div>
+
+        {/* оптична “полиця” для стабільності блоку */}
+        <div style={styles.shelf} aria-hidden="true" />
       </header>
 
       <main className="mf-container mf-main">
