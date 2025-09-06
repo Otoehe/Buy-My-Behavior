@@ -8,6 +8,17 @@ export default function Manifest() {
   const BLACK = '#000000';
   const BORDER = 'rgba(0,0,0,0.06)';
 
+  // ── Mailto для кнопки "Стати амбасадором" (АДИТИВНО) ─────────────────────────
+  const AMBASSADOR_EMAIL = 'viktorsesiuk@gmail.com';
+  const handleAmbassadorClick = () => {
+    const subject = 'Стати амбасадором BMB';
+    const body =
+      'Привіт! Хочу стати амбасадором BMB.\n\nМене звати: ...\nПосилання/аудиторія: ...\nМісто/країна: ...\n\nДякую!';
+    const mailto = `mailto:${AMBASSADOR_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    // відкриваємо системний поштовий клієнт
+    window.location.href = mailto;
+  };
+
   const styles: Record<string, React.CSSProperties> = {
     pageFont: {
       fontFamily: 'var(--nav-font, inherit)', // ⇐ той самий шрифт, що й у навбарі
@@ -272,7 +283,16 @@ export default function Manifest() {
                   <span><i className="mf-dot mf-dot-gray" /> 5% Амбасадор</span>
                 </div>
               </div>
-              <button className="mf-ghost-btn">Стати амбасадором</button>
+              {/* ⇩⇩ КНОПКА ПІДКЛЮЧЕНА ДО ПОШТИ (mailto) ⇩⇩ */}
+              <button
+                className="mf-ghost-btn"
+                type="button"
+                onClick={handleAmbassadorClick}
+                title="Написати лист, щоб стати амбасадором"
+                aria-label="Стати амбасадором (відкрити поштовий клієнт)"
+              >
+                Стати амбасадором
+              </button>
             </div>
           </div>
         </section>
