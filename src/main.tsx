@@ -1,3 +1,6 @@
+// ВАЖЛИВО: ставимо першим, щоб пропатчити MetaMask до будь-яких інших імпортів
+import './lib/metamaskGuard';
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
