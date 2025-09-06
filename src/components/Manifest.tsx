@@ -4,27 +4,38 @@ import './Manifest.css';
 export default function Manifest() {
   // ── UI tokens (адитивно; без зміни існуючого CSS) ─────────────────────────────
   const PINK = '#ffcdd6';
-  const PINK_SOFT = '#ffeef3';
+  const PINK_SOFT = '#fff7fa'; // ще світліше, щоб "менше рожевого"
   const BLACK = '#000000';
   const BORDER = 'rgba(0,0,0,0.06)';
 
   const styles: Record<string, React.CSSProperties> = {
     pageFont: {
-      // Використати той самий шрифт, що й у навігації (через CSS-змінну)
-      fontFamily: 'var(--nav-font, inherit)',
+      fontFamily: 'var(--nav-font, inherit)', // ⇐ той самий шрифт, що й у навбарі
       color: BLACK,
+    },
+    headerBg: {
+      // Прибираємо рожевий задній фон у всього хедера (залишаємо білий)
+      background: '#ffffff',
+      paddingTop: 12,
+      paddingBottom: 0,
     },
     hero: {
       backgroundImage: `
-        radial-gradient(1200px 420px at 12% -12%, ${PINK_SOFT}, transparent 55%),
+        radial-gradient(900px 360px at 50% -20%, ${PINK_SOFT}, transparent 60%),
         linear-gradient(180deg, #ffffff 0%, ${PINK_SOFT} 100%)
       `,
       border: `1px solid ${BORDER}`,
       borderRadius: 28,
       boxShadow: '0 12px 28px rgba(0,0,0,0.06)',
-      padding: '36px 22px 28px',
+      padding: '28px 20px 24px',
       margin: '0 auto',
       maxWidth: 1120,
+      textAlign: 'center', // ⇐ центр для всього контенту героя
+    },
+    kickerWrap: {
+      display: 'flex',
+      justifyContent: 'center',
+      marginBottom: 10,
     },
     kicker: {
       display: 'inline-block',
@@ -33,35 +44,38 @@ export default function Manifest() {
       background: '#ffffff',
       border: `1px solid ${BORDER}`,
       boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
-      fontSize: 'clamp(12px, 2.4vw, 14px)',
+      fontSize: 'clamp(12px, 2.4vw, 13px)',
       fontWeight: 600,
       letterSpacing: '0.02em',
-      marginBottom: 12,
     },
     title: {
+      // Тепер у заголовку тільки “Buy My Behavior” і скромніші розміри
       margin: 0,
       fontWeight: 800,
-      letterSpacing: '-0.02em',
-      lineHeight: 1.1,
-      fontSize: 'clamp(28px, 6.2vw, 56px)',
+      letterSpacing: '-0.01em',
+      lineHeight: 1.15,
+      fontSize: 'clamp(24px, 5.2vw, 48px)', // було 56px — зменшили
       textShadow: '0 1px 0 rgba(255,255,255,0.6)',
     },
     divider: {
       height: 1,
       background: 'linear-gradient(90deg, transparent, rgba(0,0,0,0.06), transparent)',
-      margin: '16px 0 12px',
+      margin: '14px auto 12px',
+      width: 'min(92%, 760px)',
     },
     lead: {
-      margin: 0,
+      margin: '0 auto',
       fontSize: 'clamp(14px, 2.8vw, 18px)',
       lineHeight: 1.6,
       opacity: 0.9,
+      maxWidth: 820,
     },
     pills: {
       display: 'flex',
       gap: 8,
       flexWrap: 'wrap',
       marginTop: 14,
+      justifyContent: 'center',
     },
     pill: {
       display: 'inline-block',
@@ -74,13 +88,13 @@ export default function Manifest() {
       boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
     },
     shelf: {
-      height: 10,
+      height: 8,
       margin: '0 10px',
       background: `linear-gradient(180deg, rgba(0,0,0,0.06), transparent 70%)`,
       borderRadius: '0 0 24px 24px',
       filter: 'blur(6px)',
-      transform: 'translateY(-8px)',
-      opacity: 0.4,
+      transform: 'translateY(-6px)',
+      opacity: 0.35,
       maxWidth: 1120,
     },
   };
@@ -88,14 +102,16 @@ export default function Manifest() {
   return (
     <div className="mf-page" style={styles.pageFont}>
       {/* HERO */}
-      <header className="mf-hero" aria-label="Маніфест Buy My Behavior">
+      <header className="mf-hero" style={styles.headerBg} aria-label="Маніфест Buy My Behavior">
         <div className="mf-container" style={styles.hero}>
-          {/* легкий “кікер” замість бейджа BMB */}
-          <span style={styles.kicker}>Маніфест</span>
+          {/* невеликий кікер “Маніфест” по центру */}
+          <div style={styles.kickerWrap}>
+            <span style={styles.kicker}>Маніфест</span>
+          </div>
 
-          {/* повна назва замість «BMB» */}
+          {/* головний заголовок тепер лише “Buy My Behavior” і по центру */}
           <h1 className="mf-hero-title" style={styles.title}>
-            Маніфест Buy My Behavior
+            Buy My Behavior
           </h1>
 
           <div style={styles.divider} />
@@ -113,7 +129,7 @@ export default function Manifest() {
           </div>
         </div>
 
-        {/* оптична “полиця” для стабільності блоку */}
+        {/* оптична “полиця” — дуже делікатна */}
         <div style={styles.shelf} aria-hidden="true" />
       </header>
 
