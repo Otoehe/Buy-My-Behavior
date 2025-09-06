@@ -3,9 +3,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import './Profile.css';
 
-// Централізований конектор (MetaMask + WalletConnect, якщо є)
-import { connectWallet, ensureBSC as ensureBSCChain, type Eip1193Provider } from '../lib/wallet';
-
 /** Ролі */
 const roles = [
   'Актор', 'Музикант', 'Авантюрист', 'Платонічний Ескорт', 'Хейтер',
@@ -38,7 +35,7 @@ const RatingStars: React.FC<{ value: number }> = ({ value }) => {
   );
 };
 
-/** MetaMask helpers (для fallback’у) */
+/** ==== MetaMask helpers ==== */
 function waitForEthereum(ms = 3500): Promise<any | null> {
   return new Promise((resolve) => {
     if (typeof window === 'undefined') return resolve(null);
@@ -53,13 +50,14 @@ function waitForEthereum(ms = 3500): Promise<any | null> {
     }, ms);
   });
 }
+
 async function getMetaMaskProvider(): Promise<any | null> {
   const eth = await waitForEthereum();
   const candidates = eth?.providers?.length ? eth.providers : (eth ? [eth] : []);
   const mm = candidates?.find((p: any) => p?.isMetaMask) || (eth?.isMetaMask ? eth : null);
   if (mm) return mm;
 
-  // EIP-6963
+  // EIP-6963 multi-inject
   if (typeof window !== 'undefined') {
     const discovered: any[] = [];
     const onAnnounce = (ev: any) => discovered.push(ev.detail);
@@ -75,6 +73,7 @@ async function getMetaMaskProvider(): Promise<any | null> {
   }
   return null;
 }
+
 async function ensureBSC(provider: any) {
   const BSC = {
     chainId: '0x38',
@@ -94,39 +93,50 @@ async function ensureBSC(provider: any) {
   }
 }
 
-/** === Anti -32002 утиліти === */
+/** === Anti -32002 (already pending) === */
+type Eip1193Provider = { request: (a: { method: string; params?: any[] | Record<string, any> }) => Promise<any>; on?: any; removeListener?: any };
+
 const MM_LOCK_KEY = 'bmb_mm_lock_v1';
-const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+let pendingAccountsPromise: Promise<string[]> | null = null;
+const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 async function requestAccountsSafe(provider: Eip1193Provider): Promise<string[]> {
-  // 1) спочатку пробуємо eth_accounts
-  let accounts = await provider.request({ method: 'eth_accounts' }).catch(() => []) as string[];
-  if (accounts && accounts.length) return accounts;
+  // 1) Якщо вже є доступ
+  let accs = await provider.request({ method: 'eth_accounts' }).catch(() => []) as string[];
+  if (accs?.length) return accs;
 
-  // 2) явний запит дозволу
+  // 2) Явний запит
   try {
-    accounts = await provider.request({ method: 'eth_requestAccounts' }) as string[];
-    if (accounts && accounts.length) return accounts;
+    accs = await provider.request({ method: 'eth_requestAccounts' }) as string[];
+    if (accs?.length) return accs;
   } catch (e: any) {
     if (e?.code === -32002) {
-      // вже є активний попап → не дублюємо запит, просто чекаємо результату
-      alert('MetaMask вже відкрив вікно підтвердження. Відкрий MetaMask і підтверди або відхили запит.');
+      alert('MetaMask вже відкрив вікно підтвердження. Відкрий MetaMask і дозволь доступ — повторний запит заблоковано.');
       localStorage.setItem(MM_LOCK_KEY, '1');
-      for (let i = 0; i < 20; i++) { // ≈30с
-        await delay(1500);
-        const accs = await provider.request({ method: 'eth_accounts' }).catch(() => []) as string[];
-        if (accs && accs.length) {
+      // 30s poll eth_accounts (без повторного wallet_requestPermissions)
+      for (let i = 0; i < 20; i++) {
+        await sleep(1500);
+        const a = await provider.request({ method: 'eth_accounts' }).catch(() => []) as string[];
+        if (a?.length) {
           localStorage.removeItem(MM_LOCK_KEY);
-          return accs;
+          return a;
         }
       }
       localStorage.removeItem(MM_LOCK_KEY);
-      throw new Error('Підтвердження MetaMask не завершено. Спробуй ще раз.');
+      throw new Error('Підтвердження в MetaMask не завершено.');
     }
     if (e?.code === 4001) throw new Error('Доступ відхилено');
     throw e;
   }
-  return accounts || [];
+  return accs || [];
+}
+
+// Один запит у всій вкладці (реюзимо pending)
+async function requestAccountsOnce(provider: Eip1193Provider): Promise<string[]> {
+  if (!pendingAccountsPromise) {
+    pendingAccountsPromise = requestAccountsSafe(provider).finally(() => { pendingAccountsPromise = null; });
+  }
+  return pendingAccountsPromise;
 }
 
 type Scenario = { id: number; description: string; price: number; hidden?: boolean };
@@ -160,15 +170,15 @@ export default function Profile() {
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
-  // Якщо повернулися у вкладку з MetaMask → знімаємо lock і підтягуємо акаунт
+  // Якщо повернулись з MetaMask → знімаємо lock і пробуємо дочитати акаунти
   useEffect(() => {
-    const checkAndUnlock = async () => {
+    const tryUnlockFromMM = async () => {
       if (document.visibilityState !== 'visible') return;
       if (!localStorage.getItem(MM_LOCK_KEY)) return;
       const mm = (await getMetaMaskProvider()) as Eip1193Provider | null;
       if (mm) {
         const accs = await mm.request({ method: 'eth_accounts' }).catch(() => []) as string[];
-        if (accs && accs.length) {
+        if (accs?.length) {
           setProfile(p => ({ ...p, wallet: accs[0] }));
           setWalletConnected(true);
         }
@@ -177,12 +187,12 @@ export default function Profile() {
       setIsConnecting(false);
       connectingRef.current = false;
     };
-    const onFocus = () => { if (localStorage.getItem(MM_LOCK_KEY)) checkAndUnlock(); };
-    document.addEventListener('visibilitychange', checkAndUnlock);
+    const onFocus = () => { if (localStorage.getItem(MM_LOCK_KEY)) tryUnlockFromMM(); };
+    document.addEventListener('visibilitychange', tryUnlockFromMM);
     window.addEventListener('focus', onFocus);
     window.addEventListener('pageshow', onFocus);
     return () => {
-      document.removeEventListener('visibilitychange', checkAndUnlock);
+      document.removeEventListener('visibilitychange', tryUnlockFromMM);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('pageshow', onFocus);
     };
@@ -292,7 +302,7 @@ export default function Profile() {
   // Аватар
   const handleAvatarChange = (file: File) => { if (!file) return; setAvatarPreview(URL.createObjectURL(file)); };
 
-  // Зберегти профіль вручну
+  // Зберегти профіль
   const handleSaveProfile = async () => {
     if (!user) return;
     const selectedRole = profile.role === 'Інше' ? customRole : profile.role;
@@ -342,7 +352,7 @@ export default function Profile() {
     if (!error) setScenarios(scenarios.map((s) => (s.id === id ? { ...s, hidden: true } : s)));
   };
 
-  // Автосейв гаманця (викликається після успішного конекту)
+  // Автосейв гаманця після конекту/зміни акаунта
   const saveWalletIfNeeded = async (address: string) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -351,7 +361,7 @@ export default function Profile() {
     } catch { /* ignore */ }
   };
 
-  // Конект MetaMask/WalletConnect з антидублікатором
+  // Конект MetaMask з жорстким сінглтоном запиту
   const connectMetamask = async () => {
     if (connectingRef.current || isConnecting) return;
     connectingRef.current = true;
@@ -359,21 +369,23 @@ export default function Profile() {
     localStorage.setItem(MM_LOCK_KEY, '1');
 
     try {
-      let provider: Eip1193Provider | null = null;
-      let accounts: string[] = [];
+      // 1) Знаходимо провайдера (десктоп або мобільний браузер MetaMask)
+      let provider = await getMetaMaskProvider() as Eip1193Provider | null;
 
-      try {
-        const res: any = await connectWallet();
-        provider = (res?.provider ?? res) as Eip1193Provider;
-        accounts = Array.isArray(res?.accounts) ? res.accounts : [];
-      } catch {
-        const mm = await getMetaMaskProvider();
-        if (!mm) throw new Error('MetaMask недоступний. Дозволь доступ у розширенні (Site access → On all sites) і перезавантаж сторінку.');
-        provider = mm as Eip1193Provider;
+      // 2) Якщо не знайдено у звичайному браузері на мобільному — відкриваємо dapp у MetaMask App
+      if (!provider && /android|iphone|ipad|ipod/i.test(navigator.userAgent)) {
+        const dappUrl = `${location.host}${location.pathname}${location.search}`;
+        location.href = `https://metamask.app.link/dapp/${dappUrl}`;
+        return; // далі ініціалізацію робить сам MetaMask App
+      }
+      if (!provider) {
+        alert('MetaMask недоступний. Дозволь доступ у розширенні (Site access → On all sites) і перезавантаж сторінку.');
+        return;
       }
 
-      if (!accounts.length) accounts = await requestAccountsSafe(provider);
-      await (ensureBSCChain ? ensureBSCChain(provider) : ensureBSC(provider));
+      // 3) Єдиний запит на акаунти у вкладці (без дублювання)
+      const accounts = await requestAccountsOnce(provider);
+      await ensureBSC(provider);
 
       const address = accounts?.[0] || '';
       if (!address) { alert('Користувач не надав доступ до акаунта MetaMask.'); return; }
@@ -382,8 +394,9 @@ export default function Profile() {
       setWalletConnected(true);
       saveWalletIfNeeded(address);
 
+      // Підписка на зміну акаунтів
       const prev = (window as any).__bmb_acc_handler__;
-      if (prev && (provider as any).removeListener) (provider as any).removeListener('accountsChanged', prev);
+      if (prev && provider.removeListener) provider.removeListener('accountsChanged', prev);
       const handler = (accs: string[]) => {
         const a = accs?.[0] || '';
         setProfile((p) => ({ ...p, wallet: a }));
@@ -391,7 +404,7 @@ export default function Profile() {
         if (a) saveWalletIfNeeded(a);
       };
       (window as any).__bmb_acc_handler__ = handler;
-      if ((provider as any).on) (provider as any).on('accountsChanged', handler);
+      if (provider.on) provider.on('accountsChanged', handler);
     } catch (e: any) {
       alert('Помилка підключення MetaMask: ' + (e?.message || String(e)));
     } finally {
@@ -414,7 +427,32 @@ export default function Profile() {
     <div className="profile-container">
       <h1 className="title">Профіль</h1>
 
-      {/* ...PWA блок залишився без змін... */}
+      {/* PWA: Add to Home Screen (без змін) */}
+      {!installed && (
+        <div className="a2hs-card">
+          <div className="a2hs-row">
+            <div className="a2hs-emoji">📲</div>
+            <div className="a2hs-text">
+              Додай іконку застосунку на робочий стіл
+              <div className="a2hs-sub">Працює офлайн, відкривається як окремий додаток</div>
+            </div>
+          </div>
+          <div className="a2hs-actions">
+            <button className="button a2hs-btn" onClick={async () => {
+              if (!installEvt) { alert('У вашому браузері встановлення через меню: Install App / Add to Home Screen.'); return; }
+              try { await installEvt.prompt(); await installEvt.userChoice; setInstallEvt(null); setInstallAvailable(false); } catch {}
+            }}>
+              <span className="btn-icon" aria-hidden>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#ff83b0" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="5" y="2.5" width="14" height="19" rx="3.5"/>
+                  <path d="M12 6v8M8 10h8"/>
+                </svg>
+              </span>
+              <span>{installAvailable ? 'Додати іконку' : 'Як додати'}</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Аватар */}
       <div
@@ -426,14 +464,23 @@ export default function Profile() {
         onDrop={(e) => { e.preventDefault(); setIsDragOver(false); const file = e.dataTransfer.files[0]; if (file?.type.startsWith('image/')) handleAvatarChange(file); }}
       >
         {getAvatarUrl() ? (
-          <img className="avatar-photo" src={getAvatarUrl()!} alt="Аватар користувача" width={192} height={192} style={{ objectFit: 'cover', cursor: 'pointer', borderRadius: '50%' }} />
+          <img
+            className="avatar-photo"
+            src={getAvatarUrl()!}
+            alt="Аватар користувача"
+            width={192}
+            height={192}
+            style={{ objectFit: 'cover', cursor: 'pointer', borderRadius: '50%' }}
+          />
         ) : (
           <div className="avatar-placeholder">
             <UserIcon />
             <span>Додати фото</span>
           </div>
         )}
+
         {avatarUploading && <div className="avatar-uploading-spinner"></div>}
+
         <input
           type="file"
           ref={fileInputRef}
@@ -469,7 +516,7 @@ export default function Profile() {
         <button onClick={handleSaveProfile} className="button">💾 Зберегти профіль</button>
       </div>
 
-      {/* Сценарії — без змін */}
+      {/* Сценарії */}
       <div className="scenario-form">
         <h2>Створити сценарій</h2>
         <textarea placeholder="Опис сценарію" value={newScenarioDescription} onChange={(e) => setNewScenarioDescription(e.target.value)} className="input" />
