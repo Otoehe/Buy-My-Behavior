@@ -3,6 +3,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import './Profile.css';
 
+// ✅ NEW: централізований конектор (MetaMask + WalletConnect, реентрансі-safe)
+import { connectWallet, ensureBSC as ensureBSCChain, type Eip1193Provider } from '../lib/wallet';
+
 /** Ролі */
 const roles = [
   'Актор', 'Музикант', 'Авантюрист', 'Платонічний Ескорт', 'Хейтер',
@@ -35,7 +38,7 @@ const RatingStars: React.FC<{ value: number }> = ({ value }) => {
   );
 };
 
-/** MetaMask helpers */
+/** MetaMask helpers (залишаємо для сумісності; конектор нижче) */
 function waitForEthereum(ms = 3500): Promise<any | null> {
   return new Promise((resolve) => {
     if (typeof window === 'undefined') return resolve(null);
@@ -308,20 +311,37 @@ export default function Profile() {
     if (!error) setScenarios(scenarios.map((s) => (s.id === id ? { ...s, hidden: true } : s)));
   };
 
-  // MetaMask
+  // MetaMask — ОНОВЛЕНО: єдиний конектор (desktop + mobile + WC), без дубль-запитів
   const connectMetamask = async () => {
     try {
-      const provider = await getMetaMaskProvider();
-      if (!provider) { alert('MetaMask недоступний. Дозволь доступ у розширенні (Site access → On all sites) і перезавантаж сторінку.'); return; }
-      const accounts: string[] = await provider.request({ method: 'eth_requestAccounts' });
-      const address = accounts?.[0] || ''; if (!address) { alert('Користувач не надав доступ до акаунта MetaMask.'); return; }
-      setProfile((prev) => ({ ...prev, wallet: address })); setWalletConnected(true);
+      const { provider, accounts } = await connectWallet(); // реентрансі-лок усередині
+      await ensureBSCChain(provider as Eip1193Provider);   // гарантуємо BSC
 
-      const prev = (window as any).__bmb_acc_handler__; if (prev && provider.removeListener) provider.removeListener('accountsChanged', prev);
-      const handler = (accs: string[]) => { const a = accs?.[0] || ''; setProfile((p) => ({ ...p, wallet: a })); setWalletConnected(Boolean(a)); };
-      (window as any).__bmb_acc_handler__ = handler; if (provider.on) provider.on('accountsChanged', handler);
+      const list: string[] =
+        accounts && accounts.length
+          ? accounts
+          : await (provider as Eip1193Provider).request({ method: 'eth_accounts' });
 
-      await ensureBSC(provider);
+      const address = list?.[0] || '';
+      if (!address) { alert('Користувач не надав доступ до акаунта MetaMask.'); return; }
+
+      setProfile((prev) => ({ ...prev, wallet: address }));
+      setWalletConnected(true);
+
+      // підписка на зміну акаунтів
+      const prev = (window as any).__bmb_acc_handler__;
+      if (prev && (provider as Eip1193Provider).removeListener) {
+        (provider as Eip1193Provider).removeListener('accountsChanged', prev);
+      }
+      const handler = (accs: string[]) => {
+        const a = accs?.[0] || '';
+        setProfile((p) => ({ ...p, wallet: a }));
+        setWalletConnected(Boolean(a));
+      };
+      (window as any).__bmb_acc_handler__ = handler;
+      if ((provider as Eip1193Provider).on) {
+        (provider as Eip1193Provider).on('accountsChanged', handler);
+      }
     } catch (e: any) {
       const msg = e?.code === 4001 ? 'Доступ відхилено' : (e?.message || String(e));
       alert('Помилка підключення MetaMask: ' + msg);
@@ -399,7 +419,7 @@ export default function Profile() {
           </div>
         )}
 
-        {avatarUploading && <div className="avatar-uploading-spinner"></div>}
+        {avatarUploading && <div className="avatar-uploading-spinner></div>}
 
         <input
           type="file"
