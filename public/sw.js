@@ -1,84 +1,34 @@
-/* public/sw.js — BMB PWA SW */
-const CACHE = 'bmb-cache-v2';
-const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.webmanifest',
-  '/offline.html',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/shortcut-executor.png'
-];
+// public/sw.js
+const VERSION = 'bmb-2025-09-06';
 
-self.addEventListener('install', (event) => {
-  event.waitUntil((async () => {
-    const cache = await caches.open(CACHE);
-    await Promise.allSettled(STATIC_ASSETS.map((u) => cache.add(u)));
-    self.skipWaiting();
-  })());
+// Активуємо одразу
+self.addEventListener('install', () => {
+  self.skipWaiting();
 });
 
-self.addEventListener('activate', (event) => {
-  event.waitUntil((async () => {
-    // navigation preload для швидкого першого байта
-    if ('navigationPreload' in self.registration) {
-      try { await self.registration.navigationPreload.enable(); } catch {}
-    }
-    const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)));
-    self.clients.claim();
-  })());
+self.addEventListener('activate', (e) => {
+  e.waitUntil(self.clients.claim());
 });
 
+// Прискорене оновлення
+self.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
+// Перехоплюємо ТІЛЬКИ HTML-навігацію для SPA.
+// ЖОДНИХ кешів JS/CSS/чанків — щоб не було MIME "text/html" замість "application/javascript".
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== 'GET') return;
+  if (req.mode !== 'navigate') return;
 
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
-
-  // HTML-навігації — мережа з фолбеком
-  if (req.mode === 'navigate') {
-    event.respondWith((async () => {
-      try {
-        const preloaded = await event.preloadResponse;
-        if (preloaded) return preloaded;
-        const fresh = await fetch(req);
-        const cache = await caches.open(CACHE);
-        cache.put('/index.html', fresh.clone());
-        return fresh;
-      } catch {
-        const cache = await caches.open(CACHE);
-        return (await cache.match('/offline.html')) ||
-               new Response('<h1>Offline</h1>', { headers: {'Content-Type': 'text/html'} });
-      }
-    })());
-    return;
-  }
-
-  // статика
-  const dest = req.destination;
-  if (['script', 'style', 'image', 'font'].includes(dest)) {
-    event.respondWith((async () => {
-      const cached = await caches.match(req);
-      if (cached) return cached;
-      try {
-        const res = await fetch(req);
-        const copy = res.clone();
-        const cache = await caches.open(CACHE);
-        cache.put(req, copy);
-        return res;
-      } catch {
-        if (dest === 'image') {
-          return (await caches.match('/icons/icon-192.png')) || Response.error();
-        }
-        throw new Error('fetch failed');
-      }
-    })());
-  }
-});
-
-// дозволяємо UI просити негайне оновлення
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+  event.respondWith((async () => {
+    try {
+      // завжди свіжа HTML-сторінка
+      return await fetch(req, { cache: 'no-store' });
+    } catch (e) {
+      // офлайн-фолбек (якщо додаси /index.html у кеш — тут можна віддати кеш)
+      const cached = await caches.match('/index.html');
+      return cached || Response.error();
+    }
+  })());
 });

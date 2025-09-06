@@ -13,8 +13,8 @@ if (import.meta.env.DEV && 'serviceWorker' in navigator) {
 }
 
 // Глобальні ловці помилок для прозорої діагностики
-window.addEventListener('error', e => console.error('[GlobalError]', e.error || e.message));
-window.addEventListener('unhandledrejection', e => console.error('[UnhandledRejection]', e.reason));
+window.addEventListener('error', e => console.error('[GlobalError]', (e as any).error || e.message));
+window.addEventListener('unhandledrejection', e => console.error('[UnhandledRejection]', (e as any).reason));
 
 console.log('BMB boot dev');
 
@@ -31,28 +31,36 @@ if (!rootEl) {
   );
 }
 
-// PROD: реєструємо SW (у DEV вимкнено)
+// PROD: реєструємо SW з анти-старінням і авто-рефрешем (лише HTML-навігація, без кешу чанків)
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    const swUrl = '/sw.js';
-    navigator.serviceWorker
-      .register(swUrl)
-      .then(reg => {
-        console.log('[BMB SW] registered', reg.scope);
-        reg.addEventListener('updatefound', () => {
-          const nw = reg.installing;
-          if (!nw) return;
-          nw.addEventListener('statechange', () => {
-            if (nw.state === 'installed') {
-              if (navigator.serviceWorker.controller) {
-                console.log('[BMB SW] new content available (next reload)');
-              } else {
-                console.log('[BMB SW] content cached for offline use');
-              }
-            }
-          });
+    const ver = (import.meta.env as any).VITE_APP_VERSION ?? Date.now();
+    const swUrl = `/sw.js?v=${ver}`;
+
+    navigator.serviceWorker.register(swUrl).then(reg => {
+      // одразу просимо оновлення
+      reg.update();
+
+      // якщо з’явився новий SW — активувати без очікування
+      const activateNow = () => reg.waiting?.postMessage({ type: 'SKIP_WAITING' });
+
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            activateNow();
+          }
         });
-      })
-      .catch(e => console.warn('[BMB SW] registration failed', e));
+      });
+
+      // авто-рефреш, коли контролер змінився (щоб підхопити новий бандл)
+      let reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloading) return;
+        reloading = true;
+        location.reload();
+      });
+    }).catch(e => console.warn('[BMB SW] registration failed', e));
   });
 }
