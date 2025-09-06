@@ -93,7 +93,7 @@ async function ensureBSC(provider: any) {
   }
 }
 
-/** === Anti -32002 (already pending) === */
+/** === Anti -32002 (already pending) + single-flight === */
 type Eip1193Provider = { request: (a: { method: string; params?: any[] | Record<string, any> }) => Promise<any>; on?: any; removeListener?: any };
 
 const MM_LOCK_KEY = 'bmb_mm_lock_v1';
@@ -101,28 +101,20 @@ let pendingAccountsPromise: Promise<string[]> | null = null;
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 async function requestAccountsSafe(provider: Eip1193Provider): Promise<string[]> {
-  // 1) Якщо вже є доступ
   let accs = await provider.request({ method: 'eth_accounts' }).catch(() => []) as string[];
   if (accs?.length) return accs;
 
-  // 2) Явний запит
   try {
     accs = await provider.request({ method: 'eth_requestAccounts' }) as string[];
     if (accs?.length) return accs;
   } catch (e: any) {
-    if (e?.code === -32002) {
-      alert('MetaMask вже відкрив вікно підтвердження. Відкрий MetaMask і дозволь доступ — повторний запит заблоковано.');
-      localStorage.setItem(MM_LOCK_KEY, '1');
-      // 30s poll eth_accounts (без повторного wallet_requestPermissions)
-      for (let i = 0; i < 20; i++) {
-        await sleep(1500);
+    if (e?.code === -32002 || String(e?.message || '').includes('already pending')) {
+      // чекаємо, поки користувач підтвердить у вже відкритому модальному вікні MM
+      for (let i = 0; i < 25; i++) {
+        await sleep(1200);
         const a = await provider.request({ method: 'eth_accounts' }).catch(() => []) as string[];
-        if (a?.length) {
-          localStorage.removeItem(MM_LOCK_KEY);
-          return a;
-        }
+        if (a?.length) return a;
       }
-      localStorage.removeItem(MM_LOCK_KEY);
       throw new Error('Підтвердження в MetaMask не завершено.');
     }
     if (e?.code === 4001) throw new Error('Доступ відхилено');
@@ -131,12 +123,20 @@ async function requestAccountsSafe(provider: Eip1193Provider): Promise<string[]>
   return accs || [];
 }
 
-// Один запит у всій вкладці (реюзимо pending)
 async function requestAccountsOnce(provider: Eip1193Provider): Promise<string[]> {
   if (!pendingAccountsPromise) {
     pendingAccountsPromise = requestAccountsSafe(provider).finally(() => { pendingAccountsPromise = null; });
   }
   return pendingAccountsPromise;
+}
+
+/** Допоміжний складання коректного deeplink для MetaMask App */
+function buildMetaMaskDappUrl(): string {
+  const href = window.location.href.startsWith('http')
+    ? window.location.href
+    : `https://${window.location.host}${window.location.pathname}${window.location.search}`;
+  // universal link у форматі metamask.app.link/dapp/<encoded full URL>
+  return `https://metamask.app.link/dapp/${encodeURIComponent(href)}`;
 }
 
 type Scenario = { id: number; description: string; price: number; hidden?: boolean };
@@ -170,30 +170,50 @@ export default function Profile() {
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
-  // Якщо повернулись з MetaMask → знімаємо lock і пробуємо дочитати акаунти
+  // Якщо повернулись / відкрились у MetaMask App → автопідхоплення акаунтів і зняття "lock"
   useEffect(() => {
-    const tryUnlockFromMM = async () => {
-      if (document.visibilityState !== 'visible') return;
-      if (!localStorage.getItem(MM_LOCK_KEY)) return;
-      const mm = (await getMetaMaskProvider()) as Eip1193Provider | null;
-      if (mm) {
-        const accs = await mm.request({ method: 'eth_accounts' }).catch(() => []) as string[];
-        if (accs?.length) {
-          setProfile(p => ({ ...p, wallet: accs[0] }));
-          setWalletConnected(true);
-        }
+    let timer: any = null;
+
+    const tryFinalize = async () => {
+      const provider = await getMetaMaskProvider() as Eip1193Provider | null;
+      if (!provider) return;
+      const accs = await provider.request({ method: 'eth_accounts' }).catch(() => []) as string[];
+      if (accs && accs[0]) {
+        try { await ensureBSC(provider); } catch {}
+        const a = accs[0];
+        setProfile(p => ({ ...p, wallet: a }));
+        setWalletConnected(true);
+        // зберігаємо в профіль
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) await supabase.from('profiles').update({ wallet: a }).eq('user_id', user.id);
+        } catch {}
+        localStorage.removeItem(MM_LOCK_KEY);
+        setIsConnecting(false);
+        connectingRef.current = false;
+        if (timer) { clearInterval(timer); timer = null; }
       }
-      localStorage.removeItem(MM_LOCK_KEY);
-      setIsConnecting(false);
-      connectingRef.current = false;
     };
-    const onFocus = () => { if (localStorage.getItem(MM_LOCK_KEY)) tryUnlockFromMM(); };
-    document.addEventListener('visibilitychange', tryUnlockFromMM);
+
+    // якщо присутній lock — починаємо лагідний пулінг eth_accounts
+    if (typeof window !== 'undefined' && localStorage.getItem(MM_LOCK_KEY) === '1') {
+      // швидка спроба одразу
+      tryFinalize();
+      // і м’який пулінг на 30–40с
+      timer = setInterval(tryFinalize, 1200);
+    }
+
+    const onFocus = () => { if (localStorage.getItem(MM_LOCK_KEY) === '1') tryFinalize(); };
+    const onVis = () => { if (document.visibilityState === 'visible' && localStorage.getItem(MM_LOCK_KEY) === '1') tryFinalize(); };
+
     window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVis);
     window.addEventListener('pageshow', onFocus);
+
     return () => {
-      document.removeEventListener('visibilitychange', tryUnlockFromMM);
+      if (timer) clearInterval(timer);
       window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('pageshow', onFocus);
     };
   }, []);
@@ -361,7 +381,7 @@ export default function Profile() {
     } catch { /* ignore */ }
   };
 
-  // Конект MetaMask з жорстким сінглтоном запиту
+  // Конект MetaMask (BSC) з коректним deeplink та single-flight
   const connectMetamask = async () => {
     if (connectingRef.current || isConnecting) return;
     connectingRef.current = true;
@@ -369,21 +389,21 @@ export default function Profile() {
     localStorage.setItem(MM_LOCK_KEY, '1');
 
     try {
-      // 1) Знаходимо провайдера (десктоп або мобільний браузер MetaMask)
       let provider = await getMetaMaskProvider() as Eip1193Provider | null;
 
-      // 2) Якщо не знайдено у звичайному браузері на мобільному — відкриваємо dapp у MetaMask App
+      // якщо на мобільному й провайдера немає — відкриваємо сторінку у MetaMask App (вбудований браузер)
       if (!provider && /android|iphone|ipad|ipod/i.test(navigator.userAgent)) {
-        const dappUrl = `${location.host}${location.pathname}${location.search}`;
-        location.href = `https://metamask.app.link/dapp/${dappUrl}`;
-        return; // далі ініціалізацію робить сам MetaMask App
+        const deeplink = buildMetaMaskDappUrl();
+        window.location.href = deeplink;
+        // далі ініціалізацію завершує effect із автопулінгом eth_accounts
+        return;
       }
+
       if (!provider) {
         alert('MetaMask недоступний. Дозволь доступ у розширенні (Site access → On all sites) і перезавантаж сторінку.');
         return;
       }
 
-      // 3) Єдиний запит на акаунти у вкладці (без дублювання)
       const accounts = await requestAccountsOnce(provider);
       await ensureBSC(provider);
 
@@ -427,7 +447,7 @@ export default function Profile() {
     <div className="profile-container">
       <h1 className="title">Профіль</h1>
 
-      {/* PWA: Add to Home Screen (без змін) */}
+      {/* PWA: Add to Home Screen */}
       {!installed && (
         <div className="a2hs-card">
           <div className="a2hs-row">
@@ -507,7 +527,12 @@ export default function Profile() {
           <input type="text" placeholder="Вкажіть власну роль" value={customRole} onChange={(e) => setCustomRole(e.target.value)} className="input" />
         )}
         <textarea placeholder="Опиши свої здібності..." value={profile.description} onChange={(e) => setProfile({ ...profile, description: e.target.value })} className="input" />
-        <input placeholder="TRC20 гаманець або MetaMask" value={profile.wallet} onChange={(e) => setProfile({ ...profile, wallet: e.target.value })} className="input" />
+        <input
+          placeholder="BSC (BEP-20) гаманець або MetaMask"
+          value={profile.wallet}
+          onChange={(e) => setProfile({ ...profile, wallet: e.target.value })}
+          className="input"
+        />
 
         <button onClick={connectMetamask} className="button" disabled={isConnecting}>
           {isConnecting ? '⏳ Підключення…' : (walletConnected ? '🟢 MetaMask підключено' : '🦊 Підключити MetaMask')}
