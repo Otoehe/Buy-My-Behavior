@@ -1,69 +1,50 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-// BMB MetaMask Guard: reroute legacy `wallet_requestPermissions` -> `eth_requestAccounts`
-// і усуває -32002 "already pending" очікуванням на eth_accounts.
+// BMB MetaMask Guard
+// Патчить window.ethereum.request, щоб у вкладці був один-єдиний pending
+// запит доступу до акаунтів. Працює для Desktop та мобільних інжекторів.
+// Ставити ПЕРШИМ імпортом у main.tsx.
 
 declare global {
-  interface Window { __bmb_mm_guard_installed?: boolean; }
+  interface Window {
+    ethereum?: any;
+  }
 }
 
-if (typeof window !== 'undefined' && !window.__bmb_mm_guard_installed) {
-  window.__bmb_mm_guard_installed = true;
+(function installGuardBootstrap() {
+  if (typeof window === 'undefined') return;
 
-  const getProviders = (): any[] => {
-    const eth: any = (window as any).ethereum;
-    if (!eth) return [];
-    if (Array.isArray(eth.providers) && eth.providers.length) return eth.providers as any[];
-    return [eth];
-  };
+  function install() {
+    try {
+      const eth = (window as any).ethereum;
+      if (!eth || eth.__bmb_guard_installed__) return;
 
-  const pollAccounts = async (provider: any, timeoutMs = 30000, stepMs = 500): Promise<string[]> => {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      try {
-        const accs = await provider.request({ method: 'eth_accounts' });
-        if (accs && accs.length) return accs;
-      } catch {}
-      await new Promise((r) => setTimeout(r, stepMs));
-    }
-    return [];
-  };
+      const origRequest = eth.request.bind(eth);
+      let pendingAccPromise: Promise<any> | null = null;
 
-  const wrap = (provider: any) => {
-    if (!provider || !provider.request || provider.__bmb_patched) return;
-    provider.__bmb_patched = true;
-
-    const orig = provider.request.bind(provider);
-    let inFlight: Promise<any> | null = null;
-
-    provider.request = async ({ method, params }: { method: string; params?: any }) => {
-      // Нормалізація застарілих викликів
-      if (method === 'wallet_requestPermissions') {
-        method = 'eth_requestAccounts';
-        params = [];
-      }
-
-      if (method === 'eth_requestAccounts') {
-        if (!inFlight) {
-          inFlight = (async () => {
-            try {
-              return await orig({ method, params });
-            } catch (err: any) {
-              if (err && (err.code === -32002 || String(err.message || '').includes('already pending'))) {
-                const accs = await pollAccounts(provider, 30000, 500);
-                if (accs.length) return accs;
-              }
-              throw err;
-            } finally {
-              setTimeout(() => { inFlight = null; }, 400);
-            }
-          })();
+      eth.request = (args: any) => {
+        const m = args?.method;
+        // Ловимо запити, що відкривають попап доступу
+        if (m === 'eth_requestAccounts' || m === 'wallet_requestPermissions') {
+          if (pendingAccPromise) {
+            console.debug('[BMB Guard] duplicate accounts request suppressed');
+            return pendingAccPromise;
+          }
+          pendingAccPromise = origRequest(args).finally(() => {
+            pendingAccPromise = null;
+          });
+          return pendingAccPromise;
         }
-        return inFlight;
-      }
+        return origRequest(args);
+      };
 
-      return orig({ method, params });
-    };
-  };
+      eth.__bmb_guard_installed__ = true;
+      console.log('[BMB Guard] installed');
+    } catch (e) {
+      console.warn('[BMB Guard] install failed', e);
+    }
+  }
 
-  try { getProviders().forEach(wrap); } catch {}
-}
+  if ((window as any).ethereum) install();
+  window.addEventListener('ethereum#initialized', install, { once: true });
+  // Резерв: деякі провайдери інжектяться пізніше
+  setTimeout(install, 1500);
+})();
