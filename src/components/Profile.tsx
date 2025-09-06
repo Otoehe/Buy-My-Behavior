@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import './Profile.css';
 
-// Централізований конектор (MetaMask + WalletConnect, реентрансі-safe)
+// Централізований конектор (MetaMask + WalletConnect)
 import { connectWallet, ensureBSC as ensureBSCChain, type Eip1193Provider } from '../lib/wallet';
 
 /** Ролі */
@@ -38,7 +38,7 @@ const RatingStars: React.FC<{ value: number }> = ({ value }) => {
   );
 };
 
-/** MetaMask helpers (залишаємо для сумісності з існуючим кодом) */
+/** MetaMask helpers (сумісність) */
 function waitForEthereum(ms = 3500): Promise<any | null> {
   return new Promise((resolve) => {
     if (typeof window === 'undefined') return resolve(null);
@@ -94,6 +94,47 @@ async function ensureBSC(provider: any) {
   }
 }
 
+/** === Anti -32002 утиліти === */
+const MM_LOCK_KEY = 'bmb_mm_lock_v1';
+const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+/** Безпечний запит акаунтів:
+ *  1) спершу eth_accounts
+ *  2) якщо порожньо — eth_requestAccounts
+ *  3) якщо -32002 (pending) — інформуємо, і POLL'имо eth_accounts до 30с
+ */
+async function requestAccountsSafe(provider: Eip1193Provider): Promise<string[]> {
+  // 1) вже авторизовано?
+  let accounts = await provider.request({ method: 'eth_accounts' }).catch(() => []) as string[];
+  if (accounts && accounts.length) return accounts;
+
+  // 2) пробуємо явний запит дозволу
+  try {
+    accounts = await provider.request({ method: 'eth_requestAccounts' }) as string[];
+    if (accounts && accounts.length) return accounts;
+  } catch (e: any) {
+    if (e?.code === -32002) {
+      // already pending → не шлемо ще один; чекаємо поки користувач дозволить/відхилить у MetaMask
+      alert('MetaMask вже відкрив вікно підтвердження. Відкрий MetaMask і підтверди або відхили запит.');
+      localStorage.setItem(MM_LOCK_KEY, '1');
+      // 20 спроб × 1.5с ≈ 30с
+      for (let i = 0; i < 20; i++) {
+        await delay(1500);
+        const accs = await provider.request({ method: 'eth_accounts' }).catch(() => []) as string[];
+        if (accs && accs.length) {
+          localStorage.removeItem(MM_LOCK_KEY);
+          return accs;
+        }
+      }
+      localStorage.removeItem(MM_LOCK_KEY);
+      throw new Error('Підтвердження MetaMask не завершено. Спробуй ще раз.');
+    }
+    if (e?.code === 4001) throw new Error('Доступ відхилено');
+    throw e;
+  }
+  return accounts || [];
+}
+
 type Scenario = { id: number; description: string; price: number; hidden?: boolean };
 
 export default function Profile() {
@@ -117,13 +158,34 @@ export default function Profile() {
   const [installed, setInstalled] = useState(false);
   const [showIosHint, setShowIosHint] = useState(false);
 
-  // ✅ NEW: guard, щоб не запускати кілька запитів підряд (і не ловити -32002)
+  // антидубль-конект
   const [isConnecting, setIsConnecting] = useState(false);
   const connectingRef = useRef(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+
+  // Якщо користувач повернувся на вкладку після підтвердження в MetaMask — знімаємо lock
+  useEffect(() => {
+    const onVis = async () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!localStorage.getItem(MM_LOCK_KEY)) return;
+      // маленька перевірка: якщо вже є доступ — розблокуємо кнопку
+      const mm = (await getMetaMaskProvider()) as Eip1193Provider | null;
+      if (!mm) { localStorage.removeItem(MM_LOCK_KEY); setIsConnecting(false); connectingRef.current = false; return; }
+      const accs = await mm.request({ method: 'eth_accounts' }).catch(() => []) as string[];
+      if (accs && accs.length) {
+        setProfile(p => ({ ...p, wallet: accs[0] }));
+        setWalletConnected(true);
+      }
+      localStorage.removeItem(MM_LOCK_KEY);
+      setIsConnecting(false);
+      connectingRef.current = false;
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
 
   // PWA events
   useEffect(() => {
@@ -315,61 +377,42 @@ export default function Profile() {
     if (!error) setScenarios(scenarios.map((s) => (s.id === id ? { ...s, hidden: true } : s)));
   };
 
-  // MetaMask — централізований конектор (desktop + mobile + WC) + антидублікатор запитів
+  // MetaMask/WalletConnect конект з антидублікатором запитів
   const connectMetamask = async () => {
-    if (connectingRef.current || isConnecting) return; // антиспам кліків
+    if (connectingRef.current || isConnecting) return;
     connectingRef.current = true;
     setIsConnecting(true);
-    (window as any).__bmb_mm_lock__ = true;
+    localStorage.setItem(MM_LOCK_KEY, '1');
 
     try {
-      // 0) Підхоплюємо провайдер і, якщо вже є доступ, не відкриваємо попап
       let provider: Eip1193Provider | null = null;
       let accounts: string[] = [];
 
       try {
-        const res: any = await connectWallet(); // може кинути “редірект у MetaMask app” на мобільних — це ок
+        const res: any = await connectWallet();
         provider = (res?.provider ?? res) as Eip1193Provider;
         accounts = Array.isArray(res?.accounts) ? res.accounts : [];
-      } catch (err: any) {
-        // Fallback на "чистий" MetaMask провайдер (якщо WalletConnect не використовується)
+      } catch {
         const mm = await getMetaMaskProvider();
-        if (!mm) throw err || new Error('MetaMask недоступний. Дозволь доступ у розширенні (Site access → On all sites) і перезавантаж сторінку.');
+        if (!mm) throw new Error('MetaMask недоступний. Дозволь доступ у розширенні (Site access → On all sites) і перезавантаж сторінку.');
         provider = mm as Eip1193Provider;
       }
 
-      // 1) Якщо вже авторизовано — не робимо requestPermissions (уникаємо -32002)
-      if (!accounts.length) {
-        accounts = await provider.request({ method: 'eth_accounts' }).catch(() => []) as string[];
-      }
-      if (!accounts.length) {
-        try {
-          accounts = await provider.request({ method: 'eth_requestAccounts' }) as string[];
-        } catch (e: any) {
-          // -32002: already pending — повідомляємо і просто виходимо
-          if (e?.code === -32002) {
-            alert('MetaMask вже відкрив вікно підтвердження. Відкрий MetaMask і дозволь доступ — повторний запит заблоковано.');
-            return;
-          }
-          if (e?.code === 4001) throw new Error('Доступ відхилено');
-          throw e;
-        }
-      }
+      // Безпечний запит акаунтів (з POLL при -32002)
+      if (!accounts.length) accounts = await requestAccountsSafe(provider);
 
-      // 2) Гарантуємо мережу BSC
+      // Гарантуємо BSC
       await (ensureBSCChain ? ensureBSCChain(provider) : ensureBSC(provider));
 
-      // 3) Оновлюємо стан
+      // Оновлюємо стан
       const address = accounts?.[0] || '';
       if (!address) { alert('Користувач не надав доступ до акаунта MetaMask.'); return; }
       setProfile((prev) => ({ ...prev, wallet: address }));
       setWalletConnected(true);
 
-      // 4) Підписка на зміну акаунтів
+      // Підписка на зміну акаунтів
       const prev = (window as any).__bmb_acc_handler__;
-      if (prev && (provider as any).removeListener) {
-        (provider as any).removeListener('accountsChanged', prev);
-      }
+      if (prev && (provider as any).removeListener) (provider as any).removeListener('accountsChanged', prev);
       const handler = (accs: string[]) => {
         const a = accs?.[0] || '';
         setProfile((p) => ({ ...p, wallet: a }));
@@ -378,12 +421,11 @@ export default function Profile() {
       (window as any).__bmb_acc_handler__ = handler;
       if ((provider as any).on) (provider as any).on('accountsChanged', handler);
     } catch (e: any) {
-      const msg = e?.message || String(e);
-      alert('Помилка підключення MetaMask: ' + msg);
+      alert('Помилка підключення MetaMask: ' + (e?.message || String(e)));
     } finally {
-      connectingRef.current = false;
+      localStorage.removeItem(MM_LOCK_KEY);
       setIsConnecting(false);
-      (window as any).__bmb_mm_lock__ = false;
+      connectingRef.current = false;
     }
   };
 
@@ -413,7 +455,6 @@ export default function Profile() {
           <div className="a2hs-actions">
             <button className="button a2hs-btn" onClick={handleInstallClick}>
               <span className="btn-icon" aria-hidden>
-                {/* Сіра кнопка + Рожева іконка */}
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#ff83b0" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="5" y="2.5" width="14" height="19" rx="3.5"/>
                   <path d="M12 6v8M8 10h8"/>
