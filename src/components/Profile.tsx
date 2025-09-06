@@ -38,7 +38,7 @@ const RatingStars: React.FC<{ value: number }> = ({ value }) => {
   );
 };
 
-/** MetaMask helpers (залишаємо для сумісності; основний конектор нижче) */
+/** MetaMask helpers (залишаємо для сумісності з існуючим кодом) */
 function waitForEthereum(ms = 3500): Promise<any | null> {
   return new Promise((resolve) => {
     if (typeof window === 'undefined') return resolve(null);
@@ -116,6 +116,10 @@ export default function Profile() {
   const [installAvailable, setInstallAvailable] = useState(false);
   const [installed, setInstalled] = useState(false);
   const [showIosHint, setShowIosHint] = useState(false);
+
+  // ✅ NEW: guard, щоб не запускати кілька запитів підряд (і не ловити -32002)
+  const [isConnecting, setIsConnecting] = useState(false);
+  const connectingRef = useRef(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
@@ -311,27 +315,60 @@ export default function Profile() {
     if (!error) setScenarios(scenarios.map((s) => (s.id === id ? { ...s, hidden: true } : s)));
   };
 
-  // MetaMask — централізований конектор (desktop + mobile + WC)
+  // MetaMask — централізований конектор (desktop + mobile + WC) + антидублікатор запитів
   const connectMetamask = async () => {
+    if (connectingRef.current || isConnecting) return; // антиспам кліків
+    connectingRef.current = true;
+    setIsConnecting(true);
+    (window as any).__bmb_mm_lock__ = true;
+
     try {
-      const { provider, accounts } = await connectWallet(); // реентрансі-лок
-      await ensureBSCChain(provider as Eip1193Provider);   // гарантія BSC
+      // 0) Підхоплюємо провайдер і, якщо вже є доступ, не відкриваємо попап
+      let provider: Eip1193Provider | null = null;
+      let accounts: string[] = [];
 
-      const list: string[] =
-        accounts && accounts.length
-          ? accounts
-          : await (provider as Eip1193Provider).request({ method: 'eth_accounts' });
+      try {
+        const res: any = await connectWallet(); // може кинути “редірект у MetaMask app” на мобільних — це ок
+        provider = (res?.provider ?? res) as Eip1193Provider;
+        accounts = Array.isArray(res?.accounts) ? res.accounts : [];
+      } catch (err: any) {
+        // Fallback на "чистий" MetaMask провайдер (якщо WalletConnect не використовується)
+        const mm = await getMetaMaskProvider();
+        if (!mm) throw err || new Error('MetaMask недоступний. Дозволь доступ у розширенні (Site access → On all sites) і перезавантаж сторінку.');
+        provider = mm as Eip1193Provider;
+      }
 
-      const address = list?.[0] || '';
+      // 1) Якщо вже авторизовано — не робимо requestPermissions (уникаємо -32002)
+      if (!accounts.length) {
+        accounts = await provider.request({ method: 'eth_accounts' }).catch(() => []) as string[];
+      }
+      if (!accounts.length) {
+        try {
+          accounts = await provider.request({ method: 'eth_requestAccounts' }) as string[];
+        } catch (e: any) {
+          // -32002: already pending — повідомляємо і просто виходимо
+          if (e?.code === -32002) {
+            alert('MetaMask вже відкрив вікно підтвердження. Відкрий MetaMask і дозволь доступ — повторний запит заблоковано.');
+            return;
+          }
+          if (e?.code === 4001) throw new Error('Доступ відхилено');
+          throw e;
+        }
+      }
+
+      // 2) Гарантуємо мережу BSC
+      await (ensureBSCChain ? ensureBSCChain(provider) : ensureBSC(provider));
+
+      // 3) Оновлюємо стан
+      const address = accounts?.[0] || '';
       if (!address) { alert('Користувач не надав доступ до акаунта MetaMask.'); return; }
-
       setProfile((prev) => ({ ...prev, wallet: address }));
       setWalletConnected(true);
 
-      // підписка на зміну акаунтів
+      // 4) Підписка на зміну акаунтів
       const prev = (window as any).__bmb_acc_handler__;
-      if (prev && (provider as Eip1193Provider).removeListener) {
-        (provider as Eip1193Provider).removeListener('accountsChanged', prev);
+      if (prev && (provider as any).removeListener) {
+        (provider as any).removeListener('accountsChanged', prev);
       }
       const handler = (accs: string[]) => {
         const a = accs?.[0] || '';
@@ -339,12 +376,14 @@ export default function Profile() {
         setWalletConnected(Boolean(a));
       };
       (window as any).__bmb_acc_handler__ = handler;
-      if ((provider as Eip1193Provider).on) {
-        (provider as Eip1193Provider).on('accountsChanged', handler);
-      }
+      if ((provider as any).on) (provider as any).on('accountsChanged', handler);
     } catch (e: any) {
-      const msg = e?.code === 4001 ? 'Доступ відхилено' : (e?.message || String(e));
+      const msg = e?.message || String(e);
       alert('Помилка підключення MetaMask: ' + msg);
+    } finally {
+      connectingRef.current = false;
+      setIsConnecting(false);
+      (window as any).__bmb_mm_lock__ = false;
     }
   };
 
@@ -449,7 +488,9 @@ export default function Profile() {
         <textarea placeholder="Опиши свої здібності..." value={profile.description} onChange={(e) => setProfile({ ...profile, description: e.target.value })} className="input" />
         <input placeholder="TRC20 гаманець або MetaMask" value={profile.wallet} onChange={(e) => setProfile({ ...profile, wallet: e.target.value })} className="input" />
 
-        <button onClick={connectMetamask} className="button">{walletConnected ? '🟢 MetaMask підключено' : '🦊 Підключити MetaMask'}</button>
+        <button onClick={connectMetamask} className="button" disabled={isConnecting}>
+          {isConnecting ? '⏳ Підключення…' : (walletConnected ? '🟢 MetaMask підключено' : '🦊 Підключити MetaMask')}
+        </button>
         <button onClick={() => setKycCompleted(true)} className="button">{kycCompleted ? '✅ KYC пройдено' : '🛡 Пройти KYC'}</button>
         <button onClick={handleSaveProfile} className="button">💾 Зберегти профіль</button>
       </div>
