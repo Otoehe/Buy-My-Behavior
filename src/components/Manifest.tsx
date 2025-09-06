@@ -8,14 +8,22 @@ export default function Manifest() {
   const BLACK = '#000000';
   const BORDER = 'rgba(0,0,0,0.06)';
 
-  // ── Mailto для кнопки "Стати амбасадором" (АДИТИВНО) ─────────────────────────
-  const AMBASSADOR_EMAIL = 'viktorsesiuk@gmail.com';
+  // ── Mailto (АДИТИВНО) ────────────────────────────────────────────────────────
+  const CONTACT_EMAIL = 'viktorsesiuk@gmail.com';
+
   const handleAmbassadorClick = () => {
     const subject = 'Стати амбасадором BMB';
     const body =
       'Привіт! Хочу стати амбасадором BMB.\n\nМене звати: ...\nПосилання/аудиторія: ...\nМісто/країна: ...\n\nДякую!';
-    const mailto = `mailto:${AMBASSADOR_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    // відкриваємо системний поштовий клієнт
+    const mailto = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailto;
+  };
+
+  const handleContactClick = () => {
+    const subject = 'Запит реферального слова BMB';
+    const body =
+      'Вітаю! Прошу надати реферальне слово для реєстрації в BMB.\n\nМене звати: ...\nКонтакти: ...\nКоротко про мене/аудиторію: ...\n\nДякую!';
+    const mailto = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.location.href = mailto;
   };
 
@@ -25,7 +33,6 @@ export default function Manifest() {
       color: BLACK,
     },
     headerBg: {
-      // Прибираємо рожевий задній фон у всього хедера (залишаємо білий)
       background: '#ffffff',
       paddingTop: 12,
       paddingBottom: 0,
@@ -41,7 +48,7 @@ export default function Manifest() {
       padding: '28px 20px 24px',
       margin: '0 auto',
       maxWidth: 1120,
-      textAlign: 'center', // ⇐ центр для всього контенту героя
+      textAlign: 'center',
     },
     kickerWrap: {
       display: 'flex',
@@ -60,12 +67,11 @@ export default function Manifest() {
       letterSpacing: '0.02em',
     },
     title: {
-      // Тепер у заголовку тільки “Buy My Behavior” і скромніші розміри
       margin: 0,
       fontWeight: 800,
       letterSpacing: '-0.01em',
       lineHeight: 1.15,
-      fontSize: 'clamp(24px, 5.2vw, 48px)', // було 56px — зменшили
+      fontSize: 'clamp(24px, 5.2vw, 48px)',
       textShadow: '0 1px 0 rgba(255,255,255,0.6)',
     },
     divider: {
@@ -115,12 +121,10 @@ export default function Manifest() {
       {/* HERO */}
       <header className="mf-hero" style={styles.headerBg} aria-label="Маніфест Buy My Behavior">
         <div className="mf-container" style={styles.hero}>
-          {/* невеликий кікер “Маніфест” по центру */}
           <div style={styles.kickerWrap}>
             <span style={styles.kicker}>Маніфест</span>
           </div>
 
-          {/* головний заголовок тепер лише “Buy My Behavior” і по центру */}
           <h1 className="mf-hero-title" style={styles.title}>
             Buy My Behavior
           </h1>
@@ -132,7 +136,6 @@ export default function Manifest() {
             узгоджують умови та захищають угоди ескроу-смартконтрактом.
           </p>
 
-          {/* акуратні піллі з мікротінню */}
           <div className="mf-pills" style={styles.pills}>
             <span className="mf-pill" style={styles.pill}>Web3</span>
             <span className="mf-pill" style={styles.pill}>Escrow Smart-Contract</span>
@@ -140,7 +143,6 @@ export default function Manifest() {
           </div>
         </div>
 
-        {/* оптична “полиця” — дуже делікатна */}
         <div style={styles.shelf} aria-hidden="true" />
       </header>
 
@@ -283,7 +285,7 @@ export default function Manifest() {
                   <span><i className="mf-dot mf-dot-gray" /> 5% Амбасадор</span>
                 </div>
               </div>
-              {/* ⇩⇩ КНОПКА ПІДКЛЮЧЕНА ДО ПОШТИ (mailto) ⇩⇩ */}
+              {/* КНОПКА: Стати амбасадором → mailto */}
               <button
                 className="mf-ghost-btn"
                 type="button"
@@ -317,7 +319,13 @@ export default function Manifest() {
 
           <div className="mf-cta">
             <p className="mf-cta-note">Щоб отримати реферальне слово, вам слід написати на пошту.</p>
-            <button className="mf-ghost-btn">
+            <button
+              className="mf-ghost-btn"
+              type="button"
+              onClick={handleContactClick}
+              title="Написати лист щодо отримання реферального слова"
+              aria-label="Написати на пошту (відкрити поштовий клієнт)"
+            >
               ✉️ Написати на пошту
             </button>
           </div>
