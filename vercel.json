@@ -1,20 +1,21 @@
 {
   "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    { "source": "/assets/(.*)", "destination": "/assets/$1" },
+    { "source": "/icons/(.*)", "destination": "/icons/$1" },
+    { "source": "/images/(.*)", "destination": "/images/$1" },
+
+    { "source": "/(sw\\.js|service-worker\\.js|workbox-.*\\.js|manifest\\.webmanifest|robots\\.txt|favicon\\.ico|apple-touch-icon\\.png|safari-pinned-tab\\.svg)", "destination": "/$1" },
+
+    { "source": "/(.*\\.(?:js|css|png|jpg|jpeg|gif|svg|webp|ico|json|txt|map|woff|woff2|ttf))", "destination": "/$1" },
+
+    { "source": "/(.*)", "destination": "/" }
+  ],
   "headers": [
     {
       "source": "/sw.js",
-      "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }]
-    },
-    {
-      "source": "/index.html",
-      "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }]
+      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
     }
-  ],
-  "rewrites": [
-    {
-      "source": "/((?!assets|icons|images|sw\\.js|manifest\\.webmanifest).*)",
-      "destination": "/index.html"
-    }
-  ],
-  "trailingSlash": false
+  ]
 }
