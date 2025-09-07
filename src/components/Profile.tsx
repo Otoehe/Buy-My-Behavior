@@ -395,42 +395,23 @@ export default function Profile() {
     })();
   }, [pushEnabled]);
 
-  // === Anti auto-reload on Profile (локальний guard лише для цієї сторінки) ===
+  // === Safe SW update listener (без підміни location.reload) ===
   useEffect(() => {
-    const locAny = window.location as any;
-    const originalReload: undefined | (() => void) =
-      typeof locAny.reload === 'function' ? locAny.reload.bind(window.location) : undefined;
-    if (!originalReload) return;
+    const onSwMessage = (e: MessageEvent) => {
+      if ((e.data as any)?.type !== 'BMB_RELOAD') return;
 
-    let allowReload = false;
+      // захист від частих перезавантажень: не частіше, ніж раз на 3с
+      const last = Number(sessionStorage.getItem('bmb_profile_reload_ts') || '0');
+      if (Date.now() - last < 3000) return;
 
-    const onSwMessage = (e: any) => {
-      if (e?.data?.type === 'BMB_RELOAD') {
-        allowReload = true;
-        const last = Number(sessionStorage.getItem('bmb_profile_reload_ts') || '0');
-        if (Date.now() - last >= 3000) {
-          sessionStorage.setItem('bmb_profile_reload_ts', String(Date.now()));
-          originalReload();
-        }
-      }
+      sessionStorage.setItem('bmb_profile_reload_ts', String(Date.now()));
+      // Якщо хочеш авто-рефреш саме тут — розкоментуй:
+      // window.location.reload();
+      // Інакше оновлення керується глобальною плашкою «Доступна нова версія».
     };
 
     navigator.serviceWorker?.addEventListener?.('message', onSwMessage);
-
-    const patchedReload = () => {
-      if (!allowReload) return; // блокуємо «чужі» reload'и
-      const last = Number(sessionStorage.getItem('bmb_profile_reload_ts') || '0');
-      if (Date.now() - last < 3000) return;
-      sessionStorage.setItem('bmb_profile_reload_ts', String(Date.now()));
-      originalReload();
-    };
-
-    locAny.reload = patchedReload as any;
-
-    return () => {
-      navigator.serviceWorker?.removeEventListener?.('message', onSwMessage);
-      locAny.reload = originalReload;
-    };
+    return () => navigator.serviceWorker?.removeEventListener?.('message', onSwMessage);
   }, []);
 
   // Аватар
