@@ -1,15 +1,9 @@
 // public/sw.js
 const VERSION = 'bmb-2025-09-07';
-
-// Чи потрібно перезавантажити вкладки після активації (лише при ручному оновленні)
 let reloadAfterActivate = false;
 
-// НІЯКОГО auto-skipWaiting у install
-self.addEventListener('install', () => {
-  // новий SW чекає, поки клієнт надішле команду SKIP_WAITING
-});
+self.addEventListener('install', () => { /* без auto-skipWaiting */ });
 
-// Кероване оновлення — приходить з клієнта по кнопці "Оновити"
 self.addEventListener('message', (e) => {
   if (e?.data?.type === 'SKIP_WAITING') {
     reloadAfterActivate = true;
@@ -27,18 +21,12 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
-// Перехоплюємо ТІЛЬКИ HTML-навігацію для SPA (без кешування JS/CSS/чанків)
+// Лише HTML-навігація, без кешування JS/CSS
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.mode !== 'navigate') return;
-
   event.respondWith((async () => {
-    try {
-      // завжди свіжа HTML-сторінка
-      return await fetch(req, { cache: 'no-store' });
-    } catch {
-      const cached = await caches.match('/index.html');
-      return cached || Response.error();
-    }
+    try { return await fetch(req, { cache: 'no-store' }); }
+    catch { return (await caches.match('/index.html')) || Response.error(); }
   })());
 });
