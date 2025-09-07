@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import './Profile.css';
-import { pushNotificationManager } from '../lib/pushNotifications'; // ✅ існуючий менеджер пушів
+import { pushNotificationManager } from '../lib/pushNotifications';
 
 /** Ролі */
 const roles = [
@@ -206,7 +206,6 @@ export default function Profile() {
     window.addEventListener('beforeinstallprompt', onBIP as any);
     window.addEventListener('appinstalled', onInstalled);
 
-    // якщо вже standalone (PWA) — ховаємо карточку
     if (isStandaloneDisplay()) {
       localStorage.setItem('bmb.a2hs.done', '1');
       setInstalled(true);
@@ -368,7 +367,6 @@ export default function Profile() {
     (async () => {
       try {
         if (pushEnabled) {
-          // запитуємо дозвіл, якщо ще не виданий
           if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
             const perm = await Notification.requestPermission();
             if (perm !== 'granted') {
@@ -395,23 +393,24 @@ export default function Profile() {
     })();
   }, [pushEnabled]);
 
-  // === Safe SW update listener (без підміни location.reload) ===
+  // === Блокування автоперезавантаження від Service Worker (лише для цієї сторінки) ===
   useEffect(() => {
-    const onSwMessage = (e: MessageEvent) => {
-      if ((e.data as any)?.type !== 'BMB_RELOAD') return;
+    const sw = navigator?.serviceWorker;
+    if (!sw) return;
 
-      // захист від частих перезавантажень: не частіше, ніж раз на 3с
-      const last = Number(sessionStorage.getItem('bmb_profile_reload_ts') || '0');
-      if (Date.now() - last < 3000) return;
+    try { (sw as any).oncontrollerchange = null; } catch {}
 
-      sessionStorage.setItem('bmb_profile_reload_ts', String(Date.now()));
-      // Якщо хочеш авто-рефреш саме тут — розкоментуй:
-      // window.location.reload();
-      // Інакше оновлення керується глобальною плашкою «Доступна нова версія».
+    const blockReload = (e: Event) => {
+      e.stopImmediatePropagation?.();
+      e.stopPropagation?.();
+      try { localStorage.setItem('bmb.sw.update', '1'); } catch {}
+      window.dispatchEvent(new Event('bmb:sw-update'));
     };
 
-    navigator.serviceWorker?.addEventListener?.('message', onSwMessage);
-    return () => navigator.serviceWorker?.removeEventListener?.('message', onSwMessage);
+    sw.addEventListener('controllerchange', blockReload, { capture: true });
+    return () => {
+      (sw as any).removeEventListener('controllerchange', blockReload, { capture: true } as any);
+    };
   }, []);
 
   // Аватар
@@ -434,26 +433,39 @@ export default function Profile() {
           setProfile(prev => ({ ...prev, avatar_url: finalAvatarUrl }));
           setAvatarPreview('');
         }
-      } catch { alert('❌ Помилка завантаження аватара'); }
-      finally { setAvatarUploading(false); }
+      } catch {
+        alert('❌ Помилка завантаження аватара');
+      } finally {
+        setAvatarUploading(false);
+      }
     }
 
     const updates = {
-      user_id: user.id, name: profile.username, role: selectedRole, description: profile.description,
-      wallet: profile.wallet, avatar_url: finalAvatarUrl, kyc_verified: kycCompleted, email: profile.email
+      user_id: user.id,
+      name: profile.username,
+      role: selectedRole,
+      description: profile.description,
+      wallet: profile.wallet,
+      avatar_url: finalAvatarUrl,
+      kyc_verified: kycCompleted,
+      email: profile.email
     } as const;
 
     const { error } = await supabase.from('profiles').upsert(updates, { onConflict: 'user_id' });
-    if (!error) alert('✅ Профіль збережено успішно'); else alert('❌ Помилка при збереженні: ' + JSON.stringify(error, null, 2));
+    if (!error) alert('✅ Профіль збережено успішно');
+    else alert('❌ Помилка при збереженні: ' + JSON.stringify(error, null, 2));
   };
 
   // Драфти сценаріїв
   const handleAddScenario = async () => {
     if (!newScenarioDescription || !newScenarioPrice || !user) return;
-    const price = parseFloat(newScenarioPrice); if (Number.isNaN(price)) return;
+    const price = parseFloat(newScenarioPrice);
+    if (Number.isNaN(price)) return;
+
     const { error } = await supabase.from('scenario_drafts').insert([{ user_id: user.id, description: newScenarioDescription, price }]);
     if (!error) {
-      setNewScenarioDescription(''); setNewScenarioPrice('');
+      setNewScenarioDescription('');
+      setNewScenarioPrice('');
       const { data } = await supabase.from('scenario_drafts').select('*').eq('user_id', user.id);
       setScenarios((data || []) as Scenario[]);
     }
