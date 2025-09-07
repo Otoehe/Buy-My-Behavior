@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import './Profile.css';
+import { pushNotificationManager } from '../lib/pushNotifications'; // ✅ підключив існуючий менеджер пушів
 
 /** Ролі */
 const roles = [
@@ -53,8 +54,8 @@ function waitForEthereum(ms = 3500): Promise<any | null> {
 
 async function getMetaMaskProvider(): Promise<any | null> {
   const eth = await waitForEthereum();
-  const candidates = eth?.providers?.length ? eth.providers : (eth ? [eth] : []);
-  const mm = candidates?.find((p: any) => p?.isMetaMask) || (eth?.isMetaMask ? eth : null);
+  const candidates = (eth as any)?.providers?.length ? (eth as any).providers : (eth ? [eth] : []);
+  const mm = candidates?.find((p: any) => p?.isMetaMask) || ((eth as any)?.isMetaMask ? eth : null);
   if (mm) return mm;
 
   // EIP-6963 multi-inject
@@ -109,7 +110,6 @@ async function requestAccountsSafe(provider: Eip1193Provider): Promise<string[]>
     if (accs?.length) return accs;
   } catch (e: any) {
     if (e?.code === -32002 || String(e?.message || '').includes('already pending')) {
-      // чекаємо, поки користувач підтвердить у вже відкритому модальному вікні MM
       for (let i = 0; i < 25; i++) {
         await sleep(1200);
         const a = await provider.request({ method: 'eth_accounts' }).catch(() => []) as string[];
@@ -130,15 +130,21 @@ async function requestAccountsOnce(provider: Eip1193Provider): Promise<string[]>
   return pendingAccountsPromise;
 }
 
-/** Допоміжний складання коректного deeplink для MetaMask App */
+/** Допоміжний deeplink для MetaMask App */
 function buildMetaMaskDappUrl(): string {
   const href = window.location.href.startsWith('http')
     ? window.location.href
     : `https://${window.location.host}${window.location.pathname}${window.location.search}`;
-  // universal link у форматі metamask.app.link/dapp/<encoded full URL>
   return `https://metamask.app.link/dapp/${encodeURIComponent(href)}`;
 }
 
+// Helpers: платформи
+const isStandaloneDisplay = () =>
+  (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (navigator as any).standalone === true;
+
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+/** Типи */
 type Scenario = { id: number; description: string; price: number; hidden?: boolean };
 
 export default function Profile() {
@@ -156,11 +162,22 @@ export default function Profile() {
   const [ratingAvg, setRatingAvg] = useState<number>(10);
   const [ratingCount, setRatingCount] = useState<number>(0);
 
-  // PWA install state
+  // ---------- A2HS ----------
   const [installEvt, setInstallEvt] = useState<BeforeInstallPromptEvent | null>(null);
   const [installAvailable, setInstallAvailable] = useState(false);
-  const [installed, setInstalled] = useState(false);
-  const [showIosHint, setShowIosHint] = useState(false);
+  const [installed, setInstalled] = useState<boolean>(() => {
+    return isStandaloneDisplay() || localStorage.getItem('bmb.a2hs.done') === '1';
+  });
+  const [showA2HSModal, setShowA2HSModal] = useState(false);
+
+  // ---------- Settings: Гео/Пуші ----------
+  const [geoEnabled, setGeoEnabled] = useState<boolean>(() => localStorage.getItem('bmb.geo') !== '0');
+  const [pushEnabled, setPushEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('bmb.push');
+    if (saved === '1') return true;
+    if (saved === '0') return false;
+    return (typeof Notification !== 'undefined' && Notification.permission === 'granted');
+  });
 
   // антидубль-конект
   const [isConnecting, setIsConnecting] = useState(false);
@@ -169,6 +186,37 @@ export default function Profile() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+
+  // ---- A2HS listeners ----
+  useEffect(() => {
+    const onBIP = (e: Event) => {
+      e.preventDefault();
+      setInstallEvt(e as BeforeInstallPromptEvent);
+      setInstallAvailable(true);
+      localStorage.setItem('bmb.a2hs.supported', '1');
+    };
+    const onInstalled = () => {
+      setInstalled(true);
+      setInstallAvailable(false);
+      setInstallEvt(null);
+      setShowA2HSModal(false);
+      localStorage.setItem('bmb.a2hs.done', '1');
+    };
+
+    window.addEventListener('beforeinstallprompt', onBIP as any);
+    window.addEventListener('appinstalled', onInstalled);
+
+    // якщо вже standalone (PWA) — ховаємо карточку
+    if (isStandaloneDisplay()) {
+      localStorage.setItem('bmb.a2hs.done', '1');
+      setInstalled(true);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBIP as any);
+      window.removeEventListener('appinstalled', onInstalled);
+    };
+  }, []);
 
   // Якщо повернулись / відкрились у MetaMask App → автопідхоплення акаунтів і зняття "lock"
   useEffect(() => {
@@ -183,7 +231,6 @@ export default function Profile() {
         const a = accs[0];
         setProfile(p => ({ ...p, wallet: a }));
         setWalletConnected(true);
-        // зберігаємо в профіль
         try {
           const { data: { user } } = await supabase.auth.getUser();
           if (user) await supabase.from('profiles').update({ wallet: a }).eq('user_id', user.id);
@@ -195,11 +242,8 @@ export default function Profile() {
       }
     };
 
-    // якщо присутній lock — починаємо лагідний пулінг eth_accounts
     if (typeof window !== 'undefined' && localStorage.getItem(MM_LOCK_KEY) === '1') {
-      // швидка спроба одразу
       tryFinalize();
-      // і м’який пулінг на 30–40с
       timer = setInterval(tryFinalize, 1200);
     }
 
@@ -299,12 +343,12 @@ export default function Profile() {
     })();
   }, []);
 
-  // 5) Геолокація кожні 10с
+  // 5) Геолокація кожні 10с (з урахуванням перемикача)
   useEffect(() => {
     let intervalId: any = null;
     const tick = async () => {
       try {
-        if (!user || typeof navigator === 'undefined' || !navigator.geolocation) return;
+        if (!geoEnabled || !user || typeof navigator === 'undefined' || !navigator.geolocation) return;
         navigator.geolocation.getCurrentPosition(
           async (pos) => {
             const { latitude, longitude } = pos.coords;
@@ -315,9 +359,41 @@ export default function Profile() {
         );
       } catch { /* ignore */ }
     };
-    if (user) { tick(); intervalId = setInterval(tick, 10000); }
+    if (user && geoEnabled) { tick(); intervalId = setInterval(tick, 10000); }
     return () => { if (intervalId) clearInterval(intervalId); };
-  }, [user]);
+  }, [user, geoEnabled]);
+
+  // Пуші (підписка/відписка при зміні перемикача)
+  useEffect(() => {
+    (async () => {
+      try {
+        if (pushEnabled) {
+          // запитуємо дозвіл, якщо ще не виданий
+          if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
+            const perm = await Notification.requestPermission();
+            if (perm !== 'granted') {
+              setPushEnabled(false);
+              localStorage.setItem('bmb.push', '0');
+              return;
+            }
+          }
+          if ((pushNotificationManager as any)?.subscribe) {
+            await (pushNotificationManager as any).subscribe();
+          } else if ((pushNotificationManager as any)?.enable) {
+            await (pushNotificationManager as any).enable();
+          }
+        } else {
+          if ((pushNotificationManager as any)?.unsubscribe) {
+            await (pushNotificationManager as any).unsubscribe();
+          } else if ((pushNotificationManager as any)?.disable) {
+            await (pushNotificationManager as any).disable();
+          }
+        }
+      } catch (e: any) {
+        alert('Помилка керування пушами: ' + (e?.message || String(e)));
+      }
+    })();
+  }, [pushEnabled]);
 
   // Аватар
   const handleAvatarChange = (file: File) => { if (!file) return; setAvatarPreview(URL.createObjectURL(file)); };
@@ -381,7 +457,7 @@ export default function Profile() {
     } catch { /* ignore */ }
   };
 
-  // Конект MetaMask (BSC) з коректним deeplink та single-flight
+  // Конект MetaMask (BSC) з deeplink та single-flight
   const connectMetamask = async () => {
     if (connectingRef.current || isConnecting) return;
     connectingRef.current = true;
@@ -391,11 +467,10 @@ export default function Profile() {
     try {
       let provider = await getMetaMaskProvider() as Eip1193Provider | null;
 
-      // якщо на мобільному й провайдера немає — відкриваємо сторінку у MetaMask App (вбудований браузер)
+      // Мобільний — відкриваємо у MetaMask App браузері
       if (!provider && /android|iphone|ipad|ipod/i.test(navigator.userAgent)) {
         const deeplink = buildMetaMaskDappUrl();
         window.location.href = deeplink;
-        // далі ініціалізацію завершує effect із автопулінгом eth_accounts
         return;
       }
 
@@ -416,7 +491,7 @@ export default function Profile() {
 
       // Підписка на зміну акаунтів
       const prev = (window as any).__bmb_acc_handler__;
-      if (prev && provider.removeListener) provider.removeListener('accountsChanged', prev);
+      if (prev && (provider as any).removeListener) (provider as any).removeListener('accountsChanged', prev);
       const handler = (accs: string[]) => {
         const a = accs?.[0] || '';
         setProfile((p) => ({ ...p, wallet: a }));
@@ -424,7 +499,7 @@ export default function Profile() {
         if (a) saveWalletIfNeeded(a);
       };
       (window as any).__bmb_acc_handler__ = handler;
-      if (provider.on) provider.on('accountsChanged', handler);
+      if ((provider as any).on) (provider as any).on('accountsChanged', handler);
     } catch (e: any) {
       alert('Помилка підключення MetaMask: ' + (e?.message || String(e)));
     } finally {
@@ -432,6 +507,16 @@ export default function Profile() {
       setIsConnecting(false);
       connectingRef.current = false;
     }
+  };
+
+  // Toggle helpers
+  const toggleGeo = (next: boolean) => {
+    setGeoEnabled(next);
+    localStorage.setItem('bmb.geo', next ? '1' : '0');
+  };
+  const togglePush = (next: boolean) => {
+    setPushEnabled(next);
+    localStorage.setItem('bmb.push', next ? '1' : '0');
   };
 
   const UserIcon = () => (
@@ -447,29 +532,93 @@ export default function Profile() {
     <div className="profile-container">
       <h1 className="title">Профіль</h1>
 
-      {/* PWA: Add to Home Screen */}
+      {/* PWA: Add to Home Screen (ховається коли встановлено) */}
       {!installed && (
         <div className="a2hs-card">
           <div className="a2hs-row">
             <div className="a2hs-emoji">📲</div>
             <div className="a2hs-text">
-              Додай іконку застосунку на робочий стіл
-              <div className="a2hs-sub">Працює офлайн, відкривається як окремий додаток</div>
+              Додати іконку на робочий стіл
+              <div className="a2hs-sub">Працює офлайн і відкривається як окремий додаток</div>
             </div>
           </div>
           <div className="a2hs-actions">
-            <button className="button a2hs-btn" onClick={async () => {
-              if (!installEvt) { alert('У вашому браузері встановлення через меню: Install App / Add to Home Screen.'); return; }
-              try { await installEvt.prompt(); await installEvt.userChoice; setInstallEvt(null); setInstallAvailable(false); } catch {}
-            }}>
+            <button
+              className="button a2hs-btn"
+              onClick={() => setShowA2HSModal(true)}
+            >
               <span className="btn-icon" aria-hidden>
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#ff83b0" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="5" y="2.5" width="14" height="19" rx="3.5"/>
                   <path d="M12 6v8M8 10h8"/>
                 </svg>
               </span>
-              <span>{installAvailable ? 'Додати іконку' : 'Як додати'}</span>
+              <span>{installAvailable || !isIOS() ? 'Додати іконку' : 'Як додати'}</span>
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* A2HS Modal */}
+      {showA2HSModal && !installed && (
+        <div className="bmb-modal-backdrop" onClick={() => setShowA2HSModal(false)}>
+          <div className="bmb-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="bmb-modal-header">
+              <div className="bmb-logo-square" aria-hidden />
+              <h3>ДОДАТИ ІКОНКУ НА РОБОЧИЙ СТІЛ</h3>
+            </div>
+
+            {!isIOS() ? (
+              <div className="bmb-modal-body">
+                <p>Встановіть застосунок як PWA для швидкого доступу.</p>
+                <ol className="bmb-steps">
+                  <li>Натисніть кнопку <b>Встановити</b> нижче.</li>
+                  <li>Підтвердіть у вікні браузера.</li>
+                </ol>
+              </div>
+            ) : (
+              <div className="bmb-modal-body">
+                <p>На iPhone / iPad:</p>
+                <ol className="bmb-steps">
+                  <li>Торкніться іконки <b>Поділитися</b> в Safari.</li>
+                  <li>Обирайте <b>На Початковий екран</b>.</li>
+                  <li>Підтвердіть назву і додайте.</li>
+                </ol>
+              </div>
+            )}
+
+            <div className="bmb-modal-actions">
+              {!isIOS() && installEvt && (
+                <button
+                  className="button bmb-primary"
+                  onClick={async () => {
+                    try {
+                      await installEvt.prompt();
+                      const choice = await installEvt.userChoice;
+                      // Якщо користувач погодився — вважаємо встановленим
+                      if (choice?.outcome === 'accepted') {
+                        localStorage.setItem('bmb.a2hs.done', '1');
+                        setInstalled(true);
+                        setShowA2HSModal(false);
+                        setInstallAvailable(false);
+                        setInstallEvt(null);
+                      }
+                    } catch {/* ignore */}
+                  }}
+                >
+                  Встановити
+                </button>
+              )}
+              {(!installEvt || isIOS()) && (
+                <button
+                  className="button bmb-secondary"
+                  onClick={() => window.alert('Використайте стандартне меню браузера: Install App / Add to Home Screen')}
+                >
+                  Відкрити підказку
+                </button>
+              )}
+              <button className="button bmb-ghost" onClick={() => setShowA2HSModal(false)}>Закрити</button>
+            </div>
           </div>
         </div>
       )}
@@ -514,6 +663,33 @@ export default function Profile() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', marginTop: 8 }}>
         <RatingStars value={ratingAvg} />
         <span style={{ fontSize: 13, color: '#6b7280' }}>{ratingAvg.toFixed(1)} / 10 · {ratingCount} оцінок</span>
+      </div>
+
+      {/* Налаштування: Гео/Пуші */}
+      <div className="settings-card">
+        <h2>Налаштування</h2>
+        <div className="settings-row">
+          <span>Геолокація</span>
+          <label className="bmb-switch">
+            <input
+              type="checkbox"
+              checked={geoEnabled}
+              onChange={(e) => toggleGeo(e.target.checked)}
+            />
+            <i />
+          </label>
+        </div>
+        <div className="settings-row">
+          <span>Пуш-сповіщення</span>
+          <label className="bmb-switch">
+            <input
+              type="checkbox"
+              checked={pushEnabled}
+              onChange={(e) => togglePush(e.target.checked)}
+            />
+            <i />
+          </label>
+        </div>
       </div>
 
       {/* Форма профілю */}
