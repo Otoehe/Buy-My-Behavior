@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import './Profile.css';
-import { pushNotificationManager } from '../lib/pushNotifications'; // ✅ підключив існуючий менеджер пушів
+import { pushNotificationManager } from '../lib/pushNotifications'; // ✅ існуючий менеджер пушів
 
 /** Ролі */
 const roles = [
@@ -395,6 +395,44 @@ export default function Profile() {
     })();
   }, [pushEnabled]);
 
+  // === Anti auto-reload on Profile (локальний guard лише для цієї сторінки) ===
+  useEffect(() => {
+    const locAny = window.location as any;
+    const originalReload: undefined | (() => void) =
+      typeof locAny.reload === 'function' ? locAny.reload.bind(window.location) : undefined;
+    if (!originalReload) return;
+
+    let allowReload = false;
+
+    const onSwMessage = (e: any) => {
+      if (e?.data?.type === 'BMB_RELOAD') {
+        allowReload = true;
+        const last = Number(sessionStorage.getItem('bmb_profile_reload_ts') || '0');
+        if (Date.now() - last >= 3000) {
+          sessionStorage.setItem('bmb_profile_reload_ts', String(Date.now()));
+          originalReload();
+        }
+      }
+    };
+
+    navigator.serviceWorker?.addEventListener?.('message', onSwMessage);
+
+    const patchedReload = () => {
+      if (!allowReload) return; // блокуємо «чужі» reload'и
+      const last = Number(sessionStorage.getItem('bmb_profile_reload_ts') || '0');
+      if (Date.now() - last < 3000) return;
+      sessionStorage.setItem('bmb_profile_reload_ts', String(Date.now()));
+      originalReload();
+    };
+
+    locAny.reload = patchedReload as any;
+
+    return () => {
+      navigator.serviceWorker?.removeEventListener?.('message', onSwMessage);
+      locAny.reload = originalReload;
+    };
+  }, []);
+
   // Аватар
   const handleAvatarChange = (file: File) => { if (!file) return; setAvatarPreview(URL.createObjectURL(file)); };
 
@@ -595,7 +633,6 @@ export default function Profile() {
                     try {
                       await installEvt.prompt();
                       const choice = await installEvt.userChoice;
-                      // Якщо користувач погодився — вважаємо встановленим
                       if (choice?.outcome === 'accepted') {
                         localStorage.setItem('bmb.a2hs.done', '1');
                         setInstalled(true);
