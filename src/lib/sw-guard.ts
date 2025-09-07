@@ -1,36 +1,35 @@
-// src/lib/sw-guard.ts
-export function setupSwUpdateGuard() {
-  if (!('serviceWorker' in navigator)) return;
+// public/sw.js
+const VERSION = 'bmb-2025-09-07';
 
-  // Показуємо банер тільки коли це справді оновлення
-  navigator.serviceWorker.ready.then((reg) => {
-    reg.addEventListener('updatefound', () => {
-      const installing = reg.installing;
-      installing?.addEventListener('statechange', () => {
-        if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-          localStorage.setItem('bmb_sw_update_ready', '1');
-          window.dispatchEvent(new Event('bmb:sw-update-ready'));
-        }
-      });
-    });
+// Не робимо skipWaiting під час install — сторінка вирішує коли оновлюватись
+self.addEventListener('install', () => {
+  // prep work here if needed
+});
 
-    // Кнопка "Оновити" → активуємо новий SW
-    (window as any).bmbApplySwUpdate = () => {
-      const w = reg.waiting;
-      if (w) w.postMessage({ type: 'SKIP_WAITING' });
-      else setTimeout(() => reg.waiting?.postMessage({ type: 'SKIP_WAITING' }), 800);
-    };
-  });
+// Приймаємо контроль після активації (не спричиняє reload само по собі)
+self.addEventListener('activate', (e) => {
+  e.waitUntil(self.clients.claim());
+});
 
-  // Перезавантаження тільки по сигналу від SW
-  let reloaded = false;
-  navigator.serviceWorker.addEventListener('message', (e) => {
-    if (e.data?.type === 'BMB_RELOAD' && !reloaded) {
-      reloaded = true;
-      const last = Number(sessionStorage.getItem('bmb_sw_reload_ts') || '0');
-      if (Date.now() - last < 3000) return;         // антипетля
-      sessionStorage.setItem('bmb_sw_reload_ts', String(Date.now()));
-      window.location.reload();
+// Кероване оновлення: сторінка надсилає APPLY_UPDATE
+self.addEventListener('message', (e) => {
+  const t = e?.data?.type;
+  if (t === 'APPLY_UPDATE' || t === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
+// Перехоплюємо тільки HTML-навігацію (SPA), без кешування JS/CSS
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.mode !== 'navigate') return;
+
+  event.respondWith((async () => {
+    try {
+      return await fetch(req, { cache: 'no-store' });
+    } catch {
+      const cached = await caches.match('/index.html');
+      return cached || Response.error();
     }
-  });
-}
+  })());
+});
