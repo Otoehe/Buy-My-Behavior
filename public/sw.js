@@ -1,22 +1,33 @@
 // public/sw.js
-const VERSION = 'bmb-2025-09-06';
+const VERSION = 'bmb-2025-09-07';
 
-// Активуємо одразу
+// Чи потрібно перезавантажити вкладки після активації (лише при ручному оновленні)
+let reloadAfterActivate = false;
+
+// НІЯКОГО auto-skipWaiting у install
 self.addEventListener('install', () => {
-  self.skipWaiting();
+  // новий SW чекає, поки клієнт надішле команду SKIP_WAITING
 });
 
-self.addEventListener('activate', (e) => {
-  e.waitUntil(self.clients.claim());
-});
-
-// Прискорене оновлення
+// Кероване оновлення — приходить з клієнта по кнопці "Оновити"
 self.addEventListener('message', (e) => {
-  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
+  if (e?.data?.type === 'SKIP_WAITING') {
+    reloadAfterActivate = true;
+    self.skipWaiting();
+  }
 });
 
-// Перехоплюємо ТІЛЬКИ HTML-навігацію для SPA.
-// ЖОДНИХ кешів JS/CSS/чанків — щоб не було MIME "text/html" замість "application/javascript".
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    await self.clients.claim();
+    if (reloadAfterActivate) {
+      const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      for (const client of all) client.postMessage({ type: 'BMB_RELOAD' });
+    }
+  })());
+});
+
+// Перехоплюємо ТІЛЬКИ HTML-навігацію для SPA (без кешування JS/CSS/чанків)
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.mode !== 'navigate') return;
@@ -25,8 +36,7 @@ self.addEventListener('fetch', (event) => {
     try {
       // завжди свіжа HTML-сторінка
       return await fetch(req, { cache: 'no-store' });
-    } catch (e) {
-      // офлайн-фолбек (якщо додаси /index.html у кеш — тут можна віддати кеш)
+    } catch {
       const cached = await caches.match('/index.html');
       return cached || Response.error();
     }
