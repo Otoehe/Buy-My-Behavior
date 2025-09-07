@@ -193,11 +193,37 @@
 /* ───────────────────── ADDITIONS (safe-area, modal, settings) ───────────────────── */
 /* УВАГА: нижче лише доповнення. Існуючі стилі вище не видалялись. */
 
+/* 0) Невеличкий reset для симетрії відступів і відсутності горизонтальної прокрутки */
+html, body { margin: 0; padding: 0; }
+* { box-sizing: border-box; }
+
 /* 1) Безпечне вирівнювання по краях екрана з урахуванням "вусів" iOS/Android */
 .profile-container {
   box-sizing: border-box;
   padding-left: max(2rem, env(safe-area-inset-left));
   padding-right: max(2rem, env(safe-area-inset-right));
+  overflow-x: hidden;
+}
+
+/* Додатково гарантуємо центр усіх основних карток */
+.a2hs-card,
+.avatar-container,
+.settings-card,
+.profile-form,
+.scenario-form,
+.scenario-archive,
+.title {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* 1.1) Аватарка без «смужки»: рівне біле кільце через shadow (override попереднього outline) */
+.avatar-photo{
+  outline: none; /* прибираємо можливу нерівну окантовку */
+  box-shadow:
+    0 0 0 6px #fff,                             /* біле кільце, рівне з обох сторін */
+    0 22px 50px rgba(255, 131, 176, .28),
+    0 4px 12px rgba(0, 0, 0, .08);
 }
 
 /* 2) Картка налаштувань (Геолокація / Пуші) */
@@ -289,4 +315,14 @@
   .a2hs-text { font-size: .95rem; }
   .profile-form, .scenario-form, .scenario-archive { border-radius: 14px; }
   .scenario-price { font-size: .85rem; }
+}
+
+/* 6) Сувора симетрія відступів на мобільних (override попереднього @media) */
+@media (max-width: 767px){
+  .profile-container{
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+    /* верх/низ залишаємо з попереднього правила: padding-top/bottom контролює перший блок */
+  }
+  .title{ margin-left:auto; margin-right:auto; }
 }
