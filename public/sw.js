@@ -1,25 +1,23 @@
 // public/sw.js
-const VERSION = 'bmb-2025-09-07';
+const VERSION = 'bmb-2025-09-07'; // онови версію щоб перегоріло кешування
 
-// Не робимо skipWaiting під час install — сторінка вирішує коли оновлюватись
-self.addEventListener('install', () => {
-  // prep work here if needed
+// Не викликаємо skipWaiting автоматично!
+self.addEventListener('install', (event) => {
+  // опційно: можна показати лог
 });
 
-// Приймаємо контроль після активації (не спричиняє reload само по собі)
-self.addEventListener('activate', (e) => {
-  e.waitUntil(self.clients.claim());
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
 });
 
-// Кероване оновлення: сторінка надсилає APPLY_UPDATE
-self.addEventListener('message', (e) => {
-  const t = e?.data?.type;
-  if (t === 'APPLY_UPDATE' || t === 'SKIP_WAITING') {
+// Дозволяємо форс-активацію лише по повідомленню з клієнта
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
 });
 
-// Перехоплюємо тільки HTML-навігацію (SPA), без кешування JS/CSS
+// Перехоплюємо ТІЛЬКИ HTML-навігацію (щоб не чіпати js/css і не ловити MIME-баґи)
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.mode !== 'navigate') return;
@@ -27,7 +25,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith((async () => {
     try {
       return await fetch(req, { cache: 'no-store' });
-    } catch {
+    } catch (e) {
       const cached = await caches.match('/index.html');
       return cached || Response.error();
     }
