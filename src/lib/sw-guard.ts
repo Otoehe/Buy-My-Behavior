@@ -1,68 +1,108 @@
 // src/lib/sw-guard.ts
-// Єдиний клієнт для реєстрації SW без авто-reload.
-// Показує подію "bmb:sw-update" — ти вже можеш на ній відкривати свою плашку
-// "Доступна нова версія". Перезавантаження робимо ТІЛЬКИ по кліку "Оновити".
+let lastReg: ServiceWorkerRegistration | null = null;
 
-const RELOAD_KEY = 'bmb_sw_reload_ts';
-const RELOAD_GAP_MS = 5000;
+// Подія, по якій ваш тост "Доступна нова версія" має відобразитись
+const UPDATE_EVENT = 'bmb:sw-update';
 
-function safeReload() {
-  const last = Number(sessionStorage.getItem(RELOAD_KEY) || '0');
-  const now = Date.now();
-  if (now - last < RELOAD_GAP_MS) return;      // анти-цикли
-  sessionStorage.setItem(RELOAD_KEY, String(now));
-  window.location.reload();
-}
-
-/** Реєстрація service worker без авто-reload */
-export function registerServiceWorker(path = '/sw.js') {
+// Реєструємо SW і повідомляємо про наявність оновлення
+export function registerServiceWorker(scriptUrl = '/sw.js') {
   if (!('serviceWorker' in navigator)) return;
 
-  window.addEventListener('load', async () => {
-    try {
-      const reg = await navigator.serviceWorker.register(path, { scope: '/' });
+  window.addEventListener('load', () => {
+    const ver = (import.meta as any).env?.VITE_APP_VERSION ?? Date.now();
+    const url = `${scriptUrl}?v=${ver}`;
 
-      // Коли з’явилась нова версія
+    navigator.serviceWorker.register(url).then((reg) => {
+      lastReg = reg;
+
+      // перевіряємо на оновлення на старті
+      reg.update().catch(() => {});
+
+      // коли є новий воркер і він встановився, але вже є controller → є оновлення
       reg.addEventListener('updatefound', () => {
-        const sw = reg.installing;
-        if (!sw) return;
-        sw.addEventListener('statechange', () => {
-          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-            // Є активна стара версія -> нова готова, але НЕ перезавантажуємо
-            (window as any).__bmb_sw_pending__ = reg;
-            window.dispatchEvent(new CustomEvent('bmb:sw-update', { detail: { reg } }));
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            dispatchUpdateEvent(reg);
           }
         });
       });
 
-      // Повідомлення від SW (опційно)
-      navigator.serviceWorker.addEventListener('message', (evt) => {
-        const t = evt?.data?.type;
-        if (t === 'BMB_RELOAD') safeReload();  // залишено для сумісності, але ми це не шлемо
-      });
-    } catch (e) {
-      console.warn('SW register failed', e);
-    }
+      // періодично перевіряємо (раз на 30 хв)
+      setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
+    }).catch((e) => {
+      console.warn('[BMB SW] registration failed', e);
+    });
   });
 }
 
-/** Викликати при натисканні "Оновити" у твоїй плашці */
-export async function applyServiceWorkerUpdate() {
-  const reg: ServiceWorkerRegistration | undefined = (window as any).__bmb_sw_pending__;
+// Викликайте це по кліку на "Оновити"
+export async function applyServiceWorkerUpdate(): Promise<void> {
+  const reg = lastReg || await navigator.serviceWorker.getRegistration();
   if (!reg) return;
 
-  // Переводимо waiting → активну
-  if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-  else await reg.update().catch(() => {});
+  // Якщо є waiting — просимо активуватись
+  if (reg.waiting) {
+    await skipWaitingAndReload(reg);
+    return;
+  }
 
-  // Дочікуємось перемикання контролера і перезавантажуємось 1 раз
-  await new Promise<void>((resolve) => {
+  // Якщо зараз щось встановлюється — дочекаємось
+  if (reg.installing) {
+    await whenInstalled(reg);
+    if (reg.waiting) {
+      await skipWaitingAndReload(reg);
+    }
+    return;
+  }
+
+  // Інакше спробуємо форснути update і подивитись ще раз
+  await reg.update().catch(() => {});
+  if (reg.waiting) {
+    await skipWaitingAndReload(reg);
+  }
+}
+
+// ——— helpers ———
+function dispatchUpdateEvent(reg: ServiceWorkerRegistration) {
+  const ev = new CustomEvent(UPDATE_EVENT, { detail: { registration: reg } });
+  window.dispatchEvent(ev);
+}
+
+/** Чекаємо поки installing стане installed */
+function whenInstalled(reg: ServiceWorkerRegistration) {
+  return new Promise<void>((resolve) => {
+    const nw = reg.installing;
+    if (!nw) return resolve();
     const onChange = () => {
-      navigator.serviceWorker.removeEventListener('controllerchange', onChange);
-      resolve();
+      if (nw.state === 'installed') {
+        nw.removeEventListener('statechange', onChange);
+        resolve();
+      }
     };
-    navigator.serviceWorker.addEventListener('controllerchange', onChange);
+    nw.addEventListener('statechange', onChange);
   });
+}
 
-  safeReload();
+/** Надсилаємо SKIP_WAITING і робимо один-єдиний reload (із захистом від циклів) */
+function skipWaitingAndReload(reg: ServiceWorkerRegistration) {
+  return new Promise<void>((resolve) => {
+    const guardKey = 'bmb_sw_reload_once';
+    if (!sessionStorage.getItem(guardKey)) {
+      sessionStorage.setItem(guardKey, String(Date.now()));
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        // один раз — і досить
+        setTimeout(() => {
+          location.reload();
+          resolve();
+        }, 50);
+      }, { once: true });
+    } else {
+      // якщо вже перезавантажувались у цій сесії — не робимо нічого
+      resolve();
+    }
+
+    reg.waiting?.postMessage({ type: 'SKIP_WAITING' });
+  });
 }

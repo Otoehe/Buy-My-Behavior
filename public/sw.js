@@ -1,7 +1,7 @@
 // public/sw.js
-const VERSION = 'bmb-2025-09-08'; // bump версію лише коли дійсно міняєш sw
+const VERSION = 'bmb-2025-09-08a'; // bump для інвалідації старого SW
 
-// Не примушуємо skipWaiting автоматично
+// НЕ викликаємо skipWaiting автоматично
 self.addEventListener('install', () => {
   // console.log('[SW]', VERSION, 'installed');
 });
@@ -10,24 +10,24 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// Дозволяємо форс-активацію лише за повідомленням із клієнта
+// Дозволяємо форс-активацію лише за повідомленням від клієнта
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
+  if (event?.data?.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
 });
 
-// Перехоплюємо ТІЛЬКИ HTML-навігацію (SPA). JS/CSS/чанки не чіпаємо.
+// Обробляємо ТІЛЬКИ HTML-навігацію, щоб не ламати js/css
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.mode !== 'navigate') return;
 
   event.respondWith((async () => {
     try {
-      // завжди свіжа HTML-сторінка
+      // ніякого кешу для HTML — беремо свіжий
       return await fetch(req, { cache: 'no-store' });
     } catch (e) {
-      // офлайн-фолбек (якщо /index.html десь закешований)
+      // офлайн фолбек
       const cached = await caches.match('/index.html');
       return cached || Response.error();
     }
