@@ -1,9 +1,9 @@
 // public/sw.js
-const VERSION = 'bmb-2025-09-07'; // онови версію щоб перегоріло кешування
+const VERSION = 'bmb-2025-09-07b'; // ↑ bump версії, щоб згоріло кешування
 
 // Не викликаємо skipWaiting автоматично!
 self.addEventListener('install', (event) => {
-  // опційно: можна показати лог
+  // опційно: console.log('[SW]', VERSION, 'installed');
 });
 
 self.addEventListener('activate', (event) => {
