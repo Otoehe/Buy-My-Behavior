@@ -1,55 +1,32 @@
 // src/components/PwaLaunchGuard.tsx
-import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 
-// Визначаємо, що працюємо як встановлена PWA (ярлик на робочому столі)
-function isStandalone() {
-  // Android / Chrome / Edge
-  if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) return true;
+function isStandalone(): boolean {
+  if (window.matchMedia?.('(display-mode: standalone)').matches) return true; // Android/Chrome/Edge
   // iOS Safari
   // @ts-ignore
-  if (typeof (navigator as any).standalone === "boolean" && (navigator as any).standalone) return true;
+  if (typeof (navigator as any).standalone === 'boolean' && (navigator as any).standalone) return true;
   return false;
 }
 
 export default function PwaLaunchGuard() {
-  const nav = useNavigate();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   useEffect(() => {
-    const goMap = () => nav("/map", { replace: true });
+    if (!isStandalone()) return;
 
-    // 1) Перший рендер у standalone → одразу на карту
-    if (isStandalone()) {
-      goMap();
+    // редірект лише один раз за сесію і лише якщо стартуємо з кореня
+    const already = sessionStorage.getItem('bmb.pwa.redirected') === '1';
+    const path = pathname.replace(/\/+$/, '');
+    const isRoot = path === '' || path === '/';
+
+    if (!already && isRoot) {
+      sessionStorage.setItem('bmb.pwa.redirected', '1');
+      navigate('/map', { replace: true });
     }
-
-    // 2) Будь-яке повернення на передній план / повторне відкриття з іконки → на карту
-    const onVisible = () => {
-      if (isStandalone() && document.visibilityState === "visible") {
-        goMap();
-      }
-    };
-    const onFocus = () => {
-      if (isStandalone()) {
-        goMap();
-      }
-    };
-    const onPageShow = () => {
-      if (isStandalone()) {
-        goMap();
-      }
-    };
-
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("pageshow", onPageShow);
-
-    return () => {
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("pageshow", onPageShow);
-    };
-  }, [nav]);
+  }, [pathname, navigate]);
 
   return null;
 }
