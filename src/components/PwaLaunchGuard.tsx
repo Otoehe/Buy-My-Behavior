@@ -1,32 +1,25 @@
 // src/components/PwaLaunchGuard.tsx
 import { useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
-function isStandalone(): boolean {
-  if (window.matchMedia?.('(display-mode: standalone)').matches) return true; // Android/Chrome/Edge
-  // iOS Safari
+function isStandalone() {
+  if (window.matchMedia?.('(display-mode: standalone)').matches) return true;
   // @ts-ignore
   if (typeof (navigator as any).standalone === 'boolean' && (navigator as any).standalone) return true;
   return false;
 }
 
 export default function PwaLaunchGuard() {
-  const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const nav = useNavigate();
 
   useEffect(() => {
-    if (!isStandalone()) return;
-
-    // редірект лише один раз за сесію і лише якщо стартуємо з кореня
-    const already = sessionStorage.getItem('bmb.pwa.redirected') === '1';
-    const path = pathname.replace(/\/+$/, '');
-    const isRoot = path === '' || path === '/';
-
-    if (!already && isRoot) {
-      sessionStorage.setItem('bmb.pwa.redirected', '1');
-      navigate('/map', { replace: true });
+    // одноразово для конкретної сесії
+    const key = 'bmb.pwa.routed.thisSession';
+    if (isStandalone() && !sessionStorage.getItem(key)) {
+      sessionStorage.setItem(key, '1');
+      nav('/map', { replace: true });
     }
-  }, [pathname, navigate]);
+  }, [nav]);
 
   return null;
 }

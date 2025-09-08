@@ -10,34 +10,32 @@
   "background_color": "#ffffff",
   "icons": [
     {
-      "src": "/icons/bmb-192.png",
+      "src": "/icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/bmb-512.png",
+      "src": "/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/bmb-maskable-192.png",
-      "sizes": "192x192",
+      "src": "/icons/apple-touch-icon-180.png",
+      "sizes": "180x180",
       "type": "image/png",
-      "purpose": "maskable"
+      "purpose": "any"
     },
     {
-      "src": "/icons/bmb-maskable-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
+      "src": "/icons/bmb-favicon-16.png",
+      "sizes": "16x16",
+      "type": "image/png"
     },
     {
-      "src": "/icons/bmb-monochrome.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "monochrome"
+      "src": "/icons/favicon-32.png",
+      "sizes": "32x32",
+      "type": "image/png"
     }
   ],
   "prefer_related_applications": false
