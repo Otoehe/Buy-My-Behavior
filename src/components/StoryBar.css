@@ -8,23 +8,24 @@
   gap: 10px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 8px 12px;
+
+  /* компактні відступи (після узгодження) */
+  padding: 2px 3px 4px; /* top 2px, left/right 3px, bottom 4px */
+
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
   align-items: center;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
-}
 
-/* Трохи охайніші скролбари (де підтримується) */
+  /* прибрати системну смужку скролу */
+  -ms-overflow-style: none;  /* IE/Edge legacy */
+  scrollbar-width: none;     /* Firefox */
+}
 .story-bar::-webkit-scrollbar {
-  height: 6px;
-}
-.story-bar::-webkit-scrollbar-thumb {
-  background: rgba(0,0,0,.15);
-  border-radius: 9999px;
-}
-.story-bar::-webkit-scrollbar-track {
+  display: none;             /* Chrome/Safari/Opera */
+  width: 0;
+  height: 0;
   background: transparent;
 }
 
@@ -52,22 +53,23 @@
   transition: transform .12s ease;
 }
 
+/* ⛔ Порожні без медіа — не показуємо */
+.story-bar .story-item:not(:has(.story-video, .thumb, video, img)) {
+  display: none !important;
+}
+
 .story-bar .story-item:active {
   transform: scale(0.97);
 }
 
-/* Відео-прев’ю всередині кружечка: обрізка по колу */
+/* Відео-прев’ю всередині кружечка */
 .story-bar .story-item .story-video {
   width: 100% !important;
   height: 100% !important;
   object-fit: cover !important;
   display: block !important;
-
-  /* підстраховка, якщо контейнер втратить круглу форму */
-  border-radius: 9999px !important;
-
-  /* Щоб клік завжди ловився контейнером story-item */
-  pointer-events: none !important;
+  border-radius: 9999px !important; /* підстраховка */
+  pointer-events: none !important;  /* кліки ловить контейнер */
 }
 
 /* Кнопка “+” для додавання */
@@ -114,4 +116,17 @@
     width: 72px !important;
     height: 72px !important;
   }
+}
+
+/* (необов’язково) альтернативний клас контейнера */
+.behaviors-bar {
+  padding: 2px 3px 4px;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.behaviors-bar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+  background: transparent;
 }
