@@ -1,52 +1,57 @@
-// src/components/SWUpdateToast.tsx
-import React, { useEffect, useState } from 'react';
-import { applyServiceWorkerUpdate } from '../lib/sw-guard';
+// Тихе оновлення Service Worker без будь-якого UI/модалок.
+// Нова версія підхопиться на наступному старті (коли всі вкладки/PWA закриті).
 
-export default function SWUpdateToast() {
-  const [open, setOpen] = useState(false);
+import React, { useEffect } from 'react';
 
+const SWUpdateToast: React.FC = () => {
   useEffect(() => {
-    const onUpdate = () => setOpen(true);
-    window.addEventListener('bmb:sw-update', onUpdate as EventListener);
-    return () => window.removeEventListener('bmb:sw-update', onUpdate as EventListener);
+    if (!('serviceWorker' in navigator)) return;
+
+    // 1) Спробувати Vite PWA (якщо підключений)
+    //    Це безпечно: якщо плагіну немає — просто підемо у fallback.
+    import('virtual:pwa-register')
+      .then(({ registerSW }) => {
+        registerSW({
+          immediate: false,        // не форсимо активацію
+          onNeedRefresh() {},      // без тосту
+          onOfflineReady() {},     // без тосту
+        });
+      })
+      .catch(() => {
+        // 2) Fallback: звичайна реєстрація SW без будь-якого UI
+        const swUrl = '/service-worker.js';
+        window.addEventListener('load', () => {
+          navigator.serviceWorker
+            .register(swUrl)
+            .then((reg) => {
+              // Жодного skipWaiting / reload тут — тихий режим
+              reg.onupdatefound = () => {
+                const w = reg.installing;
+                if (!w) return;
+                w.onstatechange = () => {
+                  // when w.state === 'installed' — нічого не робимо
+                  // новий SW активується на наступному старті
+                };
+              };
+            })
+            .catch((err) => console.warn('[SW register] silent error:', err));
+        });
+      });
+
+    // 3) Запобіжник від випадкових автоперезавантажень
+    let didMark = false;
+    const onCtrlChange = () => {
+      if (didMark) return;
+      didMark = true; // не викликаємо location.reload()
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', onCtrlChange);
+    return () => {
+      navigator.serviceWorker.removeEventListener('controllerchange', onCtrlChange);
+    };
   }, []);
 
-  if (!open) return null;
+  // Нічого не рендеримо — модалки немає.
+  return null;
+};
 
-  return (
-    <div style={wrap}>
-      <div style={card}>
-        <span>Доступна нова версія</span>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button style={btnPrimary} onClick={() => applyServiceWorkerUpdate()}>
-            Оновити
-          </button>
-          <button style={btnGhost} onClick={() => setOpen(false)}>
-            Пізніше
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const wrap: React.CSSProperties = {
-  position: 'fixed', left: 0, right: 0, bottom: 0,
-  display: 'flex', justifyContent: 'center',
-  pointerEvents: 'none', zIndex: 9999
-};
-const card: React.CSSProperties = {
-  pointerEvents: 'auto',
-  background: '#fff', border: '1px solid #eee',
-  boxShadow: '0 12px 28px rgba(0,0,0,.12)',
-  borderRadius: 12, padding: '10px 12px',
-  margin: 12, display: 'flex', alignItems: 'center', gap: 12
-};
-const btnPrimary: React.CSSProperties = {
-  background: '#ffcdd6', color: '#000', border: '1px solid #ffcdd6',
-  borderRadius: 999, padding: '8px 12px', fontWeight: 700, cursor: 'pointer'
-};
-const btnGhost: React.CSSProperties = {
-  background: 'transparent', color: '#111', border: '1px dashed #ffcdd6',
-  borderRadius: 999, padding: '8px 12px', cursor: 'pointer'
-};
+export default SWUpdateToast;
