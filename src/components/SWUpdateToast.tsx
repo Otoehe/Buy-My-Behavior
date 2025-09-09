@@ -1,37 +1,46 @@
 import React, { useEffect } from 'react';
 
 /**
- * Тихий режим оновлення SW:
- * - жодного UI / модалок
- * - жодних skipWaiting / reload
- * - якщо SW вже встановлений — лишається як є
- * - якщо SW ще не було: робимо безпечну спробу зареєструвати /service-worker.js (ігноруємо помилки)
+ * Тихий режим SW:
+ *  - без UI/модалок
+ *  - без skipWaiting / reload
+ *  - не ламає офлайн/кеш
+ *  - нова версія підхопиться на наступному "холодному" старті
  */
 const SWUpdateToast: React.FC = () => {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
 
-    // Запобіжник від випадкових перезавантажень (якщо десь є controllerchange-слухачі)
-    let didMark = false;
-    const onCtrlChange = () => { if (!didMark) didMark = true; /* без reload */ };
+    // Запобіжник від випадкових автоперезавантажень (якщо десь є controllerchange-слухачі)
+    let marked = false;
+    const onCtrlChange = () => { if (!marked) marked = true; /* без location.reload() */ };
     navigator.serviceWorker.addEventListener('controllerchange', onCtrlChange);
 
-    // Безпечна реєстрація лише якщо ще нема registration.
-    // Якщо файл SW відсутній — просто замовкнемо (помилки ігноруємо).
-    navigator.serviceWorker.getRegistration().then((reg) => {
-      if (!reg) {
-        navigator.serviceWorker.register('/service-worker.js').catch(() => {
-          /* no-op: у деяких білдах SW-файла нема — це ок */
-        });
-      }
-    });
+    // Акуратно зареєструвати SW лише якщо файл існує і ще не зареєстрований
+    const CANDIDATES = ['/service-worker.js', '/sw.js', '/sw-esm.js'];
+
+    (async () => {
+      try {
+        const existing = await navigator.serviceWorker.getRegistration();
+        if (existing) return; // вже зареєстровано — нічого не робимо
+
+        for (const url of CANDIDATES) {
+          try {
+            const head = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+            if (!head.ok) continue;
+            await navigator.serviceWorker.register(url);
+            break;
+          } catch { /* no-op, пробуємо наступного кандидата */ }
+        }
+      } catch { /* тихо ігноруємо */ }
+    })();
 
     return () => {
       navigator.serviceWorker.removeEventListener('controllerchange', onCtrlChange);
     };
   }, []);
 
-  return null; // Нічого не показуємо
+  return null; // модалки немає взагалі
 };
 
 export default SWUpdateToast;
