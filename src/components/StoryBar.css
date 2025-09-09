@@ -9,7 +9,7 @@
   overflow-x: auto;
   overflow-y: hidden;
 
-  /* компактні відступи (узгоджено): top 2px, left/right 6px, bottom 4px */
+  /* узгоджено: top 2px, left/right 6px, bottom 4px */
   padding: 2px 6px 4px;
 
   -webkit-overflow-scrolling: touch;
@@ -18,12 +18,12 @@
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 
-  /* прибрати системну смужку скролу */
-  -ms-overflow-style: none;  /* IE/Edge legacy */
-  scrollbar-width: none;     /* Firefox */
+  /* приховати системну смужку скролу */
+  -ms-overflow-style: none;   /* IE/Edge legacy */
+  scrollbar-width: none;      /* Firefox */
 }
 .story-bar::-webkit-scrollbar {
-  display: none;             /* Chrome/Safari/Opera */
+  display: none;              /* Chrome/Safari/Opera */
   width: 0;
   height: 0;
   background: transparent;
@@ -58,9 +58,7 @@
   display: none !important;
 }
 
-.story-bar .story-item:active {
-  transform: scale(0.97);
-}
+.story-bar .story-item:active { transform: scale(0.97); }
 
 /* Відео-прев’ю всередині кружечка */
 .story-bar .story-item .story-video {
