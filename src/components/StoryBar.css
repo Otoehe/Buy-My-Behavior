@@ -9,8 +9,8 @@
   overflow-x: auto;
   overflow-y: hidden;
 
-  /* компактні відступи (після узгодження) */
-  padding: 2px 3px 4px; /* top 2px, left/right 3px, bottom 4px */
+  /* компактні відступи (узгоджено): top 2px, left/right 6px, bottom 4px */
+  padding: 2px 6px 4px;
 
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
@@ -53,8 +53,8 @@
   transition: transform .12s ease;
 }
 
-/* ⛔ Порожні без медіа — не показуємо */
-.story-bar .story-item:not(:has(.story-video, .thumb, video, img)) {
+/* ⛔ Порожні без медіа — не показуємо, АЛЕ не чіпаємо кнопку “+” */
+.story-bar .story-item:not(.add-button):not(:has(.story-video, .thumb, video, img)) {
   display: none !important;
 }
 
@@ -72,8 +72,9 @@
   pointer-events: none !important;  /* кліки ловить контейнер */
 }
 
-/* Кнопка “+” для додавання */
-.story-bar .add-button {
+/* Кнопка “+” для додавання — завжди видима */
+.story-bar .add-button,
+.story-bar .story-item.add-button {
   font-size: 28px !important;
   font-weight: 700 !important;
   color: #111 !important;
@@ -104,7 +105,8 @@
 /* Адаптивні розміри (опційно) */
 @media (max-width: 420px) {
   .story-bar .story-item,
-  .story-bar .add-button {
+  .story-bar .add-button,
+  .story-bar .story-item.add-button {
     width: 56px !important;
     height: 56px !important;
   }
@@ -112,7 +114,8 @@
 
 @media (min-width: 1200px) {
   .story-bar .story-item,
-  .story-bar .add-button {
+  .story-bar .add-button,
+  .story-bar .story-item.add-button {
     width: 72px !important;
     height: 72px !important;
   }
@@ -120,7 +123,7 @@
 
 /* (необов’язково) альтернативний клас контейнера */
 .behaviors-bar {
-  padding: 2px 3px 4px;
+  padding: 2px 6px 4px; /* синхронізовано з .story-bar */
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
