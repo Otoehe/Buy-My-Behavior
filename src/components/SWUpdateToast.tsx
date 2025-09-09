@@ -1,57 +1,37 @@
-// Тихе оновлення Service Worker без будь-якого UI/модалок.
-// Нова версія підхопиться на наступному старті (коли всі вкладки/PWA закриті).
-
 import React, { useEffect } from 'react';
 
+/**
+ * Тихий режим оновлення SW:
+ * - жодного UI / модалок
+ * - жодних skipWaiting / reload
+ * - якщо SW вже встановлений — лишається як є
+ * - якщо SW ще не було: робимо безпечну спробу зареєструвати /service-worker.js (ігноруємо помилки)
+ */
 const SWUpdateToast: React.FC = () => {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
 
-    // 1) Спробувати Vite PWA (якщо підключений)
-    //    Це безпечно: якщо плагіну немає — просто підемо у fallback.
-    import('virtual:pwa-register')
-      .then(({ registerSW }) => {
-        registerSW({
-          immediate: false,        // не форсимо активацію
-          onNeedRefresh() {},      // без тосту
-          onOfflineReady() {},     // без тосту
-        });
-      })
-      .catch(() => {
-        // 2) Fallback: звичайна реєстрація SW без будь-якого UI
-        const swUrl = '/service-worker.js';
-        window.addEventListener('load', () => {
-          navigator.serviceWorker
-            .register(swUrl)
-            .then((reg) => {
-              // Жодного skipWaiting / reload тут — тихий режим
-              reg.onupdatefound = () => {
-                const w = reg.installing;
-                if (!w) return;
-                w.onstatechange = () => {
-                  // when w.state === 'installed' — нічого не робимо
-                  // новий SW активується на наступному старті
-                };
-              };
-            })
-            .catch((err) => console.warn('[SW register] silent error:', err));
-        });
-      });
-
-    // 3) Запобіжник від випадкових автоперезавантажень
+    // Запобіжник від випадкових перезавантажень (якщо десь є controllerchange-слухачі)
     let didMark = false;
-    const onCtrlChange = () => {
-      if (didMark) return;
-      didMark = true; // не викликаємо location.reload()
-    };
+    const onCtrlChange = () => { if (!didMark) didMark = true; /* без reload */ };
     navigator.serviceWorker.addEventListener('controllerchange', onCtrlChange);
+
+    // Безпечна реєстрація лише якщо ще нема registration.
+    // Якщо файл SW відсутній — просто замовкнемо (помилки ігноруємо).
+    navigator.serviceWorker.getRegistration().then((reg) => {
+      if (!reg) {
+        navigator.serviceWorker.register('/service-worker.js').catch(() => {
+          /* no-op: у деяких білдах SW-файла нема — це ок */
+        });
+      }
+    });
+
     return () => {
       navigator.serviceWorker.removeEventListener('controllerchange', onCtrlChange);
     };
   }, []);
 
-  // Нічого не рендеримо — модалки немає.
-  return null;
+  return null; // Нічого не показуємо
 };
 
 export default SWUpdateToast;
