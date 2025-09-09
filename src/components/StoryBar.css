@@ -10,7 +10,8 @@
   overflow-y: hidden;
 
   /* узгоджено: top 2px, left/right 6px, bottom 4px */
-  padding: 2px 6px 4px;
+  padding: 2px 6px 4px !important; /* підсилюємо, щоб ніхто зверху не перетис */
+  box-sizing: border-box;
 
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
@@ -22,11 +23,19 @@
   -ms-overflow-style: none;   /* IE/Edge legacy */
   scrollbar-width: none;      /* Firefox */
 }
+/* Chrome/Safari/Opera */
 .story-bar::-webkit-scrollbar {
-  display: none;              /* Chrome/Safari/Opera */
+  display: none;
   width: 0;
   height: 0;
   background: transparent;
+}
+
+/* Прокладки по краях, щоб перший/останній кружок не прилипали */
+.story-bar::before,
+.story-bar::after {
+  content: "";
+  flex: 0 0 6px;  /* той самий зазор, що й у padding left/right */
 }
 
 /* Кружечок-елемент */
@@ -109,7 +118,6 @@
     height: 56px !important;
   }
 }
-
 @media (min-width: 1200px) {
   .story-bar .story-item,
   .story-bar .add-button,
@@ -119,9 +127,10 @@
   }
 }
 
-/* (необов’язково) альтернативний клас контейнера */
+/* (необов’язково) альтернативний клас контейнера — синхронізований */
 .behaviors-bar {
-  padding: 2px 6px 4px; /* синхронізовано з .story-bar */
+  padding: 2px 6px 4px !important;
+  box-sizing: border-box;
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
@@ -130,4 +139,9 @@
   width: 0;
   height: 0;
   background: transparent;
+}
+.behaviors-bar::before,
+.behaviors-bar::after {
+  content: "";
+  flex: 0 0 6px;
 }
