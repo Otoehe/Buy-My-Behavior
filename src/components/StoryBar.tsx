@@ -9,13 +9,13 @@ import DisputeBadge from './DisputeBadge';
 interface Behavior {
   id: number;
   user_id: string | null;
-  title: string | null;                // ⬅️ будемо показувати як підпис (якщо є)
+  title: string | null;                 // показуємо як підпис, якщо є
   description: string | null;
   ipfs_cid: string | null;
   file_url?: string | null;            // fallback-джерело
   created_at: string;
   is_dispute_evidence?: boolean | null; // помітка для спору
-  dispute_id?: string | null;           // ⬅️ для навігації у спір
+  dispute_id?: string | null;           // для навігації у спір
 }
 
 export default function StoryBar() {
@@ -23,13 +23,11 @@ export default function StoryBar() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const navigate = useNavigate();
 
-  // мобайл-фьорст «бічний відступ»
+  // Гаттери по краях
   const SIDE_GUTTER = 'clamp(12px, 2.5vw, 24px)';
-  // вертикальні відступи: достатньо місця для жовтого бейджа зверху і підпису знизу
-  const VERTICAL_PAD = 'clamp(12px, 2.2vw, 18px)';     // внутрішні відступи бару
-  const VERTICAL_MARGIN = 'clamp(6px, 1.2vw, 12px)';   // зовнішній «просвіт» бару
-  // інтервал між кружечком і підписом
-  const CAPTION_GAP = '6px';
+  // Невеликі вертикальні паддінги всередині, щоб вмістився бейдж і підпис
+  const PAD_TOP = '10px';
+  const PAD_BOTTOM = '12px'; // трохи більше знизу під потенційний підпис
 
   const fetchBehaviors = async () => {
     const { data, error } = await supabase
@@ -76,18 +74,17 @@ export default function StoryBar() {
   const resolveSrc = (b: Behavior) =>
     b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url || '');
 
-  // універсальний стиль картки (кружок + підпис)
+  // Карточка сторі: кружечок + (опційний) підпис
   const cardStyle: React.CSSProperties = {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: CAPTION_GAP,
+    gap: '6px',        // відстань між кружечком і підписом
     width: 'max-content',
   };
 
-  // стиль підпису під кружечком
   const captionStyle: React.CSSProperties = {
-    maxWidth: 'var(--story-size)',
+    maxWidth: 'var(--story-size, 64px)',
     fontSize: '12px',
     lineHeight: 1,
     color: '#000',
@@ -102,23 +99,24 @@ export default function StoryBar() {
       <div
         className="story-bar"
         onClick={(e) => e.stopPropagation()}
-        // ✅ Стилі: білий фон (щоб «чорні лінії» були білі), вертикальні + горизонтальні відступи
+        // ✅ тонкі білі лінії зверху/знизу + компактні вертикальні відступи
         style={{
-          background: '#fff',
-          // горизонтальні гаттери
+          borderTop: '6px solid #fff',
+          borderBottom: '6px solid #fff',
+          background: 'transparent', // не робимо суцільну білу смугу
+          paddingTop: `max(${PAD_TOP}, env(safe-area-inset-top))`,
+          paddingBottom: `max(${PAD_BOTTOM}, env(safe-area-inset-bottom))`,
+          // гаттери зліва/праворуч
           paddingLeft: `max(${SIDE_GUTTER}, env(safe-area-inset-left))`,
           paddingRight: `max(${SIDE_GUTTER}, env(safe-area-inset-right))`,
           scrollPaddingLeft: `max(${SIDE_GUTTER}, env(safe-area-inset-left))`,
           scrollPaddingRight: `max(${SIDE_GUTTER}, env(safe-area-inset-right))`,
-          // вертикальні відступи всередині бару (місце для жовтого кружечка та підпису)
-          paddingTop: `max(${VERTICAL_PAD}, env(safe-area-inset-top))`,
-          paddingBottom: `max(${VERTICAL_PAD}, env(safe-area-inset-bottom))`,
-          // «просвіт» зверху/знизу, щоб бар не прилипав до навбару/карти
-          marginTop: VERTICAL_MARGIN,
-          marginBottom: VERTICAL_MARGIN,
+          // зовнішні марджини не потрібні — відділення роблять білі лінії
+          marginTop: 0,
+          marginBottom: 0,
         }}
       >
-        {/* Add button as a card (опційний підпис можна додати пізніше) */}
+        {/* Add button як картка (без підпису) */}
         <div style={cardStyle} onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
@@ -131,8 +129,6 @@ export default function StoryBar() {
           >
             ＋
           </button>
-          {/* за потреби можна показати підпис «Додати» */}
-          {/* <div style={captionStyle}>Додати</div> */}
         </div>
 
         {behaviors.map((b) => {
@@ -159,8 +155,8 @@ export default function StoryBar() {
                 />
                 <DisputeBadge show={b.is_dispute_evidence} />
               </div>
-              {/* Підпис під кружечком (ім’я/титул). Поки що показуємо title, якщо є. */}
-              {b.title ? <div style={captionStyle}>{b.title}</div> : <div style={captionStyle} />}
+              {/* Підпис показуємо ТІЛЬКИ якщо є title — без порожньої висоти */}
+              {b.title && <div style={captionStyle}>{b.title}</div>}
             </div>
           );
         })}
