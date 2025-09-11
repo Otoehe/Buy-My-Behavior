@@ -1,147 +1,96 @@
-/* ─────────────────────────────────────────────────────────────
-   StoryBar — горизонтальна стрічка “сторіз” з кружечками
-   ЖОДНИХ змін у TSX/логіці не потрібно.
-   ───────────────────────────────────────────────────────────── */
+/* 📄 src/components/StoryBar.css — новий стиль сторісбару з великими кружечками */
 
 .story-bar {
   display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  overflow-y: hidden;
-
-  /* узгоджено: top 2px, left/right 6px, bottom 4px */
-  padding: 2px 6px 4px !important; /* підсилюємо, щоб ніхто зверху не перетис */
-  box-sizing: border-box;
-
-  -webkit-overflow-scrolling: touch;
-  scroll-behavior: smooth;
   align-items: center;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-
-  /* приховати системну смужку скролу */
-  -ms-overflow-style: none;   /* IE/Edge legacy */
-  scrollbar-width: none;      /* Firefox */
+  overflow-x: auto;
+  padding: 12px 8px;
+  gap: 12px;
+  background: #ffffff;                 /* біла смуга під навбаром */
+  border-bottom: 1px solid #ddd;
+  height: 120px;                       /* місце для кружка + підпису */
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
 }
-/* Chrome/Safari/Opera */
-.story-bar::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
+
+/* ховаємо скролбар акуратно */
+.story-bar::-webkit-scrollbar { display: none; }
+.story-bar { scrollbar-width: none; -ms-overflow-style: none; }
+
+.story-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  width: 84px;                         /* ширина картки (кружок + підпис) */
+  flex: 0 0 auto;
+  cursor: pointer;
   background: transparent;
+  border: none;
 }
 
-/* Прокладки по краях, щоб перший/останній кружок не прилипали */
-.story-bar::before,
-.story-bar::after {
-  content: "";
-  flex: 0 0 6px;  /* той самий зазор, що й у padding left/right */
+/* Кружечок */
+.story-circle {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  background-size: cover;
+  background-position: center;
+  border: 3px solid #8cd3e9;          /* акцентний колір як у макеті */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  position: relative;                  /* для бейджа всередині */
+  overflow: hidden;                    /* щоб відео обрізалось по колу */
 }
 
-/* Кружечок-елемент */
-.story-bar .story-item {
-  width: 64px !important;
-  height: 64px !important;
-  aspect-ratio: 1 / 1;
-  flex: 0 0 auto !important;
+/* Фул-кавер відео всередині кружечка */
+.story-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: inherit;              /* повторює круг */
+  pointer-events: none;                /* кліки ловить картка */
+}
 
-  border-radius: 9999px !important;
-  overflow: hidden !important;
+.story-circle:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
 
-  border: 2px solid #fff !important;
-  box-shadow: 0 4px 10px rgba(0,0,0,.15) !important;
+/* Підпис під кружечком */
+.story-label {
+  font-size: 13px;
+  margin-top: 6px;
+  text-align: center;
+  color: #333;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 80px;
+  overflow: hidden;
+  line-height: 1.1;
+}
 
-  position: relative !important;
-  background: #f4f4f4 !important;
-
-  display: inline-flex;
+/* Кнопка «плюс» */
+.add-button .story-circle {
+  display: flex;
   align-items: center;
   justify-content: center;
-
-  cursor: pointer;
-  transition: transform .12s ease;
+  font-size: 20px;
+  font-weight: bold;
+  color: #fff;
+  background: linear-gradient(135deg, #8cd3e9, #90caf9);
+  border: none;
 }
 
-/* ⛔ Порожні без медіа — не показуємо, АЛЕ не чіпаємо кнопку “+” */
-.story-bar .story-item:not(.add-button):not(:has(.story-video, .thumb, video, img)) {
-  display: none !important;
+.add-button .story-circle:hover {
+  transform: scale(1.1);
+  background: linear-gradient(135deg, #64b5f6, #4fc3f7);
 }
 
-.story-bar .story-item:active { transform: scale(0.97); }
-
-/* Відео-прев’ю всередині кружечка */
-.story-bar .story-item .story-video {
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: cover !important;
-  display: block !important;
-  border-radius: 9999px !important; /* підстраховка */
-  pointer-events: none !important;  /* кліки ловить контейнер */
-}
-
-/* Кнопка “+” для додавання — завжди видима */
-.story-bar .add-button,
-.story-bar .story-item.add-button {
-  font-size: 28px !important;
-  font-weight: 700 !important;
-  color: #111 !important;
-  background: #fff !important;
-
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-
-  width: 64px !important;
-  height: 64px !important;
-  aspect-ratio: 1 / 1;
-  border-radius: 9999px !important;
-  border: 2px solid #fff !important;
-  box-shadow: 0 4px 10px rgba(0,0,0,.15) !important;
-  cursor: pointer;
-}
-
-/* Якщо в DisputeBadge є кореневий клас — заякоримо у куті (необов’язково) */
-.story-bar .story-item .dispute-badge,
-.story-bar .story-item .DisputeBadge {
-  position: absolute;
-  right: -2px;
-  bottom: -2px;
-  z-index: 2;
-}
-
-/* Адаптивні розміри (опційно) */
-@media (max-width: 420px) {
-  .story-bar .story-item,
-  .story-bar .add-button,
-  .story-bar .story-item.add-button {
-    width: 56px !important;
-    height: 56px !important;
-  }
-}
-@media (min-width: 1200px) {
-  .story-bar .story-item,
-  .story-bar .add-button,
-  .story-bar .story-item.add-button {
-    width: 72px !important;
-    height: 72px !important;
-  }
-}
-
-/* (необов’язково) альтернативний клас контейнера — синхронізований */
-.behaviors-bar {
-  padding: 2px 6px 4px !important;
-  box-sizing: border-box;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-.behaviors-bar::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
-  background: transparent;
-}
-.behaviors-bar::before,
-.behaviors-bar::after {
-  content: "";
-  flex: 0 0 6px;
+/* (Опційно) трохи більші кружечки на дуже широких екранах */
+@media (min-width: 1400px) {
+  .story-item { width: 92px; }
+  .story-circle { width: 92px; height: 92px; }
+  .story-label { max-width: 88px; }
 }
