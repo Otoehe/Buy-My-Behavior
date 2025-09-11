@@ -1,14 +1,22 @@
-/* 📄 src/components/StoryBar.css — новий стиль сторісбару з великими кружечками */
+/* 📄 src/components/StoryBar.css — ширший по вертикалі, 2-рядкові підписи */
 
 .story-bar {
   display: flex;
   align-items: center;
   overflow-x: auto;
-  padding: 12px 8px;
+
+  /* ⬇️ Більші вертикальні паддінги + зазор під навбаром */
+  margin-top: 8px;                 /* відступ від навбару */
+  padding: 16px 12px 18px;         /* зверху/знизу більше повітря */
   gap: 12px;
-  background: #ffffff;                 /* біла смуга під навбаром */
+
+  background: #ffffff;
+  border-top: 1px solid #eee;      /* біла смуга-роздільник зверху */
   border-bottom: 1px solid #ddd;
-  height: 120px;                       /* місце для кружка + підпису */
+
+  /* ⬇️ Збільшена загальна висота, щоб не “тиснулось” */
+  height: 152px;
+
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
 }
@@ -22,7 +30,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  width: 84px;                         /* ширина картки (кружок + підпис) */
+
+  width: 84px;           /* картка: кружок + підпис */
   flex: 0 0 auto;
   cursor: pointer;
   background: transparent;
@@ -36,21 +45,21 @@
   border-radius: 50%;
   background-size: cover;
   background-position: center;
-  border: 3px solid #8cd3e9;          /* акцентний колір як у макеті */
+  border: 3px solid #8cd3e9;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
-  position: relative;                  /* для бейджа всередині */
-  overflow: hidden;                    /* щоб відео обрізалось по колу */
+  position: relative;    /* для бейджа */
+  overflow: hidden;      /* відео обрізається по колу */
 }
 
-/* Фул-кавер відео всередині кружечка */
+/* Відео всередині кружечка */
 .story-video {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: cover;
-  border-radius: inherit;              /* повторює круг */
-  pointer-events: none;                /* кліки ловить картка */
+  border-radius: inherit;
+  pointer-events: none;
 }
 
 .story-circle:hover {
@@ -58,17 +67,22 @@
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
 }
 
-/* Підпис під кружечком */
+/* Підпис: 2 рядки з обрізанням, щоб імена вміщувались */
 .story-label {
   font-size: 13px;
   margin-top: 6px;
   text-align: center;
   color: #333;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  max-width: 80px;
+
+  max-width: 84px;
+  line-height: 1.15;
   overflow: hidden;
-  line-height: 1.1;
+
+  /* багаторядкове обрізання */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;           /* ← 2 рядки */
+  -webkit-box-orient: vertical;
+  white-space: normal;             /* дозволяємо перенос */
 }
 
 /* Кнопка «плюс» */
@@ -88,9 +102,10 @@
   background: linear-gradient(135deg, #64b5f6, #4fc3f7);
 }
 
-/* (Опційно) трохи більші кружечки на дуже широких екранах */
+/* Трохи більші кружечки на дуже широких екранах */
 @media (min-width: 1400px) {
   .story-item { width: 92px; }
   .story-circle { width: 92px; height: 92px; }
-  .story-label { max-width: 88px; }
+  .story-label { max-width: 92px; }
 }
+
