@@ -9,7 +9,7 @@ import DisputeBadge from './DisputeBadge';
 interface Behavior {
   id: number;
   user_id: string | null;
-  title: string | null;
+  title: string | null;                // ⬅️ будемо показувати як підпис (якщо є)
   description: string | null;
   ipfs_cid: string | null;
   file_url?: string | null;            // fallback-джерело
@@ -23,11 +23,13 @@ export default function StoryBar() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const navigate = useNavigate();
 
-  // мобайл-фьорст «бічний відступ» (не лізе в логіку, лише стилі)
+  // мобайл-фьорст «бічний відступ»
   const SIDE_GUTTER = 'clamp(12px, 2.5vw, 24px)';
-  // ✅ вертикальні відступи, щоб кружечки не прилипали ні до навбару, ні до карти
-  const VERTICAL_PAD = 'clamp(10px, 1.8vw, 16px)';     // внутрішні відступи бару
-  const VERTICAL_MARGIN = 'clamp(6px, 1.2vw, 12px)';   // зовнішній «просвіт» бару від сусідів
+  // вертикальні відступи: достатньо місця для жовтого бейджа зверху і підпису знизу
+  const VERTICAL_PAD = 'clamp(12px, 2.2vw, 18px)';     // внутрішні відступи бару
+  const VERTICAL_MARGIN = 'clamp(6px, 1.2vw, 12px)';   // зовнішній «просвіт» бару
+  // інтервал між кружечком і підписом
+  const CAPTION_GAP = '6px';
 
   const fetchBehaviors = async () => {
     const { data, error } = await supabase
@@ -74,66 +76,94 @@ export default function StoryBar() {
   const resolveSrc = (b: Behavior) =>
     b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url || '');
 
+  // універсальний стиль картки (кружок + підпис)
+  const cardStyle: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: CAPTION_GAP,
+    width: 'max-content',
+  };
+
+  // стиль підпису під кружечком
+  const captionStyle: React.CSSProperties = {
+    maxWidth: 'var(--story-size)',
+    fontSize: '12px',
+    lineHeight: 1,
+    color: '#000',
+    textAlign: 'center',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  };
+
   return (
     <>
       <div
         className="story-bar"
         onClick={(e) => e.stopPropagation()}
-        // ✅ лише стилі: додаємо бічні та вертикальні відступи, враховуємо safe-area
+        // ✅ Стилі: білий фон (щоб «чорні лінії» були білі), вертикальні + горизонтальні відступи
         style={{
+          background: '#fff',
           // горизонтальні гаттери
           paddingLeft: `max(${SIDE_GUTTER}, env(safe-area-inset-left))`,
           paddingRight: `max(${SIDE_GUTTER}, env(safe-area-inset-right))`,
           scrollPaddingLeft: `max(${SIDE_GUTTER}, env(safe-area-inset-left))`,
           scrollPaddingRight: `max(${SIDE_GUTTER}, env(safe-area-inset-right))`,
-
-          // 🔝🔻 вертикальні відступи всередині бару
+          // вертикальні відступи всередині бару (місце для жовтого кружечка та підпису)
           paddingTop: `max(${VERTICAL_PAD}, env(safe-area-inset-top))`,
           paddingBottom: `max(${VERTICAL_PAD}, env(safe-area-inset-bottom))`,
-
           // «просвіт» зверху/знизу, щоб бар не прилипав до навбару/карти
           marginTop: VERTICAL_MARGIN,
           marginBottom: VERTICAL_MARGIN,
         }}
       >
-        <button
-          type="button"
-          className="story-item add-button"
-          onClick={(e) => { e.stopPropagation(); setIsUploadOpen(true); }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          aria-label="Додати Behavior"
-        >
-          ＋
-        </button>
-
-        {behaviors.map((b) => (
-          <div
-            key={b.id}
-            className="story-item"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (b.is_dispute_evidence && b.dispute_id) {
-                navigate(`/behaviors?dispute=${b.dispute_id}`);
-              } else {
-                openFeed();
-              }
-            }}
-            title={b.description || undefined}
+        {/* Add button as a card (опційний підпис можна додати пізніше) */}
+        <div style={cardStyle} onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className="story-item add-button"
+            onClick={(e) => { e.stopPropagation(); setIsUploadOpen(true); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            aria-label="Додати Behavior"
+            title="Додати Behavior"
           >
-            <video
-              src={resolveSrc(b)}
-              autoPlay
-              loop
-              muted
-              playsInline
-              preload="auto"
-              onEnded={(e) => { const v = e.currentTarget; v.currentTime = 0; v.play(); }}
-              className="story-video"
-            />
-            <DisputeBadge show={b.is_dispute_evidence} />
-          </div>
-        ))}
+            ＋
+          </button>
+          {/* за потреби можна показати підпис «Додати» */}
+          {/* <div style={captionStyle}>Додати</div> */}
+        </div>
+
+        {behaviors.map((b) => {
+          const go = (e: React.MouseEvent) => {
+            e.stopPropagation();
+            if (b.is_dispute_evidence && b.dispute_id) {
+              navigate(`/behaviors?dispute=${b.dispute_id}`);
+            } else {
+              openFeed();
+            }
+          };
+          return (
+            <div key={b.id} style={cardStyle} onClick={go} title={b.description || undefined}>
+              <div className="story-item" aria-label={b.title ?? 'Behavior'}>
+                <video
+                  src={resolveSrc(b)}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  preload="auto"
+                  onEnded={(e) => { const v = e.currentTarget; v.currentTime = 0; v.play(); }}
+                  className="story-video"
+                />
+                <DisputeBadge show={b.is_dispute_evidence} />
+              </div>
+              {/* Підпис під кружечком (ім’я/титул). Поки що показуємо title, якщо є. */}
+              {b.title ? <div style={captionStyle}>{b.title}</div> : <div style={captionStyle} />}
+            </div>
+          );
+        })}
       </div>
 
       {isUploadOpen && (
