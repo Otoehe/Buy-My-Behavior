@@ -25,6 +25,9 @@ export default function StoryBar() {
 
   // мобайл-фьорст «бічний відступ» (не лізе в логіку, лише стилі)
   const SIDE_GUTTER = 'clamp(12px, 2.5vw, 24px)';
+  // ✅ вертикальні відступи, щоб кружечки не прилипали ні до навбару, ні до карти
+  const VERTICAL_PAD = 'clamp(10px, 1.8vw, 16px)';     // внутрішні відступи бару
+  const VERTICAL_MARGIN = 'clamp(6px, 1.2vw, 12px)';   // зовнішній «просвіт» бару від сусідів
 
   const fetchBehaviors = async () => {
     const { data, error } = await supabase
@@ -76,13 +79,21 @@ export default function StoryBar() {
       <div
         className="story-bar"
         onClick={(e) => e.stopPropagation()}
-        // ✅ лише стилі: додаємо бокові «гаттери», враховуємо safe-area на мобільних
+        // ✅ лише стилі: додаємо бічні та вертикальні відступи, враховуємо safe-area
         style={{
+          // горизонтальні гаттери
           paddingLeft: `max(${SIDE_GUTTER}, env(safe-area-inset-left))`,
           paddingRight: `max(${SIDE_GUTTER}, env(safe-area-inset-right))`,
-          // невеликий «scroll-padding», щоб перший/останній айтем не прилипав при прокрутці
           scrollPaddingLeft: `max(${SIDE_GUTTER}, env(safe-area-inset-left))`,
           scrollPaddingRight: `max(${SIDE_GUTTER}, env(safe-area-inset-right))`,
+
+          // 🔝🔻 вертикальні відступи всередині бару
+          paddingTop: `max(${VERTICAL_PAD}, env(safe-area-inset-top))`,
+          paddingBottom: `max(${VERTICAL_PAD}, env(safe-area-inset-bottom))`,
+
+          // «просвіт» зверху/знизу, щоб бар не прилипав до навбару/карти
+          marginTop: VERTICAL_MARGIN,
+          marginBottom: VERTICAL_MARGIN,
         }}
       >
         <button
