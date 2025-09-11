@@ -23,6 +23,9 @@ export default function StoryBar() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const navigate = useNavigate();
 
+  // мобайл-фьорст «бічний відступ» (не лізе в логіку, лише стилі)
+  const SIDE_GUTTER = 'clamp(12px, 2.5vw, 24px)';
+
   const fetchBehaviors = async () => {
     const { data, error } = await supabase
       .from('behaviors')
@@ -70,7 +73,18 @@ export default function StoryBar() {
 
   return (
     <>
-      <div className="story-bar" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="story-bar"
+        onClick={(e) => e.stopPropagation()}
+        // ✅ лише стилі: додаємо бокові «гаттери», враховуємо safe-area на мобільних
+        style={{
+          paddingLeft: `max(${SIDE_GUTTER}, env(safe-area-inset-left))`,
+          paddingRight: `max(${SIDE_GUTTER}, env(safe-area-inset-right))`,
+          // невеликий «scroll-padding», щоб перший/останній айтем не прилипав при прокрутці
+          scrollPaddingLeft: `max(${SIDE_GUTTER}, env(safe-area-inset-left))`,
+          scrollPaddingRight: `max(${SIDE_GUTTER}, env(safe-area-inset-right))`,
+        }}
+      >
         <button
           type="button"
           className="story-item add-button"
