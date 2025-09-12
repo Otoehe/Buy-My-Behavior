@@ -1,80 +1,112 @@
-/* Горизонтальна стрічка «сторіс» */
+/* 📄 src/components/StoryBar.css — ширший по вертикалі, 2-рядкові підписи, відео без кропу */
+
 .story-bar {
-  display: flex;                   /* кружечки в ряд */
-  align-items: center;             /* центруємо по висоті */
-  gap: 12px;                       /* відступи між кружечками */
-  padding: 10px 14px;              /* внутрішні відступи */
-  overflow-x: auto;                /* горизонтальний скрол */
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+
+  /* відступ від навбару + більше повітря всередині */
+  margin-top: 8px;
+  padding: 16px 12px 18px;   /* top / left-right / bottom */
+  gap: 12px;
+
+  background: #ffffff;
+  border-top: 1px solid #eee;
+  border-bottom: 1px solid #ddd;
+
+  /* висота, щоб умістились: кружок + 2 рядки підпису + бейдж */
+  height: 152px;
+
+  scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
-  background: transparent;         /* без білої смуги по краях екрана */
-  scroll-snap-type: x mandatory;   /* прилипання під час скролу */
-  border: 0;                       /* жодних рамок контейнера */
 }
 
-/* Базовий кружечок */
+/* ховаємо скролбар акуратно */
+.story-bar::-webkit-scrollbar { display: none; }
+.story-bar { scrollbar-width: none; -ms-overflow-style: none; }
+
 .story-item {
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+
+  width: 84px;          /* картка: кружок + підпис */
   flex: 0 0 auto;
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  overflow: hidden;                /* вміст строго по колу */
-  background: #f7f8fa;
-  border: 2px solid #fff;          /* ЄДИНА біла ОКАНТОВКА */
-  box-shadow: 0 8px 16px rgba(0,0,0,.14); /* м’яка тінь */
   cursor: pointer;
-  scroll-snap-align: start;
-  transition: transform .15s ease, box-shadow .15s ease;
+  background: transparent;
+  border: none;
 }
 
-/* Контент усередині кружечка */
-.story-media {
-  display: block;
+/* Кружечок */
+.story-circle {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  border: 3px solid #8cd3e9;          /* акцентний колір */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  position: relative;                  /* для бейджа */
+  overflow: hidden;                    /* обрізка по колу */
+  background: #fff;                    /* фон під відео при contain */
+}
+
+.story-circle:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+/* Відео всередині кружечка — повністю видно (без кропу) */
+.story-video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  border-radius: 50%;
-  object-fit: cover;
+  object-fit: contain;                 /* ⬅️ важливо: без збільшення і кропу */
+  object-position: center center;
+  display: block;
+  border-radius: inherit;
+  background: #fff;
+  pointer-events: none;
 }
 
-/* Кнопка «+» стилістично — той самий кружечок */
-.add-button {
-  display: inline-flex;
+/* Підпис: 2 рядки, щоб довгі імена влазили */
+.story-label {
+  font-size: 13px;
+  margin-top: 6px;
+  text-align: center;
+  color: #333;
+
+  max-width: 84px;
+  line-height: 1.15;
+  overflow: hidden;
+
+  display: -webkit-box;
+  -webkit-line-clamp: 2;               /* до 2 рядків */
+  -webkit-box-orient: vertical;
+  white-space: normal;
+}
+
+/* Кнопка “＋ Додати” */
+.add-button .story-circle {
+  display: flex;
   align-items: center;
   justify-content: center;
-  background: #eef2f5;
-  color: #5f6b7a;
-}
-.add-button .plus-icon { display:block; pointer-events:none; }
-
-.story-item:hover { transform: translateY(-1px); }
-.story-item:active { transform: scale(.97); }
-
-/* Приховуємо скролбар */
-.story-bar::-webkit-scrollbar { display: none; }
-.story-bar { -ms-overflow-style: none; scrollbar-width: none; }
-
-/* Мобільні */
-@media (max-width: 768px) {
-  .story-bar { gap: 10px; padding: 8px 10px; }
-  .story-item { width: 58px; height: 58px; }
-}
-@media (max-width: 360px) {
-  .story-item { width: 54px; height: 54px; }
+  font-size: 20px;
+  font-weight: bold;
+  color: #fff;
+  background: linear-gradient(135deg, #8cd3e9, #90caf9);
+  border: none;
 }
 
-/* Темна тема */
-@media (prefers-color-scheme: dark) {
-  .story-item {
-    border-color: #0f1114;
-    background: #0f1114;
-    box-shadow: 0 8px 20px rgba(0,0,0,.55);
-  }
-  .add-button { background:#1a1d22; color:#aab3c0; }
+.add-button .story-circle:hover {
+  transform: scale(1.1);
+  background: linear-gradient(135deg, #64b5f6, #4fc3f7);
 }
 
-/* Підвантаження */
-.story-loading {
-  font-size: 12px;
-  color: #94a3b8;
-  padding: 6px 4px;
+/* Трохи більші кружечки на дуже широких екранах */
+@media (min-width: 1400px) {
+  .story-item { width: 92px; }
+  .story-circle { width: 92px; height: 92px; }
+  .story-label { max-width: 92px; }
 }
