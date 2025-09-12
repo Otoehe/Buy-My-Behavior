@@ -1,4 +1,4 @@
-/* 📄 src/components/StoryBar.css — ширший по вертикалі, 2-рядкові підписи, відео без кропу */
+/* ширший по вертикалі, 2-рядкові підписи, відео без кропу, фікси для button */
 
 .story-bar {
   position: relative;
@@ -7,9 +7,8 @@
   align-items: center;
   overflow-x: auto;
 
-  /* відступ від навбару + більше повітря всередині */
-  margin-top: 8px;
-  padding: 16px 12px 18px;   /* top | left-right | bottom */
+  margin-top: 8px;           /* зазор під навбаром */
+  padding: 16px 12px 18px;   /* top | sides | bottom */
   gap: 12px;
 
   background: #ffffff;
@@ -51,14 +50,13 @@
   width: 84px;
   height: 84px;
   border-radius: 50%;
-  border: 3px solid #8cd3e9;          /* акцентний колір */
+  border: 3px solid #8cd3e9;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
-  position: relative;                  /* для бейджа */
-  overflow: hidden;                    /* обрізка по колу */
-  background: #fff;                    /* фон під відео при contain */
+  position: relative;          /* для бейджа/відео */
+  overflow: hidden;            /* обрізка по колу */
+  background: #fff;            /* фон під відео при contain */
 }
-
 .story-circle:hover {
   transform: scale(1.05);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
@@ -70,7 +68,7 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: contain;                 /* показуємо весь кадр */
+  object-fit: contain;         /* показуємо весь кадр */
   object-position: center center;
   display: block;
   border-radius: inherit;
@@ -90,7 +88,7 @@
   overflow: hidden;
 
   display: -webkit-box;
-  -webkit-line-clamp: 2;               /* до 2 рядків */
+  -webkit-line-clamp: 2;       /* до 2 рядків */
   -webkit-box-orient: vertical;
   white-space: normal;
 }
@@ -106,7 +104,6 @@
   background: linear-gradient(135deg, #8cd3e9, #90caf9);
   border: none;
 }
-
 .add-button .story-circle:hover {
   transform: scale(1.1);
   background: linear-gradient(135deg, #64b5f6, #4fc3f7);
