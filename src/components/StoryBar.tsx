@@ -9,13 +9,13 @@ import DisputeBadge from "./DisputeBadge";
 interface Behavior {
   id: number;
   user_id: string | null;
-  title: string | null;                 // показуємо як підпис (якщо є)
+  title: string | null;                 // підпис (якщо є)
   description: string | null;
   ipfs_cid: string | null;
-  file_url?: string | null;             // fallback-джерело
+  file_url?: string | null;             // fallback
   created_at: string;
   is_dispute_evidence?: boolean | null; // помітка для спору
-  dispute_id?: string | null;           // для навігації у спір
+  dispute_id?: string | null;           // id спору
 }
 
 export default function StoryBar() {
@@ -66,7 +66,7 @@ export default function StoryBar() {
 
   const openFeed = () => navigate("/behaviors");
 
-  // Якщо ipfs_cid порожній, беремо file_url
+  // Якщо ipfs_cid порожній — беремо file_url
   const resolveSrc = (b: Behavior) =>
     b.ipfs_cid
       ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}`
@@ -122,7 +122,7 @@ export default function StoryBar() {
                 }}
                 className="story-video"
               />
-              {/* бейдж у правому верхньому куті круга (в самому компоненті) */}
+              {/* бейдж усередині кола */}
               <DisputeBadge show={b.is_dispute_evidence} />
             </div>
 

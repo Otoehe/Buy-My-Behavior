@@ -2,20 +2,20 @@
 
 .story-bar {
   position: relative;
-  z-index: 2;
+  z-index: 2;                   /* гарантуємо, що над картою */
   display: flex;
   align-items: center;
   overflow-x: auto;
 
-  margin-top: 8px;           /* зазор під навбаром */
-  padding: 16px 12px 18px;   /* top | sides | bottom */
+  margin-top: 8px;              /* зазор під навбаром */
+  padding: 16px 12px 18px;      /* top | sides | bottom */
   gap: 12px;
 
   background: #ffffff;
   border-top: 1px solid #eee;
   border-bottom: 1px solid #ddd;
 
-  min-height: 152px;         /* кружок + 2 рядки підпису + бейдж */
+  min-height: 152px;            /* коло + 2 рядки підпису + бейдж */
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
 }
@@ -30,7 +30,7 @@
   align-items: center;
   justify-content: flex-start;
 
-  width: 84px;          /* картка: кружок + підпис */
+  width: 84px;                  /* картка: кружок + підпис */
   flex: 0 0 auto;
   cursor: pointer;
   background: transparent;
@@ -53,22 +53,22 @@
   border: 3px solid #8cd3e9;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
-  position: relative;          /* для бейджа/відео */
-  overflow: hidden;            /* обрізка по колу */
-  background: #fff;            /* фон під відео при contain */
+  position: relative;           /* для бейджа/відео */
+  overflow: hidden;             /* обрізка по колу */
+  background: #fff;             /* фон під відео при contain */
 }
 .story-circle:hover {
   transform: scale(1.05);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
 }
 
-/* Відео всередині кружечка — повністю видно (без кропу) */
+/* Відео — повністю видно (без кропу) */
 .story-video {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: contain;         /* показуємо весь кадр */
+  object-fit: contain;          /* показуємо весь кадр */
   object-position: center center;
   display: block;
   border-radius: inherit;
@@ -88,7 +88,7 @@
   overflow: hidden;
 
   display: -webkit-box;
-  -webkit-line-clamp: 2;       /* до 2 рядків */
+  -webkit-line-clamp: 2;        /* до 2 рядків */
   -webkit-box-orient: vertical;
   white-space: normal;
 }
