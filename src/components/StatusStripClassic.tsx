@@ -25,21 +25,31 @@ export default function StoryBar() {
   const fetchBehaviors = async () => {
     const { data, error } = await supabase
       .from("behaviors")
-      .select("id,user_id,title,description,ipfs_cid,file_url,created_at,is_dispute_evidence,dispute_id")
+      .select(
+        "id,user_id,title,description,ipfs_cid,file_url,created_at,is_dispute_evidence,dispute_id"
+      )
       .order("created_at", { ascending: false });
 
-    if (error) {
+    if (!error) {
+      setBehaviors((data || []).map((b: any) => ({
+        ...b,
+        is_dispute_evidence: !!b.is_dispute_evidence,
+      })));
+    } else {
       console.error("❌ Failed to fetch behaviors:", error);
-      return;
     }
-    setBehaviors((data || []).map((b: any) => ({ ...b, is_dispute_evidence: !!b.is_dispute_evidence })));
   };
 
   useEffect(() => {
     fetchBehaviors();
+
     const subscription = supabase
       .channel("realtime:behaviors")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "behaviors" }, () => fetchBehaviors())
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "behaviors" },
+        () => fetchBehaviors()
+      )
       .subscribe();
 
     const openHandler = () => setIsUploadOpen(true);
@@ -54,8 +64,11 @@ export default function StoryBar() {
   }, []);
 
   const openFeed = () => navigate("/behaviors");
+
   const resolveSrc = (b: Behavior) =>
-    b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : (b.file_url || "");
+    b.ipfs_cid
+      ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}`
+      : b.file_url || "";
 
   return (
     <>
@@ -66,15 +79,16 @@ export default function StoryBar() {
           className="story-item add-button"
           aria-label="Додати Behavior"
           title="Додати Behavior"
-          onClick={(e) => { e.stopPropagation(); setIsUploadOpen(true); }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsUploadOpen(true);
+          }}
         >
           <div className="story-circle">＋</div>
           <div className="story-label">Додати</div>
         </button>
 
-        {/* СТОРІС + логіка спору */}
+        {/* КРУЖЕЧКИ */}
         {behaviors.map((b) => (
           <div
             key={b.id}
@@ -97,7 +111,11 @@ export default function StoryBar() {
                 muted
                 playsInline
                 preload="auto"
-                onEnded={(e) => { const v = e.currentTarget; v.currentTime = 0; v.play(); }}
+                onEnded={(e) => {
+                  const v = e.currentTarget;
+                  v.currentTime = 0;
+                  v.play();
+                }}
                 className="story-video"
               />
               <DisputeBadge show={b.is_dispute_evidence} />
@@ -110,7 +128,8 @@ export default function StoryBar() {
       {isUploadOpen && (
         <UploadBehavior onClose={() => setIsUploadOpen(false)}>
           <div className="upload-hint">
-            📦 <strong>Увага:</strong> розмір Behavior не повинен перевищувати <strong>30MB</strong>
+            📦 <strong>Увага:</strong> розмір Behavior не повинен перевищувати{" "}
+            <strong>30MB</strong>
           </div>
         </UploadBehavior>
       )}
