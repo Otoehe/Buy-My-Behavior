@@ -1,27 +1,27 @@
 /* 📄 src/components/StoryBar.css — ширший по вертикалі, 2-рядкові підписи, відео без кропу */
 
 .story-bar {
+  position: relative;
+  z-index: 2;                        /* над картою */
   display: flex;
   align-items: center;
   overflow-x: auto;
 
-  /* відступ від навбару + більше повітря всередині */
+  /* більше вертикалі і зазор під навбаром */
   margin-top: 8px;
-  padding: 16px 12px 18px;   /* top / left-right / bottom */
+  padding: 16px 12px 18px;           /* top | left-right | bottom */
   gap: 12px;
 
-  background: #ffffff;
+  background: #fff;
   border-top: 1px solid #eee;
   border-bottom: 1px solid #ddd;
 
-  /* висота, щоб умістились: кружок + 2 рядки підпису + бейдж */
-  height: 152px;
-
-  scroll-behavior: smooth;
+  height: 152px;                     /* кружок + 2 рядки імені + бейдж */
   -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
 }
 
-/* ховаємо скролбар акуратно */
+/* скролбар прибираємо акуратно */
 .story-bar::-webkit-scrollbar { display: none; }
 .story-bar { scrollbar-width: none; -ms-overflow-style: none; }
 
@@ -31,80 +31,65 @@
   align-items: center;
   justify-content: flex-start;
 
-  width: 84px;          /* картка: кружок + підпис */
+  width: 84px;                       /* картка: кружок + підпис */
   flex: 0 0 auto;
-  cursor: pointer;
   background: transparent;
   border: none;
+  cursor: pointer;
 }
 
 /* Кружечок */
 .story-circle {
+  position: relative;                /* для бейджа і відео */
   width: 84px;
   height: 84px;
   border-radius: 50%;
-  border: 3px solid #8cd3e9;          /* акцентний колір */
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-  position: relative;                  /* для бейджа */
-  overflow: hidden;                    /* обрізка по колу */
-  background: #fff;                    /* фон під відео при contain */
+  border: 3px solid #8cd3e9;         /* акцент */
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  overflow: hidden;                  /* обрізка по колу */
+  background: #fff;                  /* фон під відео при contain */
+  transition: transform .2s ease, box-shadow .2s ease;
 }
+.story-circle:hover { transform: scale(1.05); box-shadow: 0 6px 20px rgba(0,0,0,0.25); }
 
-.story-circle:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
-}
-
-/* Відео всередині кружечка — повністю видно (без кропу) */
+/* Відео — повністю видно, без кропу */
 .story-video {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;                 /* ⬅️ важливо: без збільшення і кропу */
-  object-position: center center;
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
   display: block;
+  object-fit: contain;               /* ← без зуму/обрізання */
+  object-position: center;
   border-radius: inherit;
   background: #fff;
   pointer-events: none;
 }
 
-/* Підпис: 2 рядки, щоб довгі імена влазили */
+/* Підпис: до 2 рядків */
 .story-label {
-  font-size: 13px;
   margin-top: 6px;
-  text-align: center;
-  color: #333;
-
   max-width: 84px;
+  color: #333;
+  font-size: 13px;
   line-height: 1.15;
+  text-align: center;
   overflow: hidden;
 
   display: -webkit-box;
-  -webkit-line-clamp: 2;               /* до 2 рядків */
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   white-space: normal;
 }
 
-/* Кнопка “＋ Додати” */
+/* Стилі для кнопки “＋ Додати” */
 .add-button .story-circle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  font-weight: bold;
-  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 700; color: #fff;
   background: linear-gradient(135deg, #8cd3e9, #90caf9);
   border: none;
 }
+.add-button .story-circle:hover { transform: scale(1.1); background: linear-gradient(135deg, #64b5f6, #4fc3f7); }
 
-.add-button .story-circle:hover {
-  transform: scale(1.1);
-  background: linear-gradient(135deg, #64b5f6, #4fc3f7);
-}
-
-/* Трохи більші кружечки на дуже широких екранах */
+/* Трохи збільшуємо на широких екранах */
 @media (min-width: 1400px) {
   .story-item { width: 92px; }
   .story-circle { width: 92px; height: 92px; }
