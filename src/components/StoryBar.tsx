@@ -35,7 +35,6 @@ export default function StoryBar() {
   useEffect(() => {
     fetchBehaviors();
 
-    // тільки INSERT — як у робочому білді
     const ch = supabase
       .channel("realtime:behaviors")
       .on(
@@ -68,7 +67,6 @@ export default function StoryBar() {
   return (
     <>
       <div className="story-bar" data-bmb="storybar-v1" onClick={(e) => e.stopPropagation()}>
-        {/* + Додати */}
         <button
           type="button"
           className="story-item add-button"
@@ -85,7 +83,6 @@ export default function StoryBar() {
           <div className="story-label">Додати</div>
         </button>
 
-        {/* Сторіс */}
         {behaviors.map((b) => (
           <div
             key={b.id}
