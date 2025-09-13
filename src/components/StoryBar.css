@@ -1,25 +1,24 @@
-/* src/components/StoryBar.css — мобайл-фьорст.
-   Кола з білою обводкою і М'ЯКОЮ ТІННЮ (форсовано через !important),
-   висота смуги достатня, щоб підпис не обрізався.
-*/
+/* src/components/StoryBar.css — мобайл-фьорст, щільно ліворуч */
 
 :root {
-  --story-size: 64px;
-  --story-gap: 12px;
+  --story-size: 64px;   /* діаметр кружка */
+  --story-gap: 8px;     /* відстань між кружками */
   --story-label-fs: 12px;
   --story-label-lh: 16px;
 }
 
+/* стрічка сторіс */
 .story-bar {
   display: flex;
-  gap: var(--story-gap);
+  justify-content: flex-start;          /* чітко ліворуч */
+  align-items: center;
+  gap: var(--story-gap);                /* однаковий проміжок */
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0 12px;
+  padding: 6px 8px;                     /* мінімальні внутрішні поля */
   box-sizing: border-box;
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
-  align-items: center;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
   -ms-overflow-style: none;
@@ -27,77 +26,70 @@
 }
 .story-bar::-webkit-scrollbar { display: none; width: 0; height: 0; }
 
-.story-bar.story-bar--tall {
-  padding-top: 10px;
-  padding-bottom: 12px;
-  min-height: calc(var(--story-size) + var(--story-label-lh) + 18px);
-  background: #fff;
-}
-
+/* прибираємо "проставки" зліва/справа (щоб не відштовхувало від краю) */
 .story-bar::before,
-.story-bar::after { content: ""; flex: 0 0 6px; }
+.story-bar::after { content: none !important; }
 
+/* елемент стрічки */
 .story-item {
+  flex: 0 0 auto;
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  background: transparent;
+  border: 0;
+  padding: 0;
   cursor: pointer;
   transition: transform .12s ease;
-  flex: 0 0 auto;
-  text-align: center;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  appearance: none;
-  -webkit-appearance: none;
   line-height: 1;
 }
 .story-item:active { transform: scale(0.97); }
 
-/* КОЛО — біла обводка + тінь. */
+/* кружок: біла обводка + м’яка тінь (форсовано) */
 .story-circle {
   inline-size: var(--story-size);
   block-size: var(--story-size);
-  aspect-ratio: 1 / 1;
-  border-radius: 50%;
-  position: relative;
-  background: #fff;
-  border: 3px solid #fff !important; /* фірмово */
-  box-shadow: 0 6px 14px rgba(0,0,0,.14), 0 2px 4px rgba(0,0,0,.10) !important;
-  /* дублюємо drop-shadow на випадок обмежень батьківського overflow */
-  filter: drop-shadow(0 3px 12px rgba(0,0,0,.16));
+  border-radius: 9999px;
+  background: #fff;                                   /* фон усередині кола */
+  border: 3px solid #fff !important;                  /* біла обводка (бренд) */
+  box-shadow: 0 6px 14px rgba(0,0,0,.14),
+              0 2px  4px rgba(0,0,0,.10) !important;  /* тінь */
+  filter: drop-shadow(0 3px 12px rgba(0,0,0,.16));     /* дублюємо тінь */
   display: grid;
   place-items: center;
   overflow: hidden;
 }
 
+/* медіа всередині — повністю круглі */
 .story-video,
 .story-poster {
   width: 100% !important;
   height: 100% !important;
   object-fit: cover !important;
   display: block !important;
-  border-radius: 50% !important;
+  border-radius: 9999px !important;
   pointer-events: none !important;
 }
 
+/* підпис */
 .story-label {
   font-size: var(--story-label-fs);
   line-height: var(--story-label-lh);
   color: #111;
-  max-width: calc(var(--story-size) + 24px);
+  max-width: calc(var(--story-size) + 12px);
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
   margin-top: 4px;
 }
 
-/* "+" */
+/* кнопка "+" */
 .story-item.add-button .story-circle {
   background: linear-gradient(135deg, #ffcdd6, #ffdfe6);
   border: 3px solid #fff !important;
-  box-shadow: 0 6px 14px rgba(0,0,0,.14), 0 2px 4px rgba(0,0,0,.10) !important;
+  box-shadow: 0 6px 14px rgba(0,0,0,.14),
+              0 2px  4px rgba(0,0,0,.10) !important;
   filter: drop-shadow(0 3px 12px rgba(0,0,0,.16));
   color: #000;
   font-weight: 700;
@@ -106,6 +98,7 @@
 .story-item.add-button:hover .story-circle { transform: scale(1.04); }
 .story-item.add-button .story-label { color: #000; }
 
+/* трохи більші кружки на 480+ */
 @media (min-width: 480px) {
   :root { --story-size: 72px; }
 }
