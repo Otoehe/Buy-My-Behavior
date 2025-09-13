@@ -1,8 +1,9 @@
+/* src/components/StoryBar.css */
 /* ширший по вертикалі, 2-рядкові підписи, відео без кропу, фікси для button */
 
 .story-bar {
   position: relative;
-  z-index: 2;                   /* гарантуємо, що над картою */
+  z-index: 2;                   /* над картою */
   display: flex;
   align-items: center;
   overflow-x: auto;
@@ -15,7 +16,7 @@
   border-top: 1px solid #eee;
   border-bottom: 1px solid #ddd;
 
-  min-height: 152px;            /* коло + 2 рядки підпису + бейдж */
+  min-height: 152px;            /* коло + 2 рядки підпису */
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
 }
@@ -39,7 +40,7 @@
   box-sizing: border-box;
 }
 
-/* reset для кнопки-плюса, щоб не ламалась геометрія */
+/* reset для кнопки-плюса */
 .story-item.add-button {
   appearance: none;
   -webkit-appearance: none;
@@ -53,7 +54,7 @@
   border: 3px solid #8cd3e9;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
-  position: relative;           /* для бейджа/відео */
+  position: relative;           /* під відео */
   overflow: hidden;             /* обрізка по колу */
   background: #fff;             /* фон під відео при contain */
 }
@@ -76,7 +77,7 @@
   pointer-events: none;
 }
 
-/* Підпис: до 2 рядків, щоб довгі імена влазили */
+/* Підпис: до 2 рядків */
 .story-label {
   font-size: 13px;
   margin-top: 6px;

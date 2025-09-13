@@ -2,12 +2,12 @@
   "name": "bmb-app",
   "version": "1.0.0",
   "private": true,
-  "engines": {
-    "node": "20.x"
-  },
+  "engines": { "node": "20.x" },
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/weird-imports.cjs",
     "build": "vite build",
+    "fix-imports": "node scripts/weird-imports.cjs --fix",
     "preview": "vite preview",
     "clean": "rimraf node_modules package-lock.json pnpm-lock.yaml yarn.lock node_modules/.vite && npm cache clean --force",
     "rebuild": "npm run clean && npm install && npm run build && npm run preview",
