@@ -1,12 +1,13 @@
-/* src/components/StoryBar.css
-   Mobile-first. Кола з білою обводкою й тінню; підпис — завжди видно.
+/* src/components/StoryBar.css — мобайл-фьорст.
+   Кола з білою обводкою і М'ЯКОЮ ТІННЮ (форсовано через !important),
+   висота смуги достатня, щоб підпис не обрізався.
 */
 
 :root {
-  --story-size: 64px;       /* мобайл: розмір кола */
+  --story-size: 64px;
   --story-gap: 12px;
   --story-label-fs: 12px;
-  --story-label-lh: 16px;   /* враховується в min-height смуги */
+  --story-label-lh: 16px;
 }
 
 .story-bar {
@@ -26,10 +27,9 @@
 }
 .story-bar::-webkit-scrollbar { display: none; width: 0; height: 0; }
 
-/* висота смуги так, щоб підпис не обрізався */
 .story-bar.story-bar--tall {
-  padding-top: 10px;             /* запас зверху */
-  padding-bottom: 12px;          /* запас під лейбл */
+  padding-top: 10px;
+  padding-bottom: 12px;
   min-height: calc(var(--story-size) + var(--story-label-lh) + 18px);
   background: #fff;
 }
@@ -37,7 +37,6 @@
 .story-bar::before,
 .story-bar::after { content: ""; flex: 0 0 6px; }
 
-/* item */
 .story-item {
   display: inline-flex;
   flex-direction: column;
@@ -56,20 +55,21 @@
 }
 .story-item:active { transform: scale(0.97); }
 
-/* коло — ідеально кругле; біла обводка + тінь (бренд) */
+/* КОЛО — біла обводка + тінь. */
 .story-circle {
   inline-size: var(--story-size);
   block-size: var(--story-size);
   aspect-ratio: 1 / 1;
   border-radius: 50%;
-  clip-path: circle(50% at 50% 50%);
+  position: relative;
   background: #fff;
-  border: 3px solid #fff; /* біла обводка */
-  box-shadow: 0 6px 14px rgba(0,0,0,.12), 0 2px 4px rgba(0,0,0,.08); /* м’яка тінь */
+  border: 3px solid #fff !important; /* фірмово */
+  box-shadow: 0 6px 14px rgba(0,0,0,.14), 0 2px 4px rgba(0,0,0,.10) !important;
+  /* дублюємо drop-shadow на випадок обмежень батьківського overflow */
+  filter: drop-shadow(0 3px 12px rgba(0,0,0,.16));
   display: grid;
   place-items: center;
   overflow: hidden;
-  contain: layout paint size;
 }
 
 .story-video,
@@ -82,7 +82,6 @@
   pointer-events: none !important;
 }
 
-/* підпис під колом — тільки ім’я профілю */
 .story-label {
   font-size: var(--story-label-fs);
   line-height: var(--story-label-lh);
@@ -97,15 +96,16 @@
 /* "+" */
 .story-item.add-button .story-circle {
   background: linear-gradient(135deg, #ffcdd6, #ffdfe6);
-  border: 3px solid #fff;
+  border: 3px solid #fff !important;
+  box-shadow: 0 6px 14px rgba(0,0,0,.14), 0 2px 4px rgba(0,0,0,.10) !important;
+  filter: drop-shadow(0 3px 12px rgba(0,0,0,.16));
   color: #000;
   font-weight: 700;
   font-size: 20px;
-  box-shadow: 0 6px 14px rgba(0,0,0,.12), 0 2px 4px rgba(0,0,0,.08);
 }
 .story-item.add-button:hover .story-circle { transform: scale(1.04); }
 .story-item.add-button .story-label { color: #000; }
 
 @media (min-width: 480px) {
-  :root { --story-size: 72px; }  /* планшет/десктоп */
+  :root { --story-size: 72px; }
 }

@@ -1,6 +1,6 @@
 // src/components/StoryBar.tsx
-// Показує прев’ю відео і ПІДПИС = ім'я профілю автора (profiles.user_id).
-// Якщо профіль без імені — підпис не рендеримо.
+// Показує прев’ю відео (луп, muted) і ПІДПИС = ім'я профілю автора з profiles.name (ключ profiles.user_id).
+// Якщо name порожнє — підпис не рендеримо (не fallback-имо на title/“Video evidence”).
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
@@ -9,10 +9,8 @@ import "./StoryBar.css";
 
 type Nullable<T> = T | null | undefined;
 
-// 👇 назва таблиці профілів
 const PROFILE_TABLE = "profiles";
-// 👇 у твоїй схемі ключ — user_id (а не id)
-const PROFILE_ID_COL: "user_id" | "id" = "user_id";
+const PROFILE_ID_COL: "user_id" = "user_id"; // у вашій схемі ключ саме user_id
 
 interface Behavior {
   id: number;
@@ -33,11 +31,8 @@ interface Behavior {
 }
 
 interface ProfileRow {
-  id?: string | null;
   user_id?: string | null;
-  name?: string | null;
-  display_name?: string | null;
-  username?: string | null;
+  name?: string | null; // беремо тільки це поле
 }
 
 const gateways = [
@@ -56,13 +51,12 @@ export default function StoryBar() {
   const [behaviors, setBehaviors] = useState<Behavior[]>([]);
   const [srcMap, setSrcMap] = useState<Record<number, string | null>>({});
   const [posterMap, setPosterMap] = useState<Record<number, string | null>>({});
-  // 🆕 імена авторів за user_id
   const [nameByUser, setNameByUser] = useState<Record<string, string>>({});
   const [isUploadOpen, setIsUploadOpen] = useState(false);
 
   const navigate = useNavigate();
 
-  // 1) стартове завантаження behaviors
+  // 1) Завантаження останніх behaviors
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -77,7 +71,7 @@ export default function StoryBar() {
     return () => { alive = false; };
   }, []);
 
-  // 2) realtime INSERT — додаємо зверху і довантажуємо ім’я автора
+  // 2) Realtime INSERT — додаємо нові і довантажуємо ім'я автора
   useEffect(() => {
     const ch = supabase
       .channel("realtime:behaviors")
@@ -86,20 +80,17 @@ export default function StoryBar() {
         async (payload) => {
           const b = payload.new as Behavior;
           setBehaviors(prev => (prev.some(x => x.id === b.id) ? prev : [b, ...prev]));
-
           const uid = (b.user_id || "").trim();
           if (uid && !nameByUser[uid]) {
             try {
               const { data } = await supabase
                 .from<ProfileRow>(PROFILE_TABLE)
-                .select("id,user_id,name,display_name,username")
-                .eq(PROFILE_ID_COL, uid) // 👈 пошук по user_id
+                .select("user_id,name")
+                .eq(PROFILE_ID_COL, uid)
                 .maybeSingle();
-              if (data) {
-                const key = (data[PROFILE_ID_COL] as string) || data.id || "";
-                const n = data.name?.trim() || data.display_name?.trim() || data.username?.trim() || "";
-                if (key && n) setNameByUser(prev => ({ ...prev, [key]: n }));
-              }
+              const key = (data?.user_id || "").trim();
+              const n = (data?.name || "").trim();
+              if (key && n) setNameByUser(prev => ({ ...prev, [key]: n }));
             } catch {}
           }
         }
@@ -108,7 +99,7 @@ export default function StoryBar() {
     return () => { supabase.removeChannel(ch); };
   }, [nameByUser]);
 
-  // --- helpers для URL ---
+  // helpers для URL
   const resolveDirect = (b: Behavior) => {
     const direct = firstNonEmpty(b.file_url, b.video_url, b.image_url);
     if (isHttp(direct)) return direct!;
@@ -141,7 +132,7 @@ export default function StoryBar() {
     return null;
   };
 
-  // робимо постер зі стартового кадру (за CORS дозволу)
+  // Якщо немає постера — зробимо стартовий кадр (за CORS дозволу)
   const grabPosterFrame = (url: string): Promise<string | null> => new Promise((resolve) => {
     try {
       const video = document.createElement("video");
@@ -173,7 +164,7 @@ export default function StoryBar() {
     } catch { resolve(null); }
   });
 
-  // 3) обчислюємо медіа/постери
+  // 3) Обчислюємо URL/постери для всіх
   useEffect(() => {
     (async () => {
       const nextSrc: Record<number, string | null> = {};
@@ -191,7 +182,6 @@ export default function StoryBar() {
       setSrcMap(nextSrc);
       setPosterMap(nextPoster);
 
-      // автогенерація постерів, якщо нема
       for (const b of behaviors) {
         if (!nextPoster[b.id] && nextSrc[b.id]) {
           try {
@@ -203,7 +193,7 @@ export default function StoryBar() {
     })();
   }, [behaviors]);
 
-  // 4) підтягуємо імена для всіх видимих user_id (за profiles.user_id)
+  // 4) Підтягнути імена для видимих user_id, яких немає в кеші
   useEffect(() => {
     (async () => {
       const want = Array.from(
@@ -218,13 +208,13 @@ export default function StoryBar() {
       try {
         const { data, error } = await supabase
           .from<ProfileRow>(PROFILE_TABLE)
-          .select("id,user_id,name,display_name,username")
-          .in(PROFILE_ID_COL, want); // 👈 шукаємо по user_id
+          .select("user_id,name")
+          .in(PROFILE_ID_COL, want);
         if (!error && data) {
           const patch: Record<string, string> = {};
           for (const p of data) {
-            const key = (p[PROFILE_ID_COL] as string) || p.id || "";
-            const n = p.name?.trim() || p.display_name?.trim() || p.username?.trim();
+            const key = (p.user_id || "").trim();
+            const n = (p.name || "").trim();
             if (key && n) patch[key] = n;
           }
           if (Object.keys(patch).length) setNameByUser(prev => ({ ...prev, ...patch }));
@@ -258,7 +248,7 @@ export default function StoryBar() {
         {behaviors.map((b) => {
           const media = srcMap[b.id] || null;
           const poster = posterMap[b.id] || "/placeholder.jpg";
-          const authorName = b.user_id ? nameByUser[b.user_id] : undefined; // 👈 мапимо за user_id
+          const authorName = b.user_id ? nameByUser[b.user_id] : undefined; // тільки name
 
           return (
             <button
@@ -289,7 +279,7 @@ export default function StoryBar() {
                 )}
               </div>
 
-              {/* ПІДПИС — тільки ім'я; якщо немає — не показуємо */}
+              {/* Показуємо тільки ім’я; якщо його немає — не рендеримо підпис */}
               {authorName ? <div className="story-label">{authorName}</div> : null}
             </button>
           );
