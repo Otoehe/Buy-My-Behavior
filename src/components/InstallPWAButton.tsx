@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
 
-/** Тип події для PWA-встановлення (Chromium-браузери) */
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
@@ -30,7 +29,7 @@ export default function InstallPWAButton({
   const deferredRef = useRef<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
-    if (isStandalone()) return; // вже встановлено — не показуємо кнопку
+    if (isStandalone()) return;
 
     const onBIP = (e: Event) => {
       e.preventDefault();
@@ -39,7 +38,6 @@ export default function InstallPWAButton({
     };
     window.addEventListener("beforeinstallprompt", onBIP as any);
 
-    // Якщо подія не прийшла — імовірно iOS Safari → покажемо підказку
     const t = setTimeout(() => {
       if (!deferredRef.current && isIosSafari()) setShowIosHint(true);
     }, 1000);
@@ -64,10 +62,8 @@ export default function InstallPWAButton({
     } catch {}
   };
 
-  // Нічого не рендеримо, якщо немає що показувати
   if (!canInstall && !showIosHint) return null;
 
-  // Сіра кнопка, тонший напис; іконка з рожевою обводкою та заокругленням
   const btnStyle: React.CSSProperties = {
     display: canInstall ? "inline-flex" : "none",
     alignItems: "center",
@@ -103,8 +99,6 @@ export default function InstallPWAButton({
         <img src={iconSrc} alt="BMB" style={iconStyle} />
         <span>{label}</span>
       </button>
-
-      {/* Підказка для iOS Safari */}
       <div style={hintStyle}>
         На iPhone відкрийте меню <strong>Поділитись</strong> і виберіть
         <strong> Додати на екран «Додому»</strong>.
