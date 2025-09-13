@@ -1,32 +1,42 @@
 /* src/components/StoryBar.css
-   Canonical, mobile-first (узгоджено 2025-08-17):
-   - горизонтальна стрічка
-   - прихований скролбар
-   - "+" завжди видно
-   - без badge DISPUTE
+   Mobile-first. Акуратні відступи, ідеальні кола, підпис завжди видимий.
 */
 
 :root {
-  --story-size: 72px; /* легко поміняти один раз для всіх кружечків */
+  /* розмір кола; на мобі 64px, на ширших — 72px */
+  --story-size: 64px;
+  --story-gap: 12px;
+  --story-label-fs: 12px;
+  --story-label-lh: 16px;
 }
 
 .story-bar {
   display: flex;
-  gap: 10px;
+  gap: var(--story-gap);
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 2px 6px 4px !important;
+  padding: 0 12px;                 /* горизонтальний відступ всередині смуги */
   box-sizing: border-box;
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
   align-items: center;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
-  -ms-overflow-style: none;  /* IE/Edge */
-  scrollbar-width: none;     /* Firefox */
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
-.story-bar::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.story-bar::-webkit-scrollbar { display: none; width:0; height:0; }
 
+/* додатковий вертикальний простір для підписів */
+.story-bar.story-bar--tall {
+  /*  коло + відступ згори + підпис + відступ знизу  */
+  padding-top: 10px;
+  padding-bottom: 12px;
+  min-height: calc(var(--story-size) + var(--story-label-lh) + 14px);
+  background: #fff;
+}
+
+/* легкі відступи зліва/справа */
 .story-bar::before,
 .story-bar::after { content: ""; flex: 0 0 6px; }
 
@@ -49,13 +59,13 @@
 }
 .story-item:active { transform: scale(0.97); }
 
-/* circle — жорстко фіксуємо 1:1 і круглу маску  */
+/* ідеальне коло з фіксованою геометрією */
 .story-circle {
   inline-size: var(--story-size);
   block-size: var(--story-size);
   aspect-ratio: 1 / 1;
   border-radius: 50%;
-  clip-path: circle(50% at 50% 50%);
+  clip-path: circle(50% at 50% 50%);     /* страховка від овальності */
   background: #f7f7f7;
   border: 1px solid #e6e6e6;
   box-shadow: 0 1px 0 rgba(0,0,0,.04);
@@ -64,7 +74,6 @@
   overflow: hidden;
   contain: layout paint size;
 }
-
 .story-video,
 .story-poster {
   width: 100% !important;
@@ -75,12 +84,12 @@
   pointer-events: none !important;
 }
 
-/* підпис */
+/* підпис під колом — завжди читається */
 .story-label {
-  font-size: 12px;
-  line-height: 14px;
+  font-size: var(--story-label-fs);
+  line-height: var(--story-label-lh);
   color: #111;
-  max-width: 88px;
+  max-width: calc(var(--story-size) + 24px);  /* трішки ширше за коло */
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
@@ -98,6 +107,6 @@
 .story-item.add-button:hover .story-circle { transform: scale(1.04); }
 .story-item.add-button .story-label { color: #000; }
 
-@media (max-width: 479px) {
-  :root { --story-size: 64px; }
+@media (min-width: 480px) {
+  :root { --story-size: 72px; }
 }
