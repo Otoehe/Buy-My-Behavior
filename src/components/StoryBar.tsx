@@ -1,4 +1,5 @@
 // src/components/StoryBar.tsx
+// ADD-ONLY: показуємо прев'ю відео як і було + підпис = ім'я автора з таблиці профілів.
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
@@ -6,6 +7,9 @@ import UploadBehavior from "./UploadBehavior";
 import "./StoryBar.css";
 
 type Nullable<T> = T | null | undefined;
+
+// 🔧 якщо таблиця профілів має іншу назву — зміни тут
+const PROFILE_TABLE = "profiles";
 
 interface Behavior {
   id: number;
@@ -25,6 +29,13 @@ interface Behavior {
   dispute_id?: string | null;
 }
 
+interface ProfileRow {
+  id: string;
+  name?: string | null;
+  display_name?: string | null;
+  username?: string | null;
+}
+
 const gateways = [
   (cid: string) => `https://gateway.lighthouse.storage/ipfs/${cid}`,
   (cid: string) => `https://ipfs.io/ipfs/${cid}`,
@@ -42,6 +53,10 @@ export default function StoryBar() {
   const [srcMap, setSrcMap] = useState<Record<number, string | null>>({});
   const [posterMap, setPosterMap] = useState<Record<number, string | null>>({});
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+
+  // 🆕 кеш імен за user_id
+  const [nameByUser, setNameByUser] = useState<Record<string, string>>({});
+
   const navigate = useNavigate();
 
   // initial fetch
@@ -65,14 +80,30 @@ export default function StoryBar() {
       .channel("realtime:behaviors")
       .on("postgres_changes",
         { event: "INSERT", schema: "public", table: "behaviors" },
-        (payload) => {
+        async (payload) => {
           const b = payload.new as Behavior;
+          // додати behavior, якщо його ще нема
           setBehaviors(prev => (prev.some(x => x.id === b.id) ? prev : [b, ...prev]));
+          // і паралельно підтягнути ім'я автора, якщо ще не в кеші
+          const uid = b.user_id || "";
+          if (uid && !nameByUser[uid]) {
+            try {
+              const { data } = await supabase
+                .from<ProfileRow>(PROFILE_TABLE)
+                .select("id,name,display_name,username")
+                .eq("id", uid)
+                .maybeSingle();
+              if (data) {
+                const n = data.name?.trim() || data.display_name?.trim() || data.username?.trim() || "";
+                if (n) setNameByUser(prev => ({ ...prev, [uid]: n }));
+              }
+            } catch {}
+          }
         }
       )
       .subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, []);
+  }, [nameByUser]);
 
   // ---- resolvers ----
   const resolveDirect = (b: Behavior) => {
@@ -126,13 +157,12 @@ export default function StoryBar() {
 
       video.onloadedmetadata = () => {
         try {
-          // невеликий зсув від 0, щоб не ловити чорний кадр
           video.currentTime = Math.min(0.25, (video.duration || 1) / 10);
         } catch { onError(); }
       };
       video.onseeked = () => {
         try {
-          const size = 144; // більше, щоб чіткіше в ретині
+          const size = 144;
           const canvas = document.createElement("canvas");
           canvas.width = size; canvas.height = size;
           const ctx = canvas.getContext("2d");
@@ -165,19 +195,48 @@ export default function StoryBar() {
       setPosterMap(nextPoster);
 
       // автогенерація постерів, якщо їх нема, але є src
-      const prefersReduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
       for (const b of behaviors) {
         if (!nextPoster[b.id] && nextSrc[b.id]) {
           try {
             const dataUrl = await grabPosterFrame(nextSrc[b.id]!);
-            if (dataUrl) {
-              setPosterMap(prev => ({ ...prev, [b.id]: dataUrl }));
-            }
+            if (dataUrl) setPosterMap(prev => ({ ...prev, [b.id]: dataUrl }));
           } catch { /* ignore */ }
         }
       }
     })();
   }, [behaviors]);
+
+  // 🆕 підтягнути імена авторів разом із поведінками
+  useEffect(() => {
+    (async () => {
+      // з поведінок дістаємо унікальні user_id, яких ще нема в кеші
+      const want = Array.from(
+        new Set(
+          behaviors
+            .map(b => (b.user_id || "").trim())
+            .filter(uid => uid && !nameByUser[uid])
+        )
+      );
+      if (want.length === 0) return;
+
+      try {
+        const { data, error } = await supabase
+          .from<ProfileRow>(PROFILE_TABLE)
+          .select("id,name,display_name,username")
+          .in("id", want);
+        if (!error && data) {
+          const patch: Record<string, string> = {};
+          for (const p of data) {
+            const n = p.name?.trim() || p.display_name?.trim() || p.username?.trim();
+            if (n) patch[p.id] = n;
+          }
+          if (Object.keys(patch).length) {
+            setNameByUser(prev => ({ ...prev, ...patch }));
+          }
+        }
+      } catch {}
+    })();
+  }, [behaviors, nameByUser]);
 
   const openUpload = useCallback(() => setIsUploadOpen(true), []);
   const closeUpload = useCallback(() => setIsUploadOpen(false), []);
@@ -205,7 +264,15 @@ export default function StoryBar() {
         {behaviors.map((b) => {
           const media = srcMap[b.id] || null;
           const poster = posterMap[b.id] || "/placeholder.jpg";
-          const label = b.title ?? "Behavior";
+
+          // 🆕 підпис: ім'я автора → fallback на title → "Behavior"
+          const authorName =
+            (b.user_id && nameByUser[b.user_id]) || null;
+          const label =
+            authorName ||
+            (b.title && b.title.trim()) ||
+            "Behavior";
+
           return (
             <button
               type="button"
@@ -214,6 +281,7 @@ export default function StoryBar() {
               onClick={goToBehaviors}
               role="listitem"
               aria-label={label}
+              title={label}
               onKeyDown={(e) => (e.key === "Enter" ? goToBehaviors() : null)}
             >
               <div className="story-circle">
@@ -226,7 +294,7 @@ export default function StoryBar() {
                     playsInline
                     loop
                     preload="metadata"
-                    autoPlay={!prefersReduceMotion} /* маленьке луп-прев’ю */
+                    autoPlay={!prefersReduceMotion}
                     aria-hidden="true"
                   />
                 ) : (
