@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 
+/** Тип події для PWA-встановлення (Chromium-браузери) */
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
@@ -29,8 +30,16 @@ export default function InstallPWAButton({
   const deferredRef = useRef<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
-    if (isStandalone()) return;
+    if (isStandalone()) return; // вже встановлено — кнопку не показуємо
 
+    // 1) Підхопити вже збережену подію (якщо інший код спіймав її раніше)
+    const existing = (window as any).__bmbA2HS as BeforeInstallPromptEvent | undefined;
+    if (existing) {
+      deferredRef.current = existing;
+      setCanInstall(true);
+    }
+
+    // 2) Нормальний шлях: слухач події браузера
     const onBIP = (e: Event) => {
       e.preventDefault();
       deferredRef.current = e as BeforeInstallPromptEvent;
@@ -38,15 +47,28 @@ export default function InstallPWAButton({
     };
     window.addEventListener("beforeinstallprompt", onBIP as any);
 
+    // 3) Наш кастомний евент з профілю (коли подію вже перехопив інший слухач)
+    const onCustom = () => {
+      const ev = (window as any).__bmbA2HS as BeforeInstallPromptEvent | undefined;
+      if (ev) {
+        deferredRef.current = ev;
+        setCanInstall(true);
+      }
+    };
+    window.addEventListener("bmb:a2hs-available", onCustom);
+
+    // 4) iOS-підказка (бо там beforeinstallprompt нема)
     const t = setTimeout(() => {
       if (!deferredRef.current && isIosSafari()) setShowIosHint(true);
     }, 1000);
 
+    // 5) Коли встановлено — ховаємо кнопку
     const onInstalled = () => setCanInstall(false);
     window.addEventListener("appinstalled", onInstalled);
 
     return () => {
       window.removeEventListener("beforeinstallprompt", onBIP as any);
+      window.removeEventListener("bmb:a2hs-available", onCustom);
       window.removeEventListener("appinstalled", onInstalled);
       clearTimeout(t);
     };
@@ -62,8 +84,10 @@ export default function InstallPWAButton({
     } catch {}
   };
 
+  // Нічого не рендеримо, якщо немає що показувати
   if (!canInstall && !showIosHint) return null;
 
+  // Сіра кнопка, тонший напис; іконка з рожевою обводкою та заокругленням
   const btnStyle: React.CSSProperties = {
     display: canInstall ? "inline-flex" : "none",
     alignItems: "center",
@@ -99,6 +123,8 @@ export default function InstallPWAButton({
         <img src={iconSrc} alt="BMB" style={iconStyle} />
         <span>{label}</span>
       </button>
+
+      {/* Підказка для iOS Safari */}
       <div style={hintStyle}>
         На iPhone відкрийте меню <strong>Поділитись</strong> і виберіть
         <strong> Додати на екран «Додому»</strong>.
