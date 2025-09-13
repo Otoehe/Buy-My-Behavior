@@ -1,20 +1,19 @@
 // src/components/NavigationBar.tsx — мобайл-фьорст, бургер (3 горизонтальні лінії), модалка через portal
+// StoryBar показуємо ЛИШЕ на /map і тільки якщо на сторінці немає іншого .story-bar (антидублікат).
 import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import StoryBar from './StoryBar'; // показуємо лише на /map і тільки якщо немає іншого інстансу
+import StoryBar from './StoryBar';
 
-const DESKTOP_BP = 992; // breakpoint для десктопу
+const DESKTOP_BP = 992;
 
 const NavigationBar: React.FC = () => {
   const [isDesktop, setIsDesktop] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
 
   const location = useLocation();
-  const isMapRoute =
-    location.pathname === '/map' || location.pathname.startsWith('/map/');
+  const isMapRoute = location.pathname === '/map' || location.pathname.startsWith('/map/');
 
-  // ✅ анти-дублікат: рендерити StoryBar у навбарі лише якщо НІДЕ поза навбаром його немає
   const navRef = useRef<HTMLDivElement | null>(null);
   const [canMountStoryBar, setCanMountStoryBar] = useState(false);
 
@@ -23,7 +22,7 @@ const NavigationBar: React.FC = () => {
 
   // breakpoint
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return;
+    if (!window.matchMedia) return;
     const mq = window.matchMedia(`(min-width:${DESKTOP_BP}px)`);
     const handler = (e: MediaQueryList | MediaQueryListEvent) => {
       const match = 'matches' in e ? e.matches : (e as MediaQueryList).matches;
@@ -35,60 +34,49 @@ const NavigationBar: React.FC = () => {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
-  // lock scroll for mobile modal
+  // блокування скролу для мобільної модалки
   useEffect(() => {
-    if (!isDesktop) {
-      const prevBodyOverflow = document.body.style.overflow;
-      const prevHtmlOverflow =
-        (document.documentElement && document.documentElement.style.overflow) || '';
-      document.body.style.overflow = isOpen ? 'hidden' : prevBodyOverflow || '';
-      document.documentElement.style.overflow = isOpen ? 'hidden' : prevHtmlOverflow || '';
-      return () => {
-        document.body.style.overflow = prevBodyOverflow || '';
-        document.documentElement.style.overflow = prevHtmlOverflow || '';
-      };
-    }
+    if (isDesktop) return;
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = isOpen ? 'hidden' : prevBody || '';
+    document.documentElement.style.overflow = isOpen ? 'hidden' : prevHtml || '';
+    return () => {
+      document.body.style.overflow = prevBody || '';
+      document.documentElement.style.overflow = prevHtml || '';
+    };
   }, [isOpen, isDesktop]);
 
-  // close by Esc
+  // Esc — закриття
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMenu(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // === Анти-дублікатний гард =================================================
+  // Антидублікат: монтуємо StoryBar в навбарі лише якщо поза навбаром його немає
   useEffect(() => {
     if (!isMapRoute) { setCanMountStoryBar(false); return; }
 
     const check = () => {
-      const allBars = Array.from(document.querySelectorAll('.story-bar'));
-      const inNav = allBars.some(el => navRef.current?.contains(el));
-      const outside = allBars.some(el => !navRef.current?.contains(el));
-      // монтуємо у навбарі лише якщо зовнішнього інстансу немає
+      const bars = Array.from(document.querySelectorAll('.story-bar'));
+      const inNav = bars.some(el => navRef.current?.contains(el));
+      const outside = bars.some(el => !navRef.current?.contains(el));
       setCanMountStoryBar(!outside || inNav);
     };
 
-    // 1) первинна перевірка після рендера кадром пізніше
     const r = requestAnimationFrame(check);
-
-    // 2) відстежуємо зміни DOM (якщо сторінка підмальовує власний StoryBar)
-    const obs = new MutationObserver(() => check());
+    const obs = new MutationObserver(check);
     obs.observe(document.body, { childList: true, subtree: true });
 
-    return () => {
-      cancelAnimationFrame(r);
-      obs.disconnect();
-    };
+    return () => { cancelAnimationFrame(r); obs.disconnect(); };
   }, [isMapRoute]);
-  // ===========================================================================
 
   return (
     <nav style={styles.nav}>
       <div style={styles.container} ref={navRef}>
         <div style={styles.logo}>Buy My Behavior</div>
 
-        {/* Burger (mobile only) */}
         <button
           onClick={toggleMenu}
           aria-label="Toggle menu"
@@ -101,7 +89,6 @@ const NavigationBar: React.FC = () => {
           <span style={styles.hbar} />
         </button>
 
-        {/* Desktop links */}
         <div style={{ ...styles.linksDesktop, display: isDesktop ? 'flex' : 'none' }}>
           <NavLink to="/register"  onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>Реєстрація</NavLink>
           <NavLink to="/profile"   onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>Профіль</NavLink>
@@ -112,14 +99,13 @@ const NavigationBar: React.FC = () => {
         </div>
       </div>
 
-      {/* ✅ StoryBar рендеримо ТІЛЬКИ на /map і лише якщо немає іншого інстансу поза навбаром */}
+      {/* ЛИШЕ на /map і без дубля */}
       {isMapRoute && canMountStoryBar && (
         <div style={styles.storyStrip}>
           <StoryBar />
         </div>
       )}
 
-      {/* Mobile modal via portal */}
       {!isDesktop && isOpen && createPortal(
         <div role="dialog" aria-modal="true" id="mobile-menu" style={styles.modalBackdrop} onClick={closeMenu}>
           <div style={styles.modalPanel} onClick={(e) => e.stopPropagation()}>
@@ -179,11 +165,13 @@ const styles: Record<string, React.CSSProperties> = {
 
   linksDesktop: { gap: '24px', alignItems: 'center' },
 
+  // Полоса для StoryBar з невеликим "подихом"
   storyStrip: {
     background: '#fff',
     borderTop: '1px solid #f1f1f1',
     borderBottom: '1px solid rgba(0,0,0,.04)',
-    padding: 0, // внутрішні паддінги задає .story-bar--tall у StoryBar.css
+    paddingTop: 6,
+    paddingBottom: 6,
     position: 'relative',
     zIndex: 2,
   },

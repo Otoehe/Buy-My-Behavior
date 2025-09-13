@@ -1,12 +1,12 @@
 /* src/components/StoryBar.css
-   Mobile-first. Акуратні відступи, ідеальні кола, підпис завжди видимий.
+   Mobile-first. Кола з білою обводкою й тінню; підпис — завжди видно.
 */
 
 :root {
-  --story-size: 64px;          /* мобайл */
+  --story-size: 64px;       /* мобайл: розмір кола */
   --story-gap: 12px;
   --story-label-fs: 12px;
-  --story-label-lh: 16px;      /* ВАЖЛИВО: те, що рахуємо у min-height */
+  --story-label-lh: 16px;   /* враховується в min-height смуги */
 }
 
 .story-bar {
@@ -14,7 +14,7 @@
   gap: var(--story-gap);
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0 12px;               /* горизонтальні відступи всередині смуги */
+  padding: 0 12px;
   box-sizing: border-box;
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
@@ -26,10 +26,10 @@
 }
 .story-bar::-webkit-scrollbar { display: none; width: 0; height: 0; }
 
-/* висока версія, щоб лейбли не обрізались */
+/* висота смуги так, щоб підпис не обрізався */
 .story-bar.story-bar--tall {
   padding-top: 10px;             /* запас зверху */
-  padding-bottom: 12px;          /* запас знизу під лейбл */
+  padding-bottom: 12px;          /* запас під лейбл */
   min-height: calc(var(--story-size) + var(--story-label-lh) + 18px);
   background: #fff;
 }
@@ -56,7 +56,7 @@
 }
 .story-item:active { transform: scale(0.97); }
 
-/* коло — 1:1, біла обводка, брендова тінь */
+/* коло — ідеально кругле; біла обводка + тінь (бренд) */
 .story-circle {
   inline-size: var(--story-size);
   block-size: var(--story-size);
@@ -64,8 +64,8 @@
   border-radius: 50%;
   clip-path: circle(50% at 50% 50%);
   background: #fff;
-  border: 3px solid #fff;                 /* біла обводка */
-  box-shadow: 0 6px 14px rgba(0,0,0,.12), 0 2px 4px rgba(0,0,0,.08); /* мʼяка тінь */
+  border: 3px solid #fff; /* біла обводка */
+  box-shadow: 0 6px 14px rgba(0,0,0,.12), 0 2px 4px rgba(0,0,0,.08); /* м’яка тінь */
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -82,12 +82,12 @@
   pointer-events: none !important;
 }
 
-/* підпис — завжди читається */
+/* підпис під колом — тільки ім’я профілю */
 .story-label {
   font-size: var(--story-label-fs);
   line-height: var(--story-label-lh);
   color: #111;
-  max-width: calc(var(--story-size) + 24px); /* трохи ширше за коло */
+  max-width: calc(var(--story-size) + 24px);
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
@@ -107,5 +107,5 @@
 .story-item.add-button .story-label { color: #000; }
 
 @media (min-width: 480px) {
-  :root { --story-size: 72px; }  /* ширші кола на планшет/десктоп */
+  :root { --story-size: 72px; }  /* планшет/десктоп */
 }
