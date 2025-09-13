@@ -1,28 +1,52 @@
+/* ===== Глобально: коректні розрахунки ширин ===== */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ===== Тема / змінні ===== */
 :root{
   --bmb-pink:#ffcdd6;
   --bmb-pink-strong:#ff9fb8;
   --bmb-pink-hover:#ffb7c8;
   --track:#e9edf3;
   --panel:#f7f7fa;
-  --radius:24px;
-  --action-w:560px;
 
-  /* керуємо товщиною індикатора та розміром капсули */
+  --radius:24px;
+
+  /* Максимальна ширина контенту сторінки (карти/хедера/картки) */
+  --content-max: 980px;
+
+  /* Внутрішня «колонка» в картці (textarea, кнопки) */
+  --action-w: 560px;
+
+  /* горизонтальні поля сторінки */
+  --page-pad: 16px;
+
+  /* індикатор прогресу */
   --progress-h: 8px;                      /* товщина тонкої лінії */
   --cap-d: calc(var(--progress-h) * 2.2); /* діаметр кружечка з лого */
   --cap-border: calc(var(--progress-h) / 4);
 }
 
-/* layout */
+/* ===== Layout сторінки ===== */
 .scenario-list{
-  padding: 24px 12px 56px;
+  /* рівні відступи від краю екрана, з урахуванням iOS safe-area */
+  padding-top: 24px;
+  padding-bottom: 56px;
+  padding-left: max(var(--page-pad), env(safe-area-inset-left));
+  padding-right: max(var(--page-pad), env(safe-area-inset-right));
+
   background:
     radial-gradient(1200px 600px at 50% -10%, rgba(255,205,214,.20), transparent 60%),
     linear-gradient(#fff, #fff);
 }
+
+/* Хедер тримаємо у «контейнері» по центру */
 .scenario-header{
-  display:flex; justify-content:space-between; align-items:center;
-  max-width: 980px; margin: 6px auto 14px;
+  display:flex;
+  justify-content: space-between;
+  align-items:center;
+
+  width: min(100%, var(--content-max));
+  margin: 6px auto 14px; /* auto = по центру */
 }
 .scenario-header h2{ margin:0; }
 .scenario-status-panel{ display:flex; gap:10px; align-items:center; }
@@ -30,15 +54,17 @@
   padding:8px 12px; border-radius:999px; border:none; background:#000; color:#fff; cursor:pointer;
 }
 
-/* card */
+/* ===== Картка ===== */
 .scenario-card{
+  width: min(100%, var(--content-max));   /* по центру та не ширше контенту */
+  margin: 18px auto;
+  padding: 22px;
+
   background: var(--panel);
   border: 1px solid #fff;
   border-radius: var(--radius);
-  padding: 22px;
-  margin: 18px auto;
-  max-width: 980px;
   box-shadow: 0 8px 24px rgba(0,0,0,.04);
+
   display:flex; flex-direction:column; align-items:center;
   animation: cardFade .2s ease-out;
 }
@@ -47,7 +73,14 @@
   to{ transform: translateY(0); opacity:1; }
 }
 
-.scenario-info{ width:100%; max-width: var(--action-w); }
+/* Внутрішня колонка контенту у картці — теж центр і фіксована max-width */
+.scenario-info,
+.scenario-actions{
+  width: min(100%, var(--action-w));
+  margin-inline: auto;          /* строгий центр */
+}
+
+/* Текстова область */
 .scenario-info textarea{
   width:100%; min-height: 160px; resize:vertical;
   background:#fff; border:none; border-radius:18px; padding:12px 14px;
@@ -60,19 +93,18 @@
     0 0 0 3px rgba(255,205,214,.55);
 }
 
+/* мета-рядок */
 .meta-row{ display:flex; gap:24px; margin: 12px 0 6px; }
 .meta-col .meta-label{ font-size:12px; opacity:.7; }
 .meta-col .meta-value{ font-weight:600; }
 
-/* ——— індикатор статусу — тонкий, з лого та пілюлею суми ——— */
+/* ===== Індикатор статусу (тонкий) ===== */
 .bmb-progress-wrap{
   position:relative;
   width:100%;
   height: calc(var(--cap-d) + 18px); /* даємо простір під пілюлю/кап */
   margin: 6px 0 10px;
 }
-
-/* сіра основа */
 .bmb-track{
   position:absolute; left:0; right:0; top:50%;
   height: var(--progress-h);
@@ -81,8 +113,6 @@
   border-radius: 999px;
   overflow:hidden;
 }
-
-/* рожевий заповнювач */
 .bmb-fill{
   position:absolute; left:0; top:50%;
   height: var(--progress-h);
@@ -91,8 +121,6 @@
   border-radius: 999px;
   transition: width .25s ease;
 }
-
-/* кружечок з логотипом — пропорційний товщині */
 .bmb-cap{
   position:absolute;
   top:50%;
@@ -109,7 +137,7 @@
 }
 .bmb-cap img{ width:80%; height:80%; object-fit:contain; display:block; }
 
-/* пілюля суми (живе поле) — притискаємо до верху */
+/* пілюля суми */
 .bmb-amount-wrap{
   position:absolute;
   bottom: calc(100% + 6px);
@@ -135,14 +163,14 @@
   font-weight:700;
 }
 
-/* actions */
+/* ===== Дії / Кнопки ===== */
 .scenario-actions{
   display:flex; flex-direction:column; gap:12px; align-items:center;
   margin-top: 16px;
-  width:100%; max-width: var(--action-w);
 }
 .btn{
-  width:100%; padding:14px 18px;
+  width:100%;
+  padding:14px 18px;
   border:none; border-radius:999px; font-weight:700;
   background: var(--bmb-pink);
   color:#000; cursor:pointer;
@@ -152,18 +180,34 @@
 .btn:hover{ background: var(--bmb-pink-hover); }
 .btn:active{ transform: translateY(1px); box-shadow: 0 1px 0 rgba(0,0,0,.05); }
 .btn:disabled{ opacity:.5; cursor:not-allowed; }
-
-/* flags line */
 .flags-line{ font-size:12px; opacity:.65; margin-top:6px; }
-
-/* responsive */
-@media (max-width: 640px){
-  :root{ --action-w: 100%; }
-  .meta-row{ flex-direction:column; gap:6px; }
-}
 .scenario-actions .btn.checked{
   background:#ffdbe3;
   color:#111;
   font-weight:700;
   cursor:default;
+}
+
+/* ===== Mobile tweaks ===== */
+@media (max-width: 640px){
+  /* однакові поля від країв, обидва блоки по центру */
+  :root{ --page-pad: 16px; }
+
+  .scenario-header{
+    width: min(100%, var(--content-max));
+    margin: 6px auto 14px;
+    flex-direction: column;
+    gap: 8px;
+    text-align: center;
+  }
+
+  .meta-row{ flex-direction:column; gap:6px; }
+
+  /* гарантуємо рівну «рамку» по краях для внутрішніх блоків */
+  .scenario-info,
+  .scenario-actions{
+    width: min(100%, var(--action-w));
+    margin-left: auto;
+    margin-right: auto;
+  }
 }
