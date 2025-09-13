@@ -10,12 +10,14 @@
 
     { "source": "/(.*\\.(?:js|css|png|jpg|jpeg|gif|svg|webp|ico|json|txt|map|woff|woff2|ttf))", "destination": "/$1" },
 
-    { "source": "/(.*)", "destination": "/" }
+    { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
     {
       "source": "/sw.js",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache" }
+      ]
     }
   ]
 }
