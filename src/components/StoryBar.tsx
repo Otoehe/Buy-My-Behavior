@@ -1,7 +1,9 @@
 // src/components/StoryBar.tsx
-// Stories (INSERT-only) — робоча стабільна версія без зайвих залежностей
-// + Кнопка "+", відкриття UploadBehavior, кліки ведуть на /behaviors
-// + Підпис до 2-х рядків, відео без кропу, realtime: INSERT
+// ✅ КАНОНІЧНИЙ СТОРІСБАР (v2025-08-17)
+// - Realtime лише INSERT з таблиці behaviors
+// - Кнопка "+" → UploadBehavior
+// - Клік по сторіс → /behaviors
+// - Без DISPUTE-badge та будь-яких інших експериментів
 
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -9,15 +11,15 @@ import { supabase } from "../lib/supabase";
 import UploadBehavior from "./UploadBehavior";
 import "./StoryBar.css";
 
-interface Behavior {
+type Behavior = {
   id: number;
   user_id: string | null;
-  title: string | null;       // підпис під кружечком (за наявності)
+  title: string | null;
   description: string | null;
   ipfs_cid: string | null;
-  file_url?: string | null;   // fallback на пряме посилання
+  file_url?: string | null;
   created_at: string;
-}
+};
 
 export default function StoryBar() {
   const [behaviors, setBehaviors] = useState<Behavior[]>([]);
@@ -27,7 +29,9 @@ export default function StoryBar() {
   async function fetchBehaviors() {
     const { data, error } = await supabase
       .from("behaviors")
-      .select("id,user_id,title,description,ipfs_cid,file_url,created_at")
+      .select(
+        "id,user_id,title,description,ipfs_cid,file_url,created_at"
+      )
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -40,7 +44,7 @@ export default function StoryBar() {
   useEffect(() => {
     fetchBehaviors();
 
-    // realtime лише INSERT (канонічно)
+    // 🔔 Канон: тільки INSERT
     const ch = supabase
       .channel("realtime:behaviors")
       .on(
@@ -50,6 +54,7 @@ export default function StoryBar() {
       )
       .subscribe();
 
+    // внутрішні події, які ми вже використовували
     const onUploaded = () => fetchBehaviors();
     const openHandler = () => setIsUploadOpen(true);
 
@@ -63,6 +68,7 @@ export default function StoryBar() {
     };
   }, []);
 
+  // IPFS → gateway, або fallback на file_url
   const resolveSrc = (b: Behavior) =>
     b.ipfs_cid
       ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}`
@@ -73,7 +79,7 @@ export default function StoryBar() {
   return (
     <>
       <div className="story-bar" onClick={(e) => e.stopPropagation()}>
-        {/* Кнопка + Додати */}
+        {/* + Додати */}
         <button
           type="button"
           className="story-item add-button"
@@ -90,7 +96,7 @@ export default function StoryBar() {
           <div className="story-label">Додати</div>
         </button>
 
-        {/* Історії */}
+        {/* Items */}
         {behaviors.map((b) => (
           <div
             key={b.id}
@@ -113,7 +119,7 @@ export default function StoryBar() {
                 onEnded={(e) => {
                   const v = e.currentTarget;
                   v.currentTime = 0;
-                  v.play();
+                  v.play().catch(() => {});
                 }}
               />
             </div>
