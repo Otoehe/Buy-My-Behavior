@@ -4,6 +4,9 @@ import { supabase } from '../lib/supabase';
 import './Profile.css';
 import { pushNotificationManager } from '../lib/pushNotifications';
 
+// ✅ ДОДАНО: імпорт кнопки PWA (окремий компонент, нічого не ламає)
+import InstallPWAButton from './InstallPWAButton';
+
 /** Ролі */
 const roles = [
   'Актор', 'Музикант', 'Авантюрист', 'Платонічний Ескорт', 'Хейтер',
@@ -589,6 +592,13 @@ export default function Profile() {
           </div>
         </div>
       )}
+
+      {/* ✅ ДОДАНО: окрема “розумна” кнопка PWA посередині сторінки, на ширину контенту */}
+      <style>{`
+        .profile-install-cta{width:100%;max-width:760px;margin:16px auto 24px;display:flex;flex-direction:column;align-items:center}
+        .profile-install-cta button{width:100%;justify-content:center}
+      `}</style>
+      <InstallPWAButton className="profile-install-cta" iconSrc="/icons/icon-192.png" />
 
       {/* A2HS Modal */}
       {showA2HSModal && !installed && (
