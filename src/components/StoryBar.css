@@ -6,6 +6,10 @@
    - без badge DISPUTE
 */
 
+:root {
+  --story-size: 72px; /* легко поміняти один раз для всіх кружечків */
+}
+
 .story-bar {
   display: flex;
   gap: 10px;
@@ -34,73 +38,6 @@
   gap: 6px;
   cursor: pointer;
   transition: transform .12s ease;
-}
-.story-item:active { transform: scale(0.97); }
-
-/* circle */
-.story-circle {
-  width: 64px;
-  height: 64px;
-  border-radius: 9999px;
-  background: #f7f7f7;
-  border: 1px solid #e6e6e6;
-  box-shadow: 0 1px 0 rgba(0,0,0,.04);
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-}
-.story-video {
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: cover !important;
-  display: block !important;
-  border-radius: 9999px !important;
-  pointer-events: none !important;
-}
-
-.story-label {
-  font-size: 12px;
-  line-height: 14px;
-  color: #111;
-  max-width: 80px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  overflow: hidden;
-}
-
-/* "+" */
-.story-item.add-button .story-circle {
-  background: linear-gradient(135deg, #ffcdd6, #ffdfe6); /* наш бренд */
-  border: none;
-  color: #000;
-  font-weight: 700;
-  font-size: 20px;
-}
-.story-item.add-button:hover .story-circle { transform: scale(1.04); }
-.story-item.add-button .story-label { color: #000; }
-
-@media (min-width: 480px) {
-  .story-circle { width: 72px; height: 72px; }
-  .story-item.add-button .story-circle { font-size: 22px; }
-}
-
-/* ────────────────────────────────────────────────────────────── */
-/* FIX PACK + висота: щоб не “підлазило” під навбар               */
-/* ────────────────────────────────────────────────────────────── */
-
-/* робимо рейку трохи вищою і з відступами зверху/знизу */
-.story-bar.story-bar--tall {
-  padding: 10px 12px;           /* ↑↑ було 2/6/4 */
-  gap: 12px;                    /* трохи більше повітря */
-  scrollbar-gutter: stable both-edges;
-  background: #fff;             /* підкладка, якщо навбар напівпрозорий */
-  position: relative;
-  z-index: 2;
-  border-bottom: 1px solid rgba(0,0,0,.04); /* легка лінія як у шапці */
-}
-
-/* глушимо дефолти кнопки — без зміни твоєї розмітки */
-.story-item {
   flex: 0 0 auto;
   text-align: center;
   border: 0;
@@ -110,30 +47,57 @@
   -webkit-appearance: none;
   line-height: 1;
 }
+.story-item:active { transform: scale(0.97); }
 
-/* коло не стискається; медіа рендеряться чітко */
-.story-circle { flex: 0 0 64px; position: relative; }
-@media (min-width: 480px) { .story-circle { flex-basis: 72px; } }
+/* circle — жорстко фіксуємо 1:1 і круглу маску  */
+.story-circle {
+  inline-size: var(--story-size);
+  block-size: var(--story-size);
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  clip-path: circle(50% at 50% 50%);
+  background: #f7f7f7;
+  border: 1px solid #e6e6e6;
+  box-shadow: 0 1px 0 rgba(0,0,0,.04);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  contain: layout paint size;
+}
 
-.story-circle > img,
-.story-circle > video {
+.story-video,
+.story-poster {
   width: 100% !important;
   height: 100% !important;
   object-fit: cover !important;
   display: block !important;
-  border-radius: 9999px !important;
+  border-radius: 50% !important;
+  pointer-events: none !important;
 }
 
-/* фокус та active без зсувів макета */
-.story-item:active .story-circle { transform: scale(0.97); }
-.story-item:focus-visible .story-circle {
-  outline: 2px solid #111;
-  outline-offset: 2px;
+/* підпис */
+.story-label {
+  font-size: 12px;
+  line-height: 14px;
+  color: #111;
+  max-width: 88px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  margin-top: 4px;
 }
 
-/* підпис стабільний */
-.story-label { margin-top: 4px; }
+/* "+" */
+.story-item.add-button .story-circle {
+  background: linear-gradient(135deg, #ffcdd6, #ffdfe6);
+  border: none;
+  color: #000;
+  font-weight: 700;
+  font-size: 22px;
+}
+.story-item.add-button:hover .story-circle { transform: scale(1.04); }
+.story-item.add-button .story-label { color: #000; }
 
-/* (необов'язково) якщо в тебе є клас навбара — додай висоти там теж:
-   .navigation-bar, .navbar, .header { padding-block: 12px; min-height: 56px; }
-*/
+@media (max-width: 479px) {
+  :root { --story-size: 64px; }
+}

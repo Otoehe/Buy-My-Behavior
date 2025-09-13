@@ -1,5 +1,4 @@
 // src/components/StoryBar.tsx
-// ADD-ONLY: більше відступів, robust media resolver (Supabase Storage/IPFS), hover-play
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
@@ -14,12 +13,11 @@ interface Behavior {
   title: string | null;
   description: string | null;
 
-  // можливі поля медіа з різних ітерацій схеми
   file_url?: Nullable<string>;
   video_url?: Nullable<string>;
   image_url?: Nullable<string>;
   thumbnail_url?: Nullable<string>;
-  storage_path?: Nullable<string>; // типу: "behaviors/xyz.mp4" або "evidence/abc.mp4"
+  storage_path?: Nullable<string>;
   ipfs_cid?: Nullable<string>;
 
   created_at: string;
@@ -32,17 +30,12 @@ const gateways = [
   (cid: string) => `https://ipfs.io/ipfs/${cid}`,
 ];
 
-const looksLikeHttp = (s?: string | null) => !!s && /^https?:\/\//i.test(s);
-const looksLikeIPFS = (s?: string | null) => !!s && /^[a-z0-9]{46,}$/i.test(s);
-
-function firstNonEmpty(...vals: Array<Nullable<string>>): string | null {
-  for (const v of vals) if (v && String(v).trim()) return String(v);
+const isHttp = (s?: string | null) => !!s && /^https?:\/\//i.test(s);
+const isCid  = (s?: string | null) => !!s && /^[a-z0-9]{46,}$/i.test(s);
+const firstNonEmpty = (...vals: Array<Nullable<string>>) => {
+  for (const v of vals) { if (v && String(v).trim()) return String(v); }
   return null;
-}
-
-function naiveJoin(a: string, b: string) {
-  return a.replace(/\/+$/, "") + "/" + b.replace(/^\/+/, "");
-}
+};
 
 export default function StoryBar() {
   const [behaviors, setBehaviors] = useState<Behavior[]>([]);
@@ -51,7 +44,7 @@ export default function StoryBar() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const navigate = useNavigate();
 
-  // --- Initial fetch (останнє зверху)
+  // initial fetch
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -66,7 +59,7 @@ export default function StoryBar() {
     return () => { alive = false; };
   }, []);
 
-  // --- Realtime INSERT-only
+  // realtime INSERT-only
   useEffect(() => {
     const ch = supabase
       .channel("realtime:behaviors")
@@ -81,31 +74,25 @@ export default function StoryBar() {
     return () => { supabase.removeChannel(ch); };
   }, []);
 
-  // --- Resolve media (HTTP / IPFS / Supabase Storage)
-  const tryResolveDirect = useCallback((b: Behavior) => {
-    // прямі http(s) або IPFS-cid
+  // ---- resolvers ----
+  const resolveDirect = (b: Behavior) => {
     const direct = firstNonEmpty(b.file_url, b.video_url, b.image_url);
-    if (looksLikeHttp(direct)) return direct!;
-    if (looksLikeIPFS(b.ipfs_cid)) return gateways[0](b.ipfs_cid!);
+    if (isHttp(direct)) return direct!;
+    if (isCid(b.ipfs_cid)) return gateways[0](b.ipfs_cid!);
     return null;
-  }, []);
+  };
 
-  const tryResolveStorage = useCallback((b: Behavior) => {
-    // якщо шлях без протоколу — спробуємо різні бакети
+  const resolveStorage = (b: Behavior) => {
     const rel = firstNonEmpty(b.storage_path, b.file_url, b.video_url, b.image_url);
-    if (!rel || looksLikeHttp(rel)) return null;
-
-    // якщо вказано "bucket/path"
-    const bucketMatch = rel.match(/^([a-z0-9_-]+)\/(.+)$/i);
+    if (!rel || isHttp(rel)) return null;
+    const m = rel.match(/^([a-z0-9_-]+)\/(.+)$/i);
     const candidates: Array<{ bucket: string; path: string }> = [];
-    if (bucketMatch) {
-      candidates.push({ bucket: bucketMatch[1], path: bucketMatch[2] });
-    } else {
-      // пробуємо стандартні бакети
-      const guessBuckets = ["behaviors", "evidence", "uploads", "public", "videos"];
-      for (const bkt of guessBuckets) candidates.push({ bucket: bkt, path: rel });
+    if (m) candidates.push({ bucket: m[1], path: m[2] });
+    else {
+      for (const bucket of ["behaviors", "evidence", "uploads", "public", "videos"]) {
+        candidates.push({ bucket, path: rel });
+      }
     }
-
     for (const c of candidates) {
       try {
         const { data } = supabase.storage.from(c.bucket).getPublicUrl(c.path);
@@ -113,51 +100,96 @@ export default function StoryBar() {
       } catch { /* ignore */ }
     }
     return null;
-  }, []);
+  };
 
-  const computePoster = useCallback((b: Behavior) => {
+  const computePosterUrl = (b: Behavior) => {
     const poster = firstNonEmpty(b.thumbnail_url, b.image_url);
-    if (looksLikeHttp(poster)) return poster!;
-    if (looksLikeIPFS(poster)) return gateways[0](poster!);
-    // якщо постера немає — залишимо null (використаємо /placeholder.jpg)
+    if (isHttp(poster)) return poster!;
+    if (isCid(poster)) return gateways[0](poster!);
     return null;
-  }, []);
+  };
 
+  // зняти кадр з відео для постера (якщо CORS дозволяє)
+  const grabPosterFrame = (url: string): Promise<string | null> => new Promise((resolve) => {
+    try {
+      const video = document.createElement("video");
+      video.crossOrigin = "anonymous";
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "metadata";
+      video.src = url;
+
+      const clean = () => { video.src = ""; };
+
+      const onError = () => { clean(); resolve(null); };
+      video.onerror = onError;
+
+      video.onloadedmetadata = () => {
+        try {
+          // невеликий зсув від 0, щоб не ловити чорний кадр
+          video.currentTime = Math.min(0.25, (video.duration || 1) / 10);
+        } catch { onError(); }
+      };
+      video.onseeked = () => {
+        try {
+          const size = 144; // більше, щоб чіткіше в ретині
+          const canvas = document.createElement("canvas");
+          canvas.width = size; canvas.height = size;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return onError();
+          ctx.drawImage(video, 0, 0, size, size);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.76);
+          clean();
+          resolve(dataUrl);
+        } catch { onError(); }
+      };
+    } catch { resolve(null); }
+  });
+
+  // resolve media & posters
   useEffect(() => {
     (async () => {
       const nextSrc: Record<number, string | null> = {};
       const nextPoster: Record<number, string | null> = {};
       for (const b of behaviors) {
-        let src = tryResolveDirect(b);
-        if (!src) src = tryResolveStorage(b);
-        // останній шанс — CID у полі ipfs_cid
-        if (!src && looksLikeIPFS(b.ipfs_cid)) src = gateways[0](b.ipfs_cid!);
+        let src = resolveDirect(b);
+        if (!src) src = resolveStorage(b);
+        if (!src && isCid(b.ipfs_cid)) src = gateways[0](b.ipfs_cid!);
+
+        let poster = computePosterUrl(b);
 
         nextSrc[b.id] = src;
-        nextPoster[b.id] = computePoster(b);
+        nextPoster[b.id] = poster ?? null;
       }
       setSrcMap(nextSrc);
       setPosterMap(nextPoster);
+
+      // автогенерація постерів, якщо їх нема, але є src
+      const prefersReduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+      for (const b of behaviors) {
+        if (!nextPoster[b.id] && nextSrc[b.id]) {
+          try {
+            const dataUrl = await grabPosterFrame(nextSrc[b.id]!);
+            if (dataUrl) {
+              setPosterMap(prev => ({ ...prev, [b.id]: dataUrl }));
+            }
+          } catch { /* ignore */ }
+        }
+      }
     })();
-  }, [behaviors, tryResolveDirect, tryResolveStorage, computePoster]);
+  }, [behaviors]);
 
   const openUpload = useCallback(() => setIsUploadOpen(true), []);
   const closeUpload = useCallback(() => setIsUploadOpen(false), []);
   const goToBehaviors = useCallback(() => navigate("/behaviors"), [navigate]);
 
-  // helper: play on hover (desktop), pause on leave
-  const onHoverPlay = useCallback((e: React.MouseEvent<HTMLVideoElement>) => {
-    const v = e.currentTarget;
-    try { v.play().catch(() => {}); } catch {}
-  }, []);
-  const onHoverStop = useCallback((e: React.MouseEvent<HTMLVideoElement>) => {
-    const v = e.currentTarget;
-    try { v.pause(); v.currentTime = 0; } catch {}
-  }, []);
+  const prefersReduceMotion = useMemo(
+    () => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false,
+    []
+  );
 
   return (
     <>
-      {/* збільшена “рейка” сторісбару, щоб нічого не перекривалось */}
       <div className="story-bar story-bar--tall" role="list" aria-label="Останні Behaviors">
         <button
           type="button"
@@ -189,16 +221,16 @@ export default function StoryBar() {
                   <video
                     className="story-video"
                     src={media}
-                    preload="metadata"
+                    poster={poster}
                     muted
                     playsInline
                     loop
-                    poster={poster}
-                    onMouseEnter={onHoverPlay}
-                    onMouseLeave={onHoverStop}
+                    preload="metadata"
+                    autoPlay={!prefersReduceMotion} /* маленьке луп-прев’ю */
+                    aria-hidden="true"
                   />
                 ) : (
-                  <img className="story-video" src={poster} alt={label} />
+                  <img className="story-poster" src={poster} alt={label} />
                 )}
               </div>
               <div className="story-label">{label}</div>
