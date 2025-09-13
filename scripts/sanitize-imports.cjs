@@ -1,91 +1,63 @@
 // scripts/sanitize-imports.cjs
-// Масова нормалізація коду перед білдом:
-//  - "імпортувати/імпорт … з …" -> "import … from …"
-//  - "імпортувати/імпорт 'x'"    -> "import 'x'"
-//  - "експортувати/експорт …"    -> "export …"
-//  - прибирає NBSP/zero-width, замінює смарт-лапки на звичайні
-//  - проходить по ВСЬОМУ репозиторію (крім node_modules, dist, build, .git, .vercel, public)
+// Запуск: `node scripts/sanitize-imports.cjs --fix`
+// Прибирає zero-width/NBSP/BOM, уніфікує лапки й випадкові "імпортувати/експортувати"
 
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = process.cwd();
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.next', '.git', '.vercel', 'public']);
-const EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+const exts = new Set(['.ts', '.tsx', '.js', '.jsx']);
 
-const ZW_RE = /[\u200B-\u200D\uFEFF\u2060]/g;      // zero-width
-const NBSP_RE = /\u00A0/g;                          // NBSP
-const SMART_SINGLE = /[\u2018\u2019]/g;             // ‘ ’
-const SMART_DOUBLE = /[\u201C\u201D]/g;             // “ ”
+const FLAGS = {
+  FIX: process.argv.includes('--fix'),
+};
 
-function walk(dir, out = []) {
+const RE = {
+  ZW: /[\u200B-\u200D\uFEFF\u2060]/g,     // zero-width chars incl. BOM
+  NBSP: /\u00A0/g,                         // NBSP
+  CURLY_QUOTES: /[\u2018\u2019\u201A\u201B\u2032\u00B4]/g,   // → '
+  CURLY_DQUOTES: /[\u201C\u201D\u201E\u201F\u2033\u00AB\u00BB]/g, // → "
+  // випадки автоперекладу
+  IMPORT_UA: /\bімпортувати\b/gi,
+  EXPORT_UA: /\bекспортувати\b/gi,
+};
+
+function sanitize(text) {
+  let out = text;
+  // прибираємо невидимі
+  out = out.replace(RE.ZW, '');
+  out = out.replace(RE.NBSP, ' ');
+  // уніфікуємо лапки
+  out = out.replace(RE.CURLY_QUOTES, '\'');
+  out = out.replace(RE.CURLY_DQUOTES, '"');
+  // захист від автоперекладу ключових слів
+  out = out.replace(RE.IMPORT_UA, 'import');
+  out = out.replace(RE.EXPORT_UA, 'export');
+  // якщо на початку лишився BOM — знімаємо
+  if (out.charCodeAt(0) === 0xFEFF) out = out.slice(1);
+  return out;
+}
+
+function walk(dir) {
   for (const name of fs.readdirSync(dir)) {
     const p = path.join(dir, name);
     const st = fs.statSync(p);
     if (st.isDirectory()) {
-      if (SKIP_DIRS.has(name)) continue;
-      walk(p, out);
-    } else if (EXTS.has(path.extname(name))) {
-      out.push(p);
+      if (name === 'node_modules' || name === 'dist' || name.startsWith('.next')) continue;
+      walk(p);
+    } else if (exts.has(path.extname(name))) {
+      const src = fs.readFileSync(p, 'utf8');
+      const cleaned = sanitize(src);
+      if (src !== cleaned) {
+        if (FLAGS.FIX) {
+          fs.writeFileSync(p, cleaned, 'utf8');
+          console.log('fixed:', p.replace(ROOT + path.sep, ''));
+        } else {
+          console.log('needs-fix:', p.replace(ROOT + path.sep, ''));
+        }
+      }
     }
   }
-  return out;
 }
 
-function normalize(code) {
-  let txt = code;
-  let changed = false;
-
-  // глобально чистимо невидимі/нестандартні символи
-  if (ZW_RE.test(txt)) { txt = txt.replace(ZW_RE, ''); changed = true; }
-  if (NBSP_RE.test(txt)) { txt = txt.replace(NBSP_RE, ' '); changed = true; }
-  if (SMART_SINGLE.test(txt)) { txt = txt.replace(SMART_SINGLE, "'"); changed = true; }
-  if (SMART_DOUBLE.test(txt)) { txt = txt.replace(SMART_DOUBLE, '"'); changed = true; }
-
-  // 1) імпорт з модулем: "імпортувати/імпорт X з 'mod'"
-  txt = txt.replace(
-    /(^|\n)\s*(?:імпортувати|імпорт)\s+([^;\n]+?)\s+з\s+(['"][^'"]+['"])\s*;?/gmi,
-    (_, br, what, from) => { changed = true; return `${br}import ${what} from ${from};`; }
-  );
-
-  // 2) сайд-ефект імпорт: "імпортувати/імпорт 'mod'"
-  txt = txt.replace(
-    /(^|\n)\s*(?:імпортувати|імпорт)\s+(['"][^'"]+['"])\s*;?/gmi,
-    (_, br, mod) => { changed = true; return `${br}import ${mod};`; }
-  );
-
-  // 3) експорт default
-  txt = txt.replace(
-    /(^|\n)\s*(?:експортувати|експорт)\s+default\s+/gmi,
-    (_, br) => { changed = true; return `${br}export default `; }
-  );
-
-  // 4) іменований експорт
-  txt = txt.replace(
-    /(^|\n)\s*(?:експортувати|експорт)\s+(\{[^;\n]+?\})\s*;?/gmi,
-    (_, br, body) => { changed = true; return `${br}export ${body};`; }
-  );
-
-  // 5) експорт декларацій
-  txt = txt.replace(
-    /(^|\n)\s*(?:експортувати|експорт)\s+(const|let|var|function|class)\s/gmi,
-    (_, br, kind) => { changed = true; return `${br}export ${kind} `; }
-  );
-
-  return { txt, changed };
-}
-
-const files = walk(ROOT);
-let changes = 0;
-
-for (const f of files) {
-  const src = fs.readFileSync(f, 'utf8');
-  const { txt, changed } = normalize(src);
-  if (changed) {
-    fs.writeFileSync(f, txt);
-    console.log('fixed:', path.relative(ROOT, f));
-    changes++;
-  }
-}
-
-console.log(`\n✅ sanitize-imports: updated files = ${changes}`);
+walk(path.join(ROOT, 'src'));
