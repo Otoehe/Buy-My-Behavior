@@ -1,3 +1,4 @@
+// src/pages/MyOrders.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { lockFunds, confirmCompletionOnChain, getDealOnChain } from '../lib/escrowContract';
@@ -38,7 +39,6 @@ export default function MyOrders() {
   const [openDisputes, setOpenDisputes] = useState<Record<string, DisputeRow | null>>({});
   const [ratedOrders, setRatedOrders] = useState<Set<string>>(new Set());
 
-  // rating modal state
   const [rateOpen, setRateOpen] = useState(false);
   const [rateFor, setRateFor] = useState<{ scenarioId: string, counterpartyId: string } | null>(null);
   const [rateScore, setRateScore] = useState(10);
@@ -79,7 +79,6 @@ export default function MyOrders() {
     setList(((data || []) as Scenario[]).filter(s => s.creator_id === uid));
   }, []);
 
-  // fetch rated orders for current user
   const refreshRated = useCallback(async (uid: string, items: Scenario[]) => {
     if (!uid || items.length === 0) { setRatedOrders(new Set()); return; }
     const ids = items.map(s => s.id);
@@ -168,7 +167,6 @@ export default function MyOrders() {
         .eq('is_agreed_by_customer', false)
         .select().single();
       if (error && error.code !== 'PGRST116') throw error;
-
       setLocal(s.id, { is_agreed_by_customer: true, status: rec?.status || s.status });
     } catch (e:any) {
       alert(e?.message || 'Помилка погодження.');
@@ -200,8 +198,8 @@ export default function MyOrders() {
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
       await confirmCompletionOnChain({ scenarioId: s.id });
-
       setLocal(s.id, { is_completed_by_customer: true });
+
       await supabase.from('scenarios')
         .update({ is_completed_by_customer: true })
         .eq('id', s.id)
@@ -225,13 +223,8 @@ export default function MyOrders() {
     }
   };
 
-  const canDispute = (s: Scenario) => {
-    const notFinal = s.status !== 'confirmed';
-    const escrowLocked = !!s.escrow_tx_hash;
-    const noOpenDispute = !openDisputes[s.id];
-    const iAmCustomer = userId === s.creator_id;
-    return notFinal && escrowLocked && noOpenDispute && iAmCustomer;
-  };
+  const canDispute = (s: Scenario) =>
+    s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id;
 
   const handleDispute = async (s: Scenario) => {
     try {
@@ -243,7 +236,6 @@ export default function MyOrders() {
     }
   };
 
-  // rating actions (customer rates executor)
   const openRateFor = (s: Scenario) => {
     setRateScore(10);
     setRateComment('');
@@ -294,7 +286,6 @@ export default function MyOrders() {
           key={s.id}
           role="customer"
           s={s}
-
           onChangeDesc={(v) => setLocal(s.id, { description: v })}
           onCommitDesc={async (v) => {
             if (s.escrow_tx_hash || s.status === 'confirmed') return;
@@ -305,7 +296,6 @@ export default function MyOrders() {
               is_agreed_by_executor: false
             }).eq('id', s.id);
           }}
-
           onChangeAmount={(v) => setLocal(s.id, { donation_amount_usdt: v })}
           onCommitAmount={async (v) => {
             if (s.escrow_tx_hash || s.status === 'confirmed') return;
@@ -317,22 +307,19 @@ export default function MyOrders() {
               is_agreed_by_executor: false
             }).eq('id', s.id);
           }}
-
           onAgree={() => handleAgree(s)}
           onLock={() => handleLock(s)}
           onConfirm={() => handleConfirm(s)}
           onDispute={() => handleDispute(s)}
           onOpenLocation={() => hasCoords(s) && window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank')}
-
           canAgree={canAgree(s)}
           canLock={(s.is_agreed_by_customer && s.is_agreed_by_executor && !s.escrow_tx_hash) || false}
           canConfirm={canConfirm(s)}
-          canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
+          canDispute={canDispute(s)}
           hasCoords={hasCoords(s)}
           busyAgree={!!agreeBusy[s.id]}
           busyLock={!!lockBusy[s.id]}
           busyConfirm={!!confirmBusy[s.id]}
-
           isRated={ratedOrders.has(s.id)}
           onOpenRate={() => openRateFor(s)}
         />
