@@ -1,10 +1,14 @@
-import React, { useEffect, useState } from "react";
+// src/components/StoryBar.tsx
+// Canonical (2025-08-17): INSERT-only realtime; "+" відкриває UploadBehavior;
+// клік по кружечку веде на /behaviors; без DisputeBadge; без toLocaleLowerCase.
+
+import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import UploadBehavior from "./UploadBehavior";
 import "./StoryBar.css";
 
-type Behavior = {
+interface Behavior {
   id: number;
   user_id: string | null;
   title: string | null;
@@ -12,6 +16,14 @@ type Behavior = {
   ipfs_cid: string | null;
   file_url?: string | null;
   created_at: string;
+  is_dispute_evidence?: boolean | null;
+  dispute_id?: string | null;
+}
+
+const toMediaSrc = (b: Behavior): string | null => {
+  if (b?.file_url) return b.file_url;
+  if (b?.ipfs_cid) return `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}`;
+  return null;
 };
 
 export default function StoryBar() {
@@ -19,108 +31,79 @@ export default function StoryBar() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const navigate = useNavigate();
 
-  async function fetchBehaviors() {
-    const { data, error } = await supabase
-      .from("behaviors")
-      .select("id,user_id,title,description,ipfs_cid,file_url,created_at")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("❌ fetch behaviors failed:", error);
-      return;
-    }
-    setBehaviors(data ?? []);
-  }
-
+  // initial fetch (останнє зверху)
   useEffect(() => {
-    fetchBehaviors();
+    let alive = true;
+    (async () => {
+      const { data, error } = await supabase
+        .from<Behavior>("behaviors")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(24);
+      if (!alive) return;
+      if (!error && data) setBehaviors(data);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
-    const ch = supabase
+  // realtime INSERT-only
+  useEffect(() => {
+    const channel = supabase
       .channel("realtime:behaviors")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "behaviors" },
-        () => fetchBehaviors()
+        (payload) => {
+          const b = payload.new as Behavior;
+          setBehaviors((prev) => {
+            // уникаємо дубляжу
+            if (prev.some((x) => x.id === b.id)) return prev;
+            return [b, ...prev];
+          });
+        }
       )
       .subscribe();
 
-    const onUploaded = () => fetchBehaviors();
-    const openHandler = () => setIsUploadOpen(true);
-
-    window.addEventListener("behaviorUploaded", onUploaded as EventListener);
-    window.addEventListener("openUploadModal", openHandler as EventListener);
-
     return () => {
-      supabase.removeChannel(ch);
-      window.removeEventListener("behaviorUploaded", onUploaded as EventListener);
-      window.removeEventListener("openUploadModal", openHandler as EventListener);
+      supabase.removeChannel(channel);
     };
   }, []);
 
-  const resolveSrc = (b: Behavior) =>
-    b.ipfs_cid
-      ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}`
-      : b.file_url || "";
+  const openUpload = useCallback(() => setIsUploadOpen(true), []);
+  const closeUpload = useCallback(() => setIsUploadOpen(false), []);
 
-  const openFeed = () => navigate("/behaviors");
+  const goToBehaviors = useCallback(() => navigate("/behaviors"), [navigate]);
 
   return (
     <>
-      <div className="story-bar" data-bmb="storybar-v1" onClick={(e) => e.stopPropagation()}>
-        <button
-          type="button"
-          className="story-item add-button"
-          aria-label="Додати Behavior"
-          title="Додати Behavior"
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsUploadOpen(true);
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="story-circle">＋</div>
+      <div className="story-bar">
+        <button className="story-item add-button" onClick={openUpload} aria-label="Додати Behavior">
+          <div className="story-circle">+</div>
           <div className="story-label">Додати</div>
         </button>
 
-        {behaviors.map((b) => (
-          <div
-            key={b.id}
-            className="story-item"
-            title={b.description || undefined}
-            onClick={(e) => {
-              e.stopPropagation();
-              openFeed();
-            }}
-          >
-            <div className="story-circle" aria-label={b.title ?? "Behavior"}>
-              <video
-                className="story-video"
-                src={resolveSrc(b)}
-                autoPlay
-                loop
-                muted
-                playsInline
-                preload="auto"
-                onEnded={(e) => {
-                  const v = e.currentTarget;
-                  v.currentTime = 0;
-                  v.play().catch(() => {});
-                }}
-              />
+        {behaviors.map((b) => {
+          const media = toMediaSrc(b);
+          return (
+            <div key={b.id} className="story-item" onClick={goToBehaviors} role="button" tabIndex={0}
+                 onKeyDown={(e) => (e.key === "Enter" ? goToBehaviors() : null)}>
+              <div className="story-circle">
+                {media ? (
+                  // невелике прев’ю — без автоплею для економії
+                  <video className="story-video" src={media} preload="metadata" muted playsInline />
+                ) : (
+                  <span className="story-initial">•</span>
+                )}
+              </div>
+              <div className="story-label">{b.title ?? "Behavior"}</div>
             </div>
-            {b.title && <div className="story-label">{b.title}</div>}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {isUploadOpen && (
-        <UploadBehavior onClose={() => setIsUploadOpen(false)}>
-          <div className="upload-hint">
-            📦 <strong>Увага:</strong> розмір Behavior не повинен перевищувати <strong>30MB</strong>
-          </div>
-        </UploadBehavior>
-      )}
+      {isUploadOpen && <UploadBehavior onClose={closeUpload} />}
     </>
   );
 }
