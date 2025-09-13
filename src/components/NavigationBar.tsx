@@ -1,8 +1,8 @@
 // src/components/NavigationBar.tsx — мобайл-фьорст, бургер (3 горизонтальні лінії), модалка через portal
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import StoryBar from './StoryBar'; // StoryBar показуємо лише на /map
+import StoryBar from './StoryBar'; // показуємо лише на /map і тільки якщо немає іншого інстансу
 
 const DESKTOP_BP = 992; // breakpoint для десктопу
 
@@ -13,6 +13,10 @@ const NavigationBar: React.FC = () => {
   const location = useLocation();
   const isMapRoute =
     location.pathname === '/map' || location.pathname.startsWith('/map/');
+
+  // ✅ анти-дублікат: рендерити StoryBar у навбарі лише якщо НІДЕ поза навбаром його немає
+  const navRef = useRef<HTMLDivElement | null>(null);
+  const [canMountStoryBar, setCanMountStoryBar] = useState(false);
 
   const toggleMenu = () => setIsOpen(v => !v);
   const closeMenu = () => setIsOpen(false);
@@ -53,9 +57,35 @@ const NavigationBar: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // === Анти-дублікатний гард =================================================
+  useEffect(() => {
+    if (!isMapRoute) { setCanMountStoryBar(false); return; }
+
+    const check = () => {
+      const allBars = Array.from(document.querySelectorAll('.story-bar'));
+      const inNav = allBars.some(el => navRef.current?.contains(el));
+      const outside = allBars.some(el => !navRef.current?.contains(el));
+      // монтуємо у навбарі лише якщо зовнішнього інстансу немає
+      setCanMountStoryBar(!outside || inNav);
+    };
+
+    // 1) первинна перевірка після рендера кадром пізніше
+    const r = requestAnimationFrame(check);
+
+    // 2) відстежуємо зміни DOM (якщо сторінка підмальовує власний StoryBar)
+    const obs = new MutationObserver(() => check());
+    obs.observe(document.body, { childList: true, subtree: true });
+
+    return () => {
+      cancelAnimationFrame(r);
+      obs.disconnect();
+    };
+  }, [isMapRoute]);
+  // ===========================================================================
+
   return (
     <nav style={styles.nav}>
-      <div style={styles.container}>
+      <div style={styles.container} ref={navRef}>
         <div style={styles.logo}>Buy My Behavior</div>
 
         {/* Burger (mobile only) */}
@@ -82,8 +112,8 @@ const NavigationBar: React.FC = () => {
         </div>
       </div>
 
-      {/* ✅ StoryBar показуємо ЛИШЕ на /map */}
-      {isMapRoute && (
+      {/* ✅ StoryBar рендеримо ТІЛЬКИ на /map і лише якщо немає іншого інстансу поза навбаром */}
+      {isMapRoute && canMountStoryBar && (
         <div style={styles.storyStrip}>
           <StoryBar />
         </div>
@@ -149,12 +179,11 @@ const styles: Record<string, React.CSSProperties> = {
 
   linksDesktop: { gap: '24px', alignItems: 'center' },
 
-  // полоса під шапкою для StoryBar (висока, щоб не перекривалось)
   storyStrip: {
     background: '#fff',
     borderTop: '1px solid #f1f1f1',
     borderBottom: '1px solid rgba(0,0,0,.04)',
-    padding: 0,
+    padding: 0, // внутрішні паддінги задає .story-bar--tall у StoryBar.css
     position: 'relative',
     zIndex: 2,
   },
