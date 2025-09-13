@@ -1,19 +1,23 @@
-// src/components/NavigationBar.tsx — мобайл-фьорст, модалка поверх усього, бургер з ТРЬОХ ГОРИЗОНТАЛЬНИХ ліній
+// src/components/NavigationBar.tsx — мобайл-фьорст, бургер (3 горизонтальні лінії), модалка через portal
 import React, { useEffect, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import StoryBar from './StoryBar'; // ✅ ДОДАНО: StoryBar під шапкою
+import StoryBar from './StoryBar'; // StoryBar показуємо лише на /map
 
 const DESKTOP_BP = 992; // breakpoint для десктопу
 
 const NavigationBar: React.FC = () => {
-  const [isDesktop, setIsDesktop] = useState(false); // mobile-first
+  const [isDesktop, setIsDesktop] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+
+  const location = useLocation();
+  const isMapRoute =
+    location.pathname === '/map' || location.pathname.startsWith('/map/');
 
   const toggleMenu = () => setIsOpen(v => !v);
   const closeMenu = () => setIsOpen(false);
 
-  // Відслідковуємо ширину екрана
+  // breakpoint
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
     const mq = window.matchMedia(`(min-width:${DESKTOP_BP}px)`);
@@ -27,11 +31,12 @@ const NavigationBar: React.FC = () => {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
-  // Блокуємо скрол сторінки, коли модалка відкрита на мобільному
+  // lock scroll for mobile modal
   useEffect(() => {
     if (!isDesktop) {
       const prevBodyOverflow = document.body.style.overflow;
-      const prevHtmlOverflow = (document.documentElement && document.documentElement.style.overflow) || '';
+      const prevHtmlOverflow =
+        (document.documentElement && document.documentElement.style.overflow) || '';
       document.body.style.overflow = isOpen ? 'hidden' : prevBodyOverflow || '';
       document.documentElement.style.overflow = isOpen ? 'hidden' : prevHtmlOverflow || '';
       return () => {
@@ -41,11 +46,9 @@ const NavigationBar: React.FC = () => {
     }
   }, [isOpen, isDesktop]);
 
-  // Закриття по Esc
+  // close by Esc
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeMenu();
-    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMenu(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
@@ -55,7 +58,7 @@ const NavigationBar: React.FC = () => {
       <div style={styles.container}>
         <div style={styles.logo}>Buy My Behavior</div>
 
-        {/* Бургер (праворуч). На мобільному видно, на десктопі приховано */}
+        {/* Burger (mobile only) */}
         <button
           onClick={toggleMenu}
           aria-label="Toggle menu"
@@ -63,47 +66,30 @@ const NavigationBar: React.FC = () => {
           aria-controls="mobile-menu"
           style={{ ...styles.burgerBtn, display: isDesktop ? 'none' : 'inline-flex' }}
         >
-          {/* ▼▼ BURGER ICON (3 HORIZONTAL LINES) — JSX ▼▼ */}
           <span style={styles.hbar} />
           <span style={styles.hbar} />
           <span style={styles.hbar} />
-          {/* ▲▲ BURGER ICON (3 HORIZONTAL LINES) — JSX ▲▲ */}
         </button>
 
-        {/* Десктопні лінки — як були */}
-        <div
-          style={{
-            ...styles.linksDesktop,
-            display: isDesktop ? 'flex' : 'none',
-          }}
-        >
-          <NavLink to="/register" onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>
-            Реєстрація
-          </NavLink>
-          <NavLink to="/profile" onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>
-            Профіль
-          </NavLink>
-          <NavLink to="/map" onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>
-            Вибрати виконавця
-          </NavLink>
-          <NavLink to="/my-orders" onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>
-            Мої замовлення
-          </NavLink>
-          <NavLink to="/received" onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>
-            Отримані сценарії
-          </NavLink>
-          <NavLink to="/manifest" onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>
-            Маніфест
-          </NavLink>
+        {/* Desktop links */}
+        <div style={{ ...styles.linksDesktop, display: isDesktop ? 'flex' : 'none' }}>
+          <NavLink to="/register"  onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>Реєстрація</NavLink>
+          <NavLink to="/profile"   onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>Профіль</NavLink>
+          <NavLink to="/map"       onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>Вибрати виконавця</NavLink>
+          <NavLink to="/my-orders" onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>Мої замовлення</NavLink>
+          <NavLink to="/received"  onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>Отримані сценарії</NavLink>
+          <NavLink to="/manifest"  onClick={closeMenu} style={({ isActive }) => linkStyle({ isActive })}>Маніфест</NavLink>
         </div>
       </div>
 
-      {/* ✅ ДОДАНО: StoryBar прямо під шапкою. Має власний клас .story-bar--tall у CSS */}
-      <div style={styles.storyStrip}>
-        <StoryBar />
-      </div>
+      {/* ✅ StoryBar показуємо ЛИШЕ на /map */}
+      {isMapRoute && (
+        <div style={styles.storyStrip}>
+          <StoryBar />
+        </div>
+      )}
 
-      {/* Мобільна модалка поверх УСЬОГО (портал у <body>) */}
+      {/* Mobile modal via portal */}
       {!isDesktop && isOpen && createPortal(
         <div role="dialog" aria-modal="true" id="mobile-menu" style={styles.modalBackdrop} onClick={closeMenu}>
           <div style={styles.modalPanel} onClick={(e) => e.stopPropagation()}>
@@ -112,24 +98,12 @@ const NavigationBar: React.FC = () => {
               <button aria-label="Close menu" onClick={closeMenu} style={styles.closeBtn}>×</button>
             </div>
             <nav style={styles.modalLinks}>
-              <NavLink to="/profile" onClick={closeMenu} style={({ isActive }) => modalLinkStyle({ isActive })}>
-                Профіль
-              </NavLink>
-              <NavLink to="/map" onClick={closeMenu} style={({ isActive }) => modalLinkStyle({ isActive })}>
-                Вибрати виконавця
-              </NavLink>
-              <NavLink to="/my-orders" onClick={closeMenu} style={({ isActive }) => modalLinkStyle({ isActive })}>
-                Мої замовлення
-              </NavLink>
-              <NavLink to="/received" onClick={closeMenu} style={({ isActive }) => modalLinkStyle({ isActive })}>
-                Отримані сценарії
-              </NavLink>
-              <NavLink to="/manifest" onClick={closeMenu} style={({ isActive }) => modalLinkStyle({ isActive })}>
-                Маніфест
-              </NavLink>
-              <NavLink to="/register" onClick={closeMenu} style={({ isActive }) => modalLinkStyle({ isActive })}>
-                Реєстрація
-              </NavLink>
+              <NavLink to="/profile"   onClick={closeMenu} style={({ isActive }) => modalLinkStyle({ isActive })}>Профіль</NavLink>
+              <NavLink to="/map"       onClick={closeMenu} style={({ isActive }) => modalLinkStyle({ isActive })}>Вибрати виконавця</NavLink>
+              <NavLink to="/my-orders" onClick={closeMenu} style={({ isActive }) => modalLinkStyle({ isActive })}>Мої замовлення</NavLink>
+              <NavLink to="/received"  onClick={closeMenu} style={({ isActive }) => modalLinkStyle({ isActive })}>Отримані сценарії</NavLink>
+              <NavLink to="/manifest"  onClick={closeMenu} style={({ isActive }) => modalLinkStyle({ isActive })}>Маніфест</NavLink>
+              <NavLink to="/register"  onClick={closeMenu} style={({ isActive }) => modalLinkStyle({ isActive })}>Реєстрація</NavLink>
             </nav>
           </div>
         </div>,
@@ -157,15 +131,8 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'space-between',
     gap: '12px',
   },
-  logo: {
-    fontWeight: 700,
-    fontSize: '20px',
-    color: '#222',
-    lineHeight: 1,
-    userSelect: 'none',
-  },
+  logo: { fontWeight: 700, fontSize: '20px', color: '#222', lineHeight: 1, userSelect: 'none' },
 
-  // Бургер з трьох ГОРИЗОНТАЛЬНИХ рисок
   burgerBtn: {
     padding: 8,
     background: 'none',
@@ -174,78 +141,37 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     alignItems: 'center',
     justifyContent: 'center',
-    flexDirection: 'column', // розміщує смужки одна над одною
+    flexDirection: 'column',
     gap: 4,
     display: 'inline-flex',
   },
-  // ▼▼ BURGER ICON (3 HORIZONTAL LINES) — STYLES ▼▼
-  hbar: {
-    width: 22,
-    height: 2,
-    backgroundColor: '#222',
-    borderRadius: 2,
-    display: 'block',
-  },
-  // ▲▲ BURGER ICON (3 HORIZONTAL LINES) — STYLES ▲▲
+  hbar: { width: 22, height: 2, backgroundColor: '#222', borderRadius: 2, display: 'block' },
 
-  // Десктопні лінки
-  linksDesktop: {
-    gap: '24px',
-    alignItems: 'center',
-  },
+  linksDesktop: { gap: '24px', alignItems: 'center' },
 
-  // ✅ смуга під шапкою для StoryBar (щоб не перекривалось і було “ширше по висоті”)
+  // полоса під шапкою для StoryBar (висока, щоб не перекривалось)
   storyStrip: {
     background: '#fff',
     borderTop: '1px solid #f1f1f1',
     borderBottom: '1px solid rgba(0,0,0,.04)',
-    padding: 0,        // внутрішні паддінги задає сам StoryBar (.story-bar--tall)
+    padding: 0,
     position: 'relative',
     zIndex: 2,
   },
 
-  // Модалка (оверлей вище за все)
+  // modal
   modalBackdrop: {
-    position: 'fixed',
-    inset: 0,
-    background: 'rgba(0,0,0,0.45)',
-    zIndex: 999999, // перекриває будь-що (StoryBar, карти, відео тощо)
-    display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    paddingTop: 40,
-    paddingLeft: 16,
-    paddingRight: 16,
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+    zIndex: 999999, display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+    paddingTop: 40, paddingLeft: 16, paddingRight: 16,
   },
   modalPanel: {
-    width: '100%',
-    maxWidth: 440,
-    background: '#fff',
-    borderRadius: 16,
-    boxShadow: '0 14px 40px rgba(0,0,0,0.25)',
-    padding: 16,
-    fontFamily: 'sans-serif',
+    width: '100%', maxWidth: 440, background: '#fff', borderRadius: 16,
+    boxShadow: '0 14px 40px rgba(0,0,0,0.25)', padding: 16, fontFamily: 'sans-serif',
   },
-  modalHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  closeBtn: {
-    background: 'none',
-    border: 'none',
-    fontSize: 28,
-    lineHeight: 1,
-    cursor: 'pointer',
-    color: '#222',
-  },
-  modalLinks: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 14,
-    paddingTop: 8,
-  },
+  modalHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  closeBtn: { background: 'none', border: 'none', fontSize: 28, lineHeight: 1, cursor: 'pointer', color: '#222' },
+  modalLinks: { display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 8 },
 };
 
 const linkStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties => ({
