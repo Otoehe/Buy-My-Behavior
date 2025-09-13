@@ -1,10 +1,3 @@
-// src/components/StoryBar.tsx
-// ✅ КАНОНІЧНИЙ СТОРІСБАР (v2025-08-17)
-// - Realtime лише INSERT з таблиці behaviors
-// - Кнопка "+" → UploadBehavior
-// - Клік по сторіс → /behaviors
-// - Без DISPUTE-badge та будь-яких інших експериментів
-
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
@@ -29,9 +22,7 @@ export default function StoryBar() {
   async function fetchBehaviors() {
     const { data, error } = await supabase
       .from("behaviors")
-      .select(
-        "id,user_id,title,description,ipfs_cid,file_url,created_at"
-      )
+      .select("id,user_id,title,description,ipfs_cid,file_url,created_at")
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -44,7 +35,7 @@ export default function StoryBar() {
   useEffect(() => {
     fetchBehaviors();
 
-    // 🔔 Канон: тільки INSERT
+    // тільки INSERT — як у робочому білді
     const ch = supabase
       .channel("realtime:behaviors")
       .on(
@@ -54,7 +45,6 @@ export default function StoryBar() {
       )
       .subscribe();
 
-    // внутрішні події, які ми вже використовували
     const onUploaded = () => fetchBehaviors();
     const openHandler = () => setIsUploadOpen(true);
 
@@ -68,7 +58,6 @@ export default function StoryBar() {
     };
   }, []);
 
-  // IPFS → gateway, або fallback на file_url
   const resolveSrc = (b: Behavior) =>
     b.ipfs_cid
       ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}`
@@ -78,7 +67,7 @@ export default function StoryBar() {
 
   return (
     <>
-      <div className="story-bar" onClick={(e) => e.stopPropagation()}>
+      <div className="story-bar" data-bmb="storybar-v1" onClick={(e) => e.stopPropagation()}>
         {/* + Додати */}
         <button
           type="button"
@@ -96,7 +85,7 @@ export default function StoryBar() {
           <div className="story-label">Додати</div>
         </button>
 
-        {/* Items */}
+        {/* Сторіс */}
         {behaviors.map((b) => (
           <div
             key={b.id}
@@ -123,7 +112,6 @@ export default function StoryBar() {
                 }}
               />
             </div>
-
             {b.title && <div className="story-label">{b.title}</div>}
           </div>
         ))}
@@ -132,8 +120,7 @@ export default function StoryBar() {
       {isUploadOpen && (
         <UploadBehavior onClose={() => setIsUploadOpen(false)}>
           <div className="upload-hint">
-            📦 <strong>Увага:</strong> розмір Behavior не повинен перевищувати{" "}
-            <strong>30MB</strong>
+            📦 <strong>Увага:</strong> розмір Behavior не повинен перевищувати <strong>30MB</strong>
           </div>
         </UploadBehavior>
       )}

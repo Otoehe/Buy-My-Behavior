@@ -1,13 +1,8 @@
-/* src/components/StoryBar.css */
-/* Канонічний вигляд: висота зі зручними відступами, горизонтальний скрол, 2-рядкові підписи, відео без кропу */
-
-:root {
-  --bmb-pink: #ffcdd6;
-}
+/* Канонічний вигляд: горизонтальний скрол, 2-рядкові підписи, відео без кропу */
 
 .story-bar {
   position: relative;
-  z-index: 3;                     /* над картою */
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -16,104 +11,61 @@
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
 
-  margin-top: 8px;                /* зазор під навбаром */
-  padding: 16px 12px 18px;        /* top | sides | bottom */
+  margin-top: 8px;
+  padding: 16px 12px 18px;
   background: #fff;
   border-top: 1px solid #eee;
   border-bottom: 1px solid #ddd;
 
-  min-height: 144px;              /* кружок + підпис */
+  min-height: 144px;
 }
-
 .story-bar::-webkit-scrollbar { display: none; }
 .story-bar { scrollbar-width: none; -ms-overflow-style: none; }
 
 .story-item {
   flex: 0 0 auto;
   width: 84px;
-
   display: flex;
   flex-direction: column;
   align-items: center;
-
   cursor: pointer;
   background: transparent;
   border: 0;
   padding: 0;
 }
+.story-item.add-button { appearance: none; -webkit-appearance: none; }
 
-/* reset для кнопки-плюса */
-.story-item.add-button {
-  appearance: none;
-  -webkit-appearance: none;
-}
-
-/* Кружечок */
 .story-circle {
-  width: 84px;
-  height: 84px;
-  border-radius: 50%;
-  border: 3px solid #8cd3e9;      /* ніжно-блакитна обводка для контрасту на білому */
-  background: #fff;
-  overflow: hidden;
-  position: relative;
-  box-shadow: 0 4px 12px rgba(0,0,0,.15);
+  width: 84px; height: 84px; border-radius: 50%;
+  border: 3px solid #8cd3e9; background: #fff; overflow: hidden;
+  position: relative; box-shadow: 0 4px 12px rgba(0,0,0,.15);
   transition: transform .2s ease, box-shadow .2s ease;
 }
+.story-circle:hover { transform: scale(1.05); box-shadow: 0 6px 20px rgba(0,0,0,.25); }
 
-.story-circle:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 20px rgba(0,0,0,.25);
-}
-
-/* Відео — без кропу */
 .story-video {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;            /* показуємо весь кадр */
-  object-position: center;
-  background: #fff;
-  border-radius: inherit;
-  display: block;
-  pointer-events: none;
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; object-position: center; background: #fff;
+  border-radius: inherit; display: block; pointer-events: none;
 }
 
-/* Підпис до 2 рядків */
 .story-label {
-  margin-top: 6px;
-  max-width: 84px;
-  text-align: center;
-  font-size: 13px;
-  line-height: 1.15;
-  color: #333;
-
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  white-space: normal;
+  margin-top: 6px; max-width: 84px; text-align: center;
+  font-size: 13px; line-height: 1.15; color: #333;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; white-space: normal;
 }
 
-/* Кнопка + */
 .add-button .story-circle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-weight: 700;
-  font-size: 20px;
-  background: linear-gradient(135deg, #8cd3e9, #90caf9);
-  border: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-size: 20px;
+  background: linear-gradient(135deg, #8cd3e9, #90caf9); border: none;
 }
-
 .add-button .story-circle:hover {
   transform: scale(1.1);
   background: linear-gradient(135deg, #64b5f6, #4fc3f7);
 }
 
-/* Великі екрани — трохи збільшимо */
 @media (min-width: 1400px) {
   .story-item { width: 92px; }
   .story-circle { width: 92px; height: 92px; }
