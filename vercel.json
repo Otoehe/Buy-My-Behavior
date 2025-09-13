@@ -6,10 +6,7 @@
     { "source": "/robots.txt", "destination": "/robots.txt" },
     { "source": "/manifest.webmanifest", "destination": "/manifest.webmanifest" },
     { "source": "/service-worker.js", "destination": "/service-worker.js" },
-
-    { "source": "/(.*\\.(?:js|css|png|jpg|jpeg|gif|svg|ico|txt|json|webmanifest|map|mp4|webm|wav|mp3|woff|woff2|ttf|otf))",
-      "destination": "/$1" },
-
+    { "source": "/(.*\\.(?:js|css|png|jpg|jpeg|gif|svg|ico|txt|json|webmanifest|map|mp4|webm|wav|mp3|woff|woff2|ttf|otf))", "destination": "/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [

@@ -1,7 +1,4 @@
 // src/components/StoryBar.tsx
-// Canonical (2025-08-17): INSERT-only realtime; "+" відкриває UploadBehavior;
-// клік по кружечку веде на /behaviors; без DisputeBadge; без toLocaleLowerCase.
-
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
@@ -58,47 +55,63 @@ export default function StoryBar() {
         (payload) => {
           const b = payload.new as Behavior;
           setBehaviors((prev) => {
-            // уникаємо дубляжу
             if (prev.some((x) => x.id === b.id)) return prev;
             return [b, ...prev];
           });
         }
       )
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   const openUpload = useCallback(() => setIsUploadOpen(true), []);
   const closeUpload = useCallback(() => setIsUploadOpen(false), []);
-
   const goToBehaviors = useCallback(() => navigate("/behaviors"), [navigate]);
 
   return (
     <>
-      <div className="story-bar">
-        <button className="story-item add-button" onClick={openUpload} aria-label="Додати Behavior">
+      <div className="story-bar" role="list" aria-label="Останні Behaviors">
+        <button
+          type="button"
+          className="story-item add-button"
+          onClick={openUpload}
+          aria-label="Додати Behavior"
+          role="listitem"
+        >
           <div className="story-circle">+</div>
           <div className="story-label">Додати</div>
         </button>
 
         {behaviors.map((b) => {
           const media = toMediaSrc(b);
+          const label = b.title ?? "Behavior";
           return (
-            <div key={b.id} className="story-item" onClick={goToBehaviors} role="button" tabIndex={0}
-                 onKeyDown={(e) => (e.key === "Enter" ? goToBehaviors() : null)}>
+            <button
+              type="button"
+              key={b.id}
+              className="story-item"
+              onClick={goToBehaviors}
+              role="listitem"
+              aria-label={label}
+              onKeyDown={(e) => (e.key === "Enter" ? goToBehaviors() : null)}
+            >
               <div className="story-circle">
                 {media ? (
-                  // невелике прев’ю — без автоплею для економії
-                  <video className="story-video" src={media} preload="metadata" muted playsInline />
+                  <video
+                    className="story-video"
+                    src={media}
+                    preload="metadata"
+                    muted
+                    playsInline
+                    /* постер на випадок, якщо перший кадр чорний */
+                    poster="/placeholder.jpg"
+                  />
                 ) : (
                   <span className="story-initial">•</span>
                 )}
               </div>
-              <div className="story-label">{b.title ?? "Behavior"}</div>
-            </div>
+              <div className="story-label">{label}</div>
+            </button>
           );
         })}
       </div>

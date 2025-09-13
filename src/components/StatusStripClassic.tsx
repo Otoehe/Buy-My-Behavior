@@ -1,27 +1,5 @@
 import React from "react";
 
-/**
- * StatusStripClassic — вузько спеціалізований стріп-індикатор для BMB.
- * Сумісний з двома стилями імпорту:
- *   import { StatusStripClassic } from './StatusStripClassic';
- *   import StatusStripClassic from './StatusStripClassic';
- *
- * Приймає "state" у формі сценарію з ReceivedScenarios.tsx:
- * {
- *   status?: 'pending' | 'agreed' | 'confirmed' | 'disputed' | string;
- *   is_agreed_by_customer?: boolean;
- *   is_agreed_by_executor?: boolean;
- *   is_completed_by_executor?: boolean;
- *   escrow_tx_hash?: string | null;
- *   agreed_at?: string | null;
- *   completed_at?: string | null;
- *   paid_out?: boolean;
- *   is_dispute?: boolean;      // на випадок іншої схеми
- *   dispute?: boolean;         // зворотна сумісність
- *   cancelled?: boolean;       // зворотна сумісність
- * }
- */
-
 export type StatusLike = {
   status?: string;
   is_agreed_by_customer?: boolean;
@@ -34,7 +12,7 @@ export type StatusLike = {
   is_dispute?: boolean;
   dispute?: boolean;
   cancelled?: boolean;
-  customer_confirmed?: boolean; // можливі поля з інших екранів
+  customer_confirmed?: boolean;
   executor_confirmed?: boolean;
 };
 
@@ -47,7 +25,6 @@ export function StatusStripClassic({
 }) {
   const st = (state?.status || "").toLowerCase();
 
-  // ---- флаги станів (робимо максимально терпимі до різних структур)
   const isDispute =
     state?.is_dispute === true ||
     state?.dispute === true ||
@@ -64,7 +41,6 @@ export function StatusStripClassic({
 
   const customerConfirmed =
     state?.customer_confirmed === true ||
-    // інколи сторони маркують "completed" полем completed_at/paid_out
     (!!state?.completed_at && st !== "pending");
 
   const executorConfirmed =
@@ -81,13 +57,11 @@ export function StatusStripClassic({
     !!state?.paid_out ||
     (!!state?.completed_at && st !== "pending");
 
-  // ---- обчислюємо крок прогресу: 0 Переговори → 1 Погоджено → 2 Підтвердження → 3 Виконано
-  let step = 0;
+  let step = 0; // 0=Переговори 1=Погоджено 2=Підтвердження 3=Виконано
   if (isAgreed) step = 1;
   if (oneConfirmed || bothConfirmed) step = 2;
   if (isCompleted) step = 3;
 
-  // ---- стилі (мінімальні, без зовнішнього CSS; бренд #ffcdd6 + чорний)
   const row: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8 };
   const title: React.CSSProperties = { fontWeight: 700, color: "#111", marginBottom: 4 };
   const sub: React.CSSProperties = { fontSize: 12, color: "#555" };
@@ -128,7 +102,6 @@ export function StatusStripClassic({
     borderRadius: 2,
   });
 
-  // ---- оверрайди для спору/скасування
   if (isDispute) {
     return (
       <div style={badge("#fff3cd", "#664d03")}>
@@ -146,7 +119,6 @@ export function StatusStripClassic({
     );
   }
 
-  // ---- основний прогрес-індикатор
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <div style={row}>
@@ -173,7 +145,8 @@ export function StatusStripClassic({
         {step === 0 && <div style={muted}>Сторони узгоджують опис та суму донату</div>}
         {step === 1 && (
           <div style={sub}>
-            Угоду погоджено{state?.escrow_tx_hash ? " — кошти заблоковані в Escrow" : " — очікуємо блокування коштів"}
+            Угоду погоджено
+            {state?.escrow_tx_hash ? " — кошти заблоковані в Escrow" : " — очікуємо блокування коштів"}
           </div>
         )}
         {step === 2 && (
@@ -184,16 +157,13 @@ export function StatusStripClassic({
           </div>
         )}
         {step === 3 && (
-          <div style={sub}>
-            Виконано — кошти розподілено за правилами BMB (90/10 або 90/5/5)
-          </div>
+          <div style={sub}>Виконано — кошти розподілено за правилами BMB (90/10 або 90/5/5)</div>
         )}
       </div>
     </div>
   );
 }
 
-/** Демо/вітрина — лишаємо як додатковий іменований експорт (на прод не впливає) */
 export function StatusStripClassicDemo() {
   const Card: React.CSSProperties = {
     background: "#fff",
@@ -233,5 +203,5 @@ export function StatusStripClassicDemo() {
   );
 }
 
-// ✅ default-експорт для сумісності з import StatusStripClassic from '...'
+/* default-експорт для сумісності з `import StatusStripClassic from '...'` */
 export default StatusStripClassic;
