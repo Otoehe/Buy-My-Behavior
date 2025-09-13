@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { createPortal } from 'react-dom';
+import StoryBar from './StoryBar'; // ✅ ДОДАНО: StoryBar під шапкою
 
 const DESKTOP_BP = 992; // breakpoint для десктопу
 
@@ -66,7 +67,7 @@ const NavigationBar: React.FC = () => {
           <span style={styles.hbar} />
           <span style={styles.hbar} />
           <span style={styles.hbar} />
-          {/* ▲▲ BURGER ICON (3 VERTICAL LINES) — JSX ▲▲ */}
+          {/* ▲▲ BURGER ICON (3 HORIZONTAL LINES) — JSX ▲▲ */}
         </button>
 
         {/* Десктопні лінки — як були */}
@@ -95,6 +96,11 @@ const NavigationBar: React.FC = () => {
             Маніфест
           </NavLink>
         </div>
+      </div>
+
+      {/* ✅ ДОДАНО: StoryBar прямо під шапкою. Має власний клас .story-bar--tall у CSS */}
+      <div style={styles.storyStrip}>
+        <StoryBar />
       </div>
 
       {/* Мобільна модалка поверх УСЬОГО (портал у <body>) */}
@@ -174,7 +180,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   // ▼▼ BURGER ICON (3 HORIZONTAL LINES) — STYLES ▼▼
   hbar: {
-    width: 22,          // горизонтальна смужка
+    width: 22,
     height: 2,
     backgroundColor: '#222',
     borderRadius: 2,
@@ -186,6 +192,16 @@ const styles: Record<string, React.CSSProperties> = {
   linksDesktop: {
     gap: '24px',
     alignItems: 'center',
+  },
+
+  // ✅ смуга під шапкою для StoryBar (щоб не перекривалось і було “ширше по висоті”)
+  storyStrip: {
+    background: '#fff',
+    borderTop: '1px solid #f1f1f1',
+    borderBottom: '1px solid rgba(0,0,0,.04)',
+    padding: 0,        // внутрішні паддінги задає сам StoryBar (.story-bar--tall)
+    position: 'relative',
+    zIndex: 2,
   },
 
   // Модалка (оверлей вище за все)
@@ -208,7 +224,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 16,
     boxShadow: '0 14px 40px rgba(0,0,0,0.25)',
     padding: 16,
-    fontFamily: 'sans-serif', // 🔴 ЄДИНИЙ ДОДАТОК: той самий шрифт, що й у заголовка навбару
+    fontFamily: 'sans-serif',
   },
   modalHeader: {
     display: 'flex',

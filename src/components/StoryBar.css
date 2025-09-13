@@ -85,10 +85,21 @@
 }
 
 /* ────────────────────────────────────────────────────────────── */
-/* FIX PACK (додано; не змінює твої існуючі правила вище)       */
+/* FIX PACK + висота: щоб не “підлазило” під навбар               */
 /* ────────────────────────────────────────────────────────────── */
 
-/* 1) глушимо дефолти кнопки, не ламаючи верстку */
+/* робимо рейку трохи вищою і з відступами зверху/знизу */
+.story-bar.story-bar--tall {
+  padding: 10px 12px;           /* ↑↑ було 2/6/4 */
+  gap: 12px;                    /* трохи більше повітря */
+  scrollbar-gutter: stable both-edges;
+  background: #fff;             /* підкладка, якщо навбар напівпрозорий */
+  position: relative;
+  z-index: 2;
+  border-bottom: 1px solid rgba(0,0,0,.04); /* легка лінія як у шапці */
+}
+
+/* глушимо дефолти кнопки — без зміни твоєї розмітки */
 .story-item {
   flex: 0 0 auto;
   text-align: center;
@@ -100,11 +111,10 @@
   line-height: 1;
 }
 
-/* 2) коло не стискається; медіа всередині рендеряться чітко */
+/* коло не стискається; медіа рендеряться чітко */
 .story-circle { flex: 0 0 64px; position: relative; }
 @media (min-width: 480px) { .story-circle { flex-basis: 72px; } }
 
-/* поширюємо на будь-яке медіа (відео/фото) */
 .story-circle > img,
 .story-circle > video {
   width: 100% !important;
@@ -114,19 +124,16 @@
   border-radius: 9999px !important;
 }
 
-/* 3) стабілізуємо скролбар і відступи */
-.story-bar {
-  scrollbar-gutter: stable both-edges;
-  gap: 12px;
-  padding: 6px 8px;
-}
-
-/* 4) фокус та active без зсувів макета */
+/* фокус та active без зсувів макета */
 .story-item:active .story-circle { transform: scale(0.97); }
 .story-item:focus-visible .story-circle {
   outline: 2px solid #111;
   outline-offset: 2px;
 }
 
-/* 5) підпис стабільний */
+/* підпис стабільний */
 .story-label { margin-top: 4px; }
+
+/* (необов'язково) якщо в тебе є клас навбара — додай висоти там теж:
+   .navigation-bar, .navbar, .header { padding-block: 12px; min-height: 56px; }
+*/
