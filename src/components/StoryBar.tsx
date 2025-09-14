@@ -1,7 +1,6 @@
-// src/components/StoryBar.tsx
 // Показує прев’ю відео (луп, muted) і ПІДПИС = ім'я профілю автора з profiles.name (ключ profiles.user_id).
 // Якщо name порожнє — підпис не рендеримо (не fallback-имо на title/“Video evidence”).
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import UploadBehavior from "./UploadBehavior";
@@ -10,7 +9,7 @@ import "./StoryBar.css";
 type Nullable<T> = T | null | undefined;
 
 const PROFILE_TABLE = "profiles";
-const PROFILE_ID_COL: "user_id" = "user_id"; // у вашій схемі ключ саме user_id
+const PROFILE_ID_COL: "user_id" = "user_id";
 
 interface Behavior {
   id: number;
@@ -32,8 +31,19 @@ interface Behavior {
 
 interface ProfileRow {
   user_id?: string | null;
-  name?: string | null; // беремо тільки це поле
+  name?: string | null;
 }
+
+type CacheShape = {
+  t: number; // timestamp
+  behaviors: Pick<Behavior, "id" | "user_id" | "thumbnail_url" | "image_url" | "video_url" | "file_url" | "storage_path" | "ipfs_cid" | "created_at">[];
+  srcMap: Record<number, string | null>;
+  posterMap: Record<number, string | null>;
+  nameByUser: Record<string, string>;
+};
+
+const CACHE_KEY = "bmb.story.cache.v2";
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 хвилин
 
 const gateways = [
   (cid: string) => `https://gateway.lighthouse.storage/ipfs/${cid}`,
@@ -52,11 +62,33 @@ export default function StoryBar() {
   const [srcMap, setSrcMap] = useState<Record<number, string | null>>({});
   const [posterMap, setPosterMap] = useState<Record<number, string | null>>({});
   const [nameByUser, setNameByUser] = useState<Record<string, string>>({});
+  const [loadedMap, setLoadedMap] = useState<Record<number, boolean>>({});
   const [isUploadOpen, setIsUploadOpen] = useState(false);
 
+  const barRef = useRef<HTMLElement | null>(null);
   const navigate = useNavigate();
 
-  // 1) Завантаження останніх behaviors
+  // ====== 0) Миттєве відмалювання з кешу (якщо є) ======
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(CACHE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as CacheShape;
+      if (!parsed?.t || Date.now() - parsed.t > CACHE_TTL_MS) return;
+
+      // показуємо моментально
+      setSrcMap(parsed.srcMap || {});
+      setPosterMap(parsed.posterMap || {});
+      setNameByUser(parsed.nameByUser || {});
+      setBehaviors((parsed.behaviors || []) as Behavior[]);
+      // вважаємо «завантаженими» те, що має постер
+      const lm: Record<number, boolean> = {};
+      Object.keys(parsed.posterMap || {}).forEach((k) => (lm[Number(k)] = true));
+      setLoadedMap(lm);
+    } catch {}
+  }, []);
+
+  // ====== 1) Свіже завантаження behaviors ======
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -71,7 +103,7 @@ export default function StoryBar() {
     return () => { alive = false; };
   }, []);
 
-  // 2) Realtime INSERT — додаємо нові і довантажуємо ім'я автора
+  // ====== 2) Realtime INSERT ======
   useEffect(() => {
     const ch = supabase
       .channel("realtime:behaviors")
@@ -99,7 +131,7 @@ export default function StoryBar() {
     return () => { supabase.removeChannel(ch); };
   }, [nameByUser]);
 
-  // helpers для URL
+  // ===== helpers для URL =====
   const resolveDirect = (b: Behavior) => {
     const direct = firstNonEmpty(b.file_url, b.video_url, b.image_url);
     if (isHttp(direct)) return direct!;
@@ -120,7 +152,7 @@ export default function StoryBar() {
     for (const c of candidates) {
       try {
         const { data } = supabase.storage.from(c.bucket).getPublicUrl(c.path);
-        if (data?.publicUrl) return data.publicUrl;
+        if (data?.publicUrl) return data.publicUrl; // синхронно формує URL
       } catch {}
     }
     return null;
@@ -132,7 +164,7 @@ export default function StoryBar() {
     return null;
   };
 
-  // Якщо немає постера — зробимо стартовий кадр (за CORS дозволу)
+  // Якщо немає постера — пробуємо витягнути кадр (потім, асинхронно)
   const grabPosterFrame = (url: string): Promise<string | null> => new Promise((resolve) => {
     try {
       const video = document.createElement("video");
@@ -164,11 +196,12 @@ export default function StoryBar() {
     } catch { resolve(null); }
   });
 
-  // 3) Обчислюємо URL/постери для всіх
+  // ===== 3) Обчислюємо URL/постери + ОНОВЛЮЄМО КЕШ =====
   useEffect(() => {
     (async () => {
       const nextSrc: Record<number, string | null> = {};
       const nextPoster: Record<number, string | null> = {};
+
       for (const b of behaviors) {
         let src = resolveDirect(b);
         if (!src) src = resolveStorage(b);
@@ -179,21 +212,58 @@ export default function StoryBar() {
         nextSrc[b.id] = src;
         nextPoster[b.id] = poster ?? null;
       }
+
       setSrcMap(nextSrc);
       setPosterMap(nextPoster);
 
+      // асинхронно довантажимо кадри-постери
       for (const b of behaviors) {
         if (!nextPoster[b.id] && nextSrc[b.id]) {
           try {
             const dataUrl = await grabPosterFrame(nextSrc[b.id]!);
-            if (dataUrl) setPosterMap(prev => ({ ...prev, [b.id]: dataUrl }));
+            if (dataUrl) setPosterMap(prev => {
+              const updated = { ...prev, [b.id]: dataUrl };
+              // оновлюємо кеш live
+              try {
+                const raw = sessionStorage.getItem(CACHE_KEY);
+                if (raw) {
+                  const parsed = JSON.parse(raw) as CacheShape;
+                  parsed.posterMap = updated;
+                  parsed.t = Date.now();
+                  sessionStorage.setItem(CACHE_KEY, JSON.stringify(parsed));
+                }
+              } catch {}
+              return updated;
+            });
           } catch {}
         }
       }
-    })();
-  }, [behaviors]);
 
-  // 4) Підтягнути імена для видимих user_id, яких немає в кеші
+      // кладемо в кеш (мінімальні поля + карти посилань)
+      try {
+        const cache: CacheShape = {
+          t: Date.now(),
+          behaviors: behaviors.map(b => ({
+            id: b.id,
+            user_id: b.user_id,
+            thumbnail_url: b.thumbnail_url,
+            image_url: b.image_url,
+            video_url: b.video_url,
+            file_url: b.file_url,
+            storage_path: b.storage_path,
+            ipfs_cid: b.ipfs_cid,
+            created_at: b.created_at,
+          })),
+          srcMap: nextSrc,
+          posterMap: nextPoster,
+          nameByUser,
+        };
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+      } catch {}
+    })();
+  }, [behaviors, nameByUser]);
+
+  // ===== 4) Підтягнути імена для видимих user_id, яких немає в кеші =====
   useEffect(() => {
     (async () => {
       const want = Array.from(
@@ -223,68 +293,118 @@ export default function StoryBar() {
     })();
   }, [behaviors, nameByUser]);
 
-  const openUpload = useCallback(() => setIsUploadOpen(true), []);
-  const closeUpload = useCallback(() => setIsUploadOpen(false), []);
-  const goToBehaviors = useCallback(() => navigate("/behaviors"), [navigate]);
+  // ===== керування відео: грає тільки коли видно =====
   const prefersReduceMotion = useMemo(
     () => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false,
     []
   );
+  useEffect(() => {
+    if (prefersReduceMotion) return;
+    const root = barRef.current;
+    if (!root) return;
+    const videos = Array.from(root.querySelectorAll<HTMLVideoElement>("video.story-video"));
+    if (!videos.length) return;
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const v = e.target as HTMLVideoElement;
+          if (e.isIntersecting && e.intersectionRatio >= 0.35) {
+            v.play().catch(() => {});
+          } else {
+            v.pause();
+          }
+        }
+      },
+      { root: root.parentElement, threshold: [0, 0.35, 1] }
+    );
+    videos.forEach((v) => io.observe(v));
+    return () => io.disconnect();
+  }, [srcMap, prefersReduceMotion]);
+
+  // UI callbacks
+  const openUpload = useCallback(() => setIsUploadOpen(true), []);
+  const closeUpload = useCallback(() => setIsUploadOpen(false), []);
+  const goToBehaviors = useCallback(() => navigate("/behaviors"), [navigate]);
+  const onMediaLoaded = (id: number) => setLoadedMap((m) => (m[id] ? m : { ...m, [id]: true }));
+
+  // Якщо ще немає behaviors і немає кешу — показати «привидів», щоб виглядало миттєво
+  const noDataYet = behaviors.length === 0 && Object.keys(posterMap).length === 0;
 
   return (
     <>
-      <div className="story-bar story-bar--tall" role="list" aria-label="Останні Behaviors">
-        <button
-          type="button"
-          className="story-item add-button"
-          onClick={openUpload}
-          aria-label="Додати Behavior"
-          role="listitem"
-        >
-          <div className="story-circle">+</div>
-          <div className="story-label">Додати</div>
-        </button>
+      <section
+        data-bmb-storybar=""
+        style={{ ["--nav-h" as any]: "56px" }}
+        ref={barRef as any}
+      >
+        <div className="story-bar story-bar--tall story-bar--sticky" role="list" aria-label="Останні Behaviors">
+          <button
+            type="button"
+            className="story-item add-button"
+            onClick={openUpload}
+            aria-label="Додати Behavior"
+            role="listitem"
+          >
+            <div className="story-circle">+</div>
+            <div className="story-label">Додати</div>
+          </button>
 
-        {behaviors.map((b) => {
-          const media = srcMap[b.id] || null;
-          const poster = posterMap[b.id] || "/placeholder.jpg";
-          const authorName = b.user_id ? nameByUser[b.user_id] : undefined; // тільки name
-
-          return (
-            <button
-              type="button"
-              key={b.id}
-              className="story-item"
-              onClick={goToBehaviors}
-              role="listitem"
-              aria-label={authorName || "Behavior"}
-              title={authorName || ""}
-              onKeyDown={(e) => (e.key === "Enter" ? goToBehaviors() : null)}
-            >
-              <div className="story-circle">
-                {media ? (
-                  <video
-                    className="story-video"
-                    src={media}
-                    poster={poster}
-                    muted
-                    playsInline
-                    loop
-                    preload="metadata"
-                    autoPlay={!prefersReduceMotion}
-                    aria-hidden="true"
-                  />
-                ) : (
-                  <img className="story-poster" src={poster} alt={authorName || ""} />
-                )}
+          {/* Привиди для миттєвого вигляду на холодному старті */}
+          {noDataYet &&
+            Array.from({ length: 12 }).map((_, i) => (
+              <div key={`ghost-${i}`} className="story-item is-ghost" role="listitem" aria-hidden="true">
+                <div className="story-circle story-circle--loading" />
+                <div className="story-label story-label--empty" />
               </div>
+            ))}
 
-              {/* Показуємо тільки ім’я; якщо його немає — не рендеримо підпис */}
-              {authorName ? <div className="story-label">{authorName}</div> : null}
-            </button>
-          );
-        })}
-      </div>
+          {behaviors.map((b) => {
+            const media = srcMap[b.id] || null;
+            const poster = posterMap[b.id] || "/placeholder.jpg";
+            const authorName = b.user_id ? nameByUser[b.user_id] : undefined;
+            const isLoaded = !!loadedMap[b.id] || !!posterMap[b.id];
+
+            return (
+              <button
+                type="button"
+                key={b.id}
+                className={`story-item${isLoaded ? " is-loaded" : ""}`}
+                onClick={goToBehaviors}
+                role="listitem"
+                aria-label={authorName || "Behavior"}
+                title={authorName || ""}
+                onKeyDown={(e) => (e.key === "Enter" ? goToBehaviors() : null)}
+              >
+                <div className={`story-circle${isLoaded ? " story-circle--ready" : " story-circle--loading"}`}>
+                  {media ? (
+                    <video
+                      className="story-video"
+                      src={media}
+                      poster={poster}
+                      muted
+                      playsInline
+                      loop
+                      preload="metadata"
+                      autoPlay={!prefersReduceMotion}
+                      aria-hidden="true"
+                      onLoadedData={() => onMediaLoaded(b.id)}
+                    />
+                  ) : (
+                    <img
+                      className="story-poster"
+                      src={poster}
+                      alt={authorName || ""}
+                      onLoad={() => onMediaLoaded(b.id)}
+                    />
+                  )}
+                </div>
+                {authorName ? <div className="story-label">{authorName}</div> : <div className="story-label story-label--empty" aria-hidden="true" />}
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       {isUploadOpen && <UploadBehavior onClose={closeUpload} />}
     </>
