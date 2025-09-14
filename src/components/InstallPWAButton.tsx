@@ -47,17 +47,14 @@ export default function InstallPWAButton({
   label = "Додати іконку на головний екран",
   iconSrc = "/icons/icon-192.png",
 }: Props) {
-  // зберігаємо відкладену BIP-подію, якщо браузер її надіслав
   const deferredRef = useRef<BeforeInstallPromptEvent | null>(null);
 
-  // ⚠️ КРИТИЧНО: вважаємо встановленим ТІЛЬКИ коли реально у standalone
   const [installed, setInstalled] = useState<boolean>(() => isStandalone());
   const [showIosHint, setShowIosHint] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [canInstall, setCanInstall] = useState(false);
 
-  // стилі — бренд #ffcdd6 + чорний
   const btnStyle: React.CSSProperties = useMemo(
     () => ({
       display: "flex",
@@ -87,10 +84,8 @@ export default function InstallPWAButton({
   );
 
   useEffect(() => {
-    // якщо юзер відкрив як інстальований PWA — сховаєм кнопку
     if (isStandalone()) setInstalled(true);
 
-    // підхоплюємо вже збережену глобально подію (A2HS.tsx її виставляє)
     const existing = (window as any).__bmbA2HS as BeforeInstallPromptEvent | undefined;
     if (existing) {
       deferredRef.current = existing;
@@ -113,13 +108,11 @@ export default function InstallPWAButton({
       setInstalled(true);
       setCanInstall(false);
       deferredRef.current = null;
-      // localStorage маркери НЕ використовуємо для приховування — лише реальний standalone
     };
 
     window.addEventListener("beforeinstallprompt", onBIP as any);
     window.addEventListener("appinstalled", onInstalled);
 
-    // iOS — показуємо підказку, навіть якщо BIP відсутній
     const t = window.setTimeout(() => {
       if (isIosSafari()) setShowIosHint(true);
       if (!existing && !isIosSafari() && isInAppBrowser()) {
@@ -137,20 +130,18 @@ export default function InstallPWAButton({
   const onClick = async () => {
     if (installed) return;
 
-    // iOS шлях: пояснення
     if (isIosSafari()) {
       setShowIosHint(true);
       return;
     }
 
-    // якщо є відкладений BIP — показуємо системний промпт
     if (deferredRef.current) {
       try {
         setBusy(true);
         await deferredRef.current.prompt();
         const res = await deferredRef.current.userChoice;
         if (res?.outcome === "accepted") {
-          setInstalled(true); // дочекаємось appinstalled або ховаємо після перезапуску
+          setInstalled(true);
           setCanInstall(false);
           deferredRef.current = null;
           return;
@@ -165,7 +156,6 @@ export default function InstallPWAButton({
       return;
     }
 
-    // fallback: немає BIP → підказка, що робити
     if (isInAppBrowser()) {
       setMessage("Відкрийте сайт напряму у Chrome/Safari (не через вбудований браузер).");
     } else {
@@ -173,7 +163,6 @@ export default function InstallPWAButton({
     }
   };
 
-  // 🔒 Єдине, що ховає кнопку — фактична інсталяція (standalone)
   if (installed) return null;
 
   return (
@@ -183,7 +172,6 @@ export default function InstallPWAButton({
         <span>{busy ? "Встановлюємо…" : label}</span>
       </button>
 
-      {/* iOS-підказка */}
       {showIosHint && (
         <div style={hintStyle}>
           На iPhone відкрийте меню <strong>Поділитись</strong> і виберіть
@@ -191,7 +179,6 @@ export default function InstallPWAButton({
         </div>
       )}
 
-      {/* Загальні підказки / статуси */}
       {(!canInstall || message) && (
         <div style={{ ...hintStyle, color: "#444" }}>
           {message ??
