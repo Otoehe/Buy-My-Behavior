@@ -16,8 +16,8 @@ import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 
-// ✅ імпорт з тим регістром, який реально лежить у репо
-import BmbModalHost         from './components/BmbModalHost';
+// ⬇️ ВАЖЛИВО: імпорт з ВЕЛИКИМИ літерами (BMB), як і назва файла
+import BMBModalHost         from './components/BMBModalHost';
 
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
@@ -25,7 +25,7 @@ const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
 const Manifest          = lazy(() => import('./components/Manifest'));
 const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
 const ScenarioLocation  = lazy(() => import('./components/ScenarioLocation'));
-const BMBModalsDemo     = lazy(() => import('./components/BMBModalsDemo'));
+const BmbModalsDemo     = lazy(() => import('./components/BmbModalsDemo'));
 
 function RequireAuth({
   user,
@@ -74,8 +74,8 @@ export default function App() {
       <NetworkToast />
       <SWUpdateToast />
       <NavigationBar />
-      {/* ✅ глобальний хост BMB-модалок */}
-      <BmbModalHost />
+      {/* Глобальний хост BMB-модалок */}
+      <BMBModalHost />
 
       <Suspense fallback={null}>
         <Routes>
