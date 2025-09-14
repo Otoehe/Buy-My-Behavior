@@ -15,7 +15,7 @@ import useViewportVH        from './lib/useViewportVH';
 import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
-import BMBModalHost         from './components/BMBModalHost'; // якщо підключали модалки
+import BmbModalHost         from './components/BmbModalHost'; // ✅ правильний шлях/регістр
 
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
@@ -25,18 +25,34 @@ const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
 const ScenarioLocation  = lazy(() => import('./components/ScenarioLocation'));
 const BmbModalsDemo     = lazy(() => import('./components/BmbModalsDemo'));
 
-function RequireAuth({ user, children }: { user: User | null | undefined; children: React.ReactElement; }) {
+function RequireAuth({
+  user,
+  children,
+}: {
+  user: User | null | undefined;
+  children: React.ReactElement;
+}) {
   const location = useLocation();
   if (user === undefined) return null;
   if (user === null) return <Navigate to="/register" replace state={{ from: location.pathname }} />;
   return children;
 }
-function RedirectIfAuthed({ user, children }: { user: User | null | undefined; children: React.ReactElement; }) {
+
+function RedirectIfAuthed({
+  user,
+  children,
+}: {
+  user: User | null | undefined;
+  children: React.ReactElement;
+}) {
   if (user === undefined) return null;
   if (user) return <Navigate to="/map" replace />;
   return children;
 }
-function HomeGate() { return <Navigate to="/map" replace />; }
+
+function HomeGate() {
+  return <Navigate to="/map" replace />;
+}
 
 export default function App() {
   useViewportVH();
@@ -53,7 +69,10 @@ export default function App() {
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setUser(session?.user ?? null);
     });
-    return () => { mounted = false; sub.subscription.unsubscribe(); };
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   if (user === undefined) return null;
@@ -64,7 +83,7 @@ export default function App() {
       <NetworkToast />
       <SWUpdateToast />
       <NavigationBar />
-      <BMBModalHost />
+      <BmbModalHost /> {/* ✅ глобальний хост модалок */}
 
       <Suspense fallback={null}>
         <Routes>
@@ -93,7 +112,7 @@ export default function App() {
             path="/profile"
             element={
               <RequireAuth user={user}>
-                <Profile />   {/* ✅ без обгортки ProfilePage — кнопка лиш одна */}
+                <Profile /> {/* ✅ кнопка A2HS лише в профілі */}
               </RequireAuth>
             }
           />
