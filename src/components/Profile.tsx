@@ -1,11 +1,11 @@
 // src/components/Profile.tsx
+import ProfileInstallCTA from './ProfileInstallCTA';
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import './Profile.css';
 import { pushNotificationManager } from '../lib/pushNotifications';
 
-// ✅ ДОДАНО: імпорт кнопки
-import InstallPWAButton from './InstallPWAButton';
+
 
 /** Ролі */
 const roles = [

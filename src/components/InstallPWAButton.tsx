@@ -9,7 +9,7 @@ function isStandalone(): boolean {
   if (typeof window === "undefined") return false;
   const standaloneDisplay =
     window.matchMedia && window.matchMedia("(display-mode: standalone)").matches;
-  // @ts-ignore - iOS Safari
+  // @ts-ignore - iOS Safari legacy
   const iosStandalone = typeof navigator !== "undefined" && (navigator as any).standalone === true;
   return Boolean(standaloneDisplay || iosStandalone);
 }
@@ -50,18 +50,12 @@ export default function InstallPWAButton({
   // зберігаємо відкладену BIP-подію, якщо браузер її надіслав
   const deferredRef = useRef<BeforeInstallPromptEvent | null>(null);
 
-  const [canInstall, setCanInstall] = useState(false);
-  const [installed, setInstalled] = useState<boolean>(() => {
-    try {
-      if (isStandalone()) return true;
-      return localStorage.getItem("bmb.a2hs.done") === "1";
-    } catch {
-      return isStandalone();
-    }
-  });
+  // ⚠️ КРИТИЧНО: вважаємо встановленим ТІЛЬКИ коли реально у standalone
+  const [installed, setInstalled] = useState<boolean>(() => isStandalone());
   const [showIosHint, setShowIosHint] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [canInstall, setCanInstall] = useState(false);
 
   // стилі — бренд #ffcdd6 + чорний
   const btnStyle: React.CSSProperties = useMemo(
@@ -93,7 +87,8 @@ export default function InstallPWAButton({
   );
 
   useEffect(() => {
-    if (installed) return;
+    // якщо юзер відкрив як інстальований PWA — сховаєм кнопку
+    if (isStandalone()) setInstalled(true);
 
     // підхоплюємо вже збережену глобально подію (A2HS.tsx її виставляє)
     const existing = (window as any).__bmbA2HS as BeforeInstallPromptEvent | undefined;
@@ -118,9 +113,7 @@ export default function InstallPWAButton({
       setInstalled(true);
       setCanInstall(false);
       deferredRef.current = null;
-      try {
-        localStorage.setItem("bmb.a2hs.done", "1");
-      } catch {}
+      // localStorage маркери НЕ використовуємо для приховування — лише реальний standalone
     };
 
     window.addEventListener("beforeinstallprompt", onBIP as any);
@@ -139,7 +132,7 @@ export default function InstallPWAButton({
       window.removeEventListener("appinstalled", onInstalled);
       window.clearTimeout(t);
     };
-  }, [installed]);
+  }, []);
 
   const onClick = async () => {
     if (installed) return;
@@ -157,15 +150,14 @@ export default function InstallPWAButton({
         await deferredRef.current.prompt();
         const res = await deferredRef.current.userChoice;
         if (res?.outcome === "accepted") {
-          try { localStorage.setItem("bmb.a2hs.done", "1"); } catch {}
-          setInstalled(true);
+          setInstalled(true); // дочекаємось appinstalled або ховаємо після перезапуску
           setCanInstall(false);
           deferredRef.current = null;
           return;
         } else {
           setMessage("Можна спробувати пізніше — кнопка лишається тут.");
         }
-      } catch (err) {
+      } catch (_err) {
         setMessage("Не вдалося показати системний промпт. Перевірте HTTPS/manifest/service worker.");
       } finally {
         setBusy(false);
@@ -177,13 +169,11 @@ export default function InstallPWAButton({
     if (isInAppBrowser()) {
       setMessage("Відкрийте сайт напряму у Chrome/Safari (не через вбудований браузер).");
     } else {
-      setMessage("Перевірте HTTPS, наявність manifest.json і активний service worker.");
+      setMessage("Переконайтесь у HTTPS, валідному manifest і активному service worker.");
     }
   };
 
-  // ⚠️ ГОЛОВНА ЗМІНА: більше не ховаємо кнопку, якщо BIP недоступний
-  // Раніше було: hidden = installed || (!canInstall && !isIosSafari())
-  // Тепер: кнопка видима завжди, поки додаток не встановлено.
+  // 🔒 Єдине, що ховає кнопку — фактична інсталяція (standalone)
   if (installed) return null;
 
   return (
@@ -201,8 +191,13 @@ export default function InstallPWAButton({
         </div>
       )}
 
-      {/* Загальні підказки / помилки */}
-      {message && <div style={{ ...hintStyle, color: "#444" }}>{message}</div>}
+      {/* Загальні підказки / статуси */}
+      {(!canInstall || message) && (
+        <div style={{ ...hintStyle, color: "#444" }}>
+          {message ??
+            "Якщо системний діалог не з’явився — це нормально. Спробуйте натиснути ще раз або відкрийте сайт напряму у браузері."}
+        </div>
+      )}
     </div>
   );
 }
