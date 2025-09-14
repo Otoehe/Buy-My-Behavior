@@ -1,11 +1,10 @@
 // src/components/Profile.tsx
 import ProfileInstallCTA from './ProfileInstallCTA';
+import InstallPWAButton   from './InstallPWAButton'; // ✅ ДОДАНО: імпорт кнопки
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import './Profile.css';
 import { pushNotificationManager } from '../lib/pushNotifications';
-
-
 
 /** Ролі */
 const roles = [
@@ -231,8 +230,6 @@ export default function Profile() {
       window.removeEventListener('appinstalled', onInstalled);
     };
   }, []);
-
-  // ... (весь решта ваш код БЕЗ ЗМІН) ...
 
   // 1) Профіль + драфти
   useEffect(() => {

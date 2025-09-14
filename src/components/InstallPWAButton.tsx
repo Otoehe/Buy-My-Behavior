@@ -49,6 +49,7 @@ export default function InstallPWAButton({
 }: Props) {
   const deferredRef = useRef<BeforeInstallPromptEvent | null>(null);
 
+  // ❗️Єдине, що ховає кнопку — реальний standalone
   const [installed, setInstalled] = useState<boolean>(() => isStandalone());
   const [showIosHint, setShowIosHint] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -64,7 +65,7 @@ export default function InstallPWAButton({
       borderRadius: 16,
       padding: "12px 14px",
       border: "1px solid rgba(0,0,0,.12)",
-      background: "#ffcdd6",
+      background: "#f3f4f6",
       color: "#000",
       fontWeight: 800,
       cursor: "pointer",
@@ -75,11 +76,7 @@ export default function InstallPWAButton({
   );
   const iconStyle: React.CSSProperties = { width: 24, height: 24, borderRadius: 6 };
   const hintStyle: React.CSSProperties = useMemo(
-    () => ({
-      marginTop: 6,
-      fontSize: 12,
-      color: "#6b7280",
-    }),
+    () => ({ marginTop: 6, fontSize: 12, color: "#6b7280" }),
     []
   );
 
@@ -98,10 +95,7 @@ export default function InstallPWAButton({
       deferredRef.current = bip;
       setCanInstall(true);
       setMessage(null);
-      try {
-        (window as any).__bmbA2HS = bip;
-        window.dispatchEvent(new CustomEvent("bmb:a2hs-available"));
-      } catch {}
+      try { (window as any).__bmbA2HS = bip; window.dispatchEvent(new CustomEvent("bmb:a2hs-available")); } catch {}
     };
 
     const onInstalled = () => {
@@ -129,11 +123,7 @@ export default function InstallPWAButton({
 
   const onClick = async () => {
     if (installed) return;
-
-    if (isIosSafari()) {
-      setShowIosHint(true);
-      return;
-    }
+    if (isIosSafari()) { setShowIosHint(true); return; }
 
     if (deferredRef.current) {
       try {
@@ -148,11 +138,9 @@ export default function InstallPWAButton({
         } else {
           setMessage("Можна спробувати пізніше — кнопка лишається тут.");
         }
-      } catch (_err) {
+      } catch {
         setMessage("Не вдалося показати системний промпт. Перевірте HTTPS/manifest/service worker.");
-      } finally {
-        setBusy(false);
-      }
+      } finally { setBusy(false); }
       return;
     }
 
@@ -181,8 +169,7 @@ export default function InstallPWAButton({
 
       {(!canInstall || message) && (
         <div style={{ ...hintStyle, color: "#444" }}>
-          {message ??
-            "Якщо системний діалог не з’явився — це нормально. Спробуйте натиснути ще раз або відкрийте сайт напряму у браузері."}
+          {message ?? "Якщо системний діалог не з’явився — це нормально. Спробуйте ще раз або відкрийте сайт напряму у браузері."}
         </div>
       )}
     </div>
