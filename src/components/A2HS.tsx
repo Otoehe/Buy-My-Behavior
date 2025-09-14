@@ -2,13 +2,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 declare global {
+  interface Window {
+    __bmbA2HS?: BeforeInstallPromptEvent | null;
+  }
   interface WindowEventMap {
     beforeinstallprompt: Event;
     appinstalled: Event;
+    'bmb:a2hs-available': CustomEvent<undefined>;
+    'bmb:a2hs-installed': CustomEvent<undefined>;
   }
 }
 
-// Нестандартний тип для Chrome on Android
+// Нестандартний тип для Chrome/Chromium
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
@@ -21,16 +26,34 @@ const DISMISS_UNTIL_KEY = 'bmb.a2hs.dismiss_until';
 const FOREVER_KEY = 'bmb.a2hs.never';
 const SEEN_COUNT_KEY = 'bmb.a2hs.seen_count';
 
+function now() { return Date.now(); }
+
 function isStandalone(): boolean {
   const mm = (window as any).matchMedia;
   if (mm && mm('(display-mode: standalone)').matches) return true;
-  if ((window.navigator as any).standalone) return true; // iOS legacy
+  // @ts-ignore iOS Safari legacy
+  if (typeof navigator !== 'undefined' && (navigator as any).standalone === true) return true;
   return false;
 }
 
 function isAndroidChrome(): boolean {
   const ua = navigator.userAgent.toLowerCase();
-  return ua.includes('android') && ua.includes('chrome') && !ua.includes('wv'); // wv = WebView
+  return ua.includes('android') && ua.includes('chrome') && !ua.includes('wv');
+}
+
+function isChromiumDesktop(): boolean {
+  const ua = navigator.userAgent.toLowerCase();
+  const isChromium =
+    ua.includes('chrome') || ua.includes('edg') || ua.includes('opr') || ua.includes('brave');
+  const isMobile = /iphone|ipad|ipod|android/i.test(ua);
+  return isChromium && !isMobile;
+}
+
+function isIosSafari(): boolean {
+  const ua = navigator.userAgent.toLowerCase();
+  const isIOS = /iphone|ipad|ipod/.test(ua);
+  const isSafari = isIOS && !ua.includes('crios') && !ua.includes('fxios') && ua.includes('safari');
+  return isIOS && isSafari;
 }
 
 function isInAppBrowser(): boolean {
@@ -46,24 +69,27 @@ function isInAppBrowser(): boolean {
   );
 }
 
-const now = () => Date.now();
-
 export default function A2HS() {
   const [bipEvent, setBipEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [eligible, setEligible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [installed, setInstalled] = useState<boolean>(isStandalone());
   const seenRef = useRef(0);
 
-  // Вмикаємо віджет тільки на Android Chrome і лише в браузері
+  // ⛳️ Робимо блок доступним на Android Chromium, Desktop Chromium та iOS Safari (інструкція)
   const shouldRender = useMemo(() => {
-    if (isStandalone()) return false;
-    if (!isAndroidChrome()) return false;
-    return true;
-  }, []);
+    if (installed) return false;
+    return isAndroidChrome() || isChromiumDesktop() || isIosSafari();
+  }, [installed]);
 
   // Правила відкладення/заборони показу
   useEffect(() => {
+    if (installed) {
+      try { localStorage.setItem(FOREVER_KEY, '1'); } catch {}
+      setEligible(false);
+      return;
+    }
     try {
       seenRef.current = Number(localStorage.getItem(SEEN_COUNT_KEY) || '0');
       const dismissUntil = Number(localStorage.getItem(DISMISS_UNTIL_KEY) || '0');
@@ -74,21 +100,34 @@ export default function A2HS() {
     } catch {
       setEligible(true);
     }
-  }, []);
+  }, [installed]);
 
-  // Ловимо beforeinstallprompt + реакція на встановлення
+  // Ловимо beforeinstallprompt, експортуємо глобально, реагуємо на встановлення
   useEffect(() => {
     if (!shouldRender) return;
 
+    // Якщо хтось уже зберіг відкладену подію — підхоплюємо
+    if (window.__bmbA2HS) {
+      setBipEvent(window.__bmbA2HS);
+      setError(null);
+    }
+
     const onBIP = (e: Event) => {
       e.preventDefault();
-      setBipEvent(e as BeforeInstallPromptEvent);
+      const ev = e as BeforeInstallPromptEvent;
+      window.__bmbA2HS = ev;              // <- робимо доступним глобально
+      setBipEvent(ev);
       setError(null);
+      try { window.dispatchEvent(new CustomEvent('bmb:a2hs-available')); } catch {}
     };
+
     const onInstalled = () => {
       try { localStorage.setItem(FOREVER_KEY, '1'); } catch {}
+      window.__bmbA2HS = null;
       setBipEvent(null);
       setEligible(false);
+      setInstalled(true);
+      try { window.dispatchEvent(new CustomEvent('bmb:a2hs-installed')); } catch {}
     };
 
     window.addEventListener('beforeinstallprompt', onBIP);
@@ -102,13 +141,22 @@ export default function A2HS() {
   if (!shouldRender) return null;
   if (!eligible) return null;
 
-  const promptUnavailable = !bipEvent;
+  const promptUnavailable = !bipEvent && !isIosSafari(); // на iOS промпта немає — показуємо інструкцію
 
   const onInstallClick = async () => {
-    if (!bipEvent) {
-      setError('Промпт недоступний. Відкрий сайт напряму в Chrome; перевір HTTPS / manifest / service worker.');
+    // iOS: показуємо інструкцію замість системного промпта
+    if (isIosSafari()) {
+      setError('На iOS: натисніть Поділитись → Додати на екран «Додому».');
       return;
     }
+
+    if (!bipEvent) {
+      setError(
+        'Промпт недоступний. Відкрий сайт напряму у Chromium-браузері; перевір HTTPS / manifest / service worker.'
+      );
+      return;
+    }
+
     setBusy(true);
     setError(null);
     try {
@@ -124,8 +172,7 @@ export default function A2HS() {
           localStorage.setItem(FOREVER_KEY, '1'); // прийнято — більше не показувати
         }
       } catch {}
-      setBipEvent(null);
-      setEligible(false);
+      setEligible(false); // дочекаємось appinstalled або просто сховаємось
     } catch (err: any) {
       setError(err?.message || 'Не вдалося показати промпт.');
     } finally {
@@ -156,9 +203,11 @@ export default function A2HS() {
         padding: 16,
         border: `1px solid ${PINK}`,
       }}
+      role="region"
+      aria-label="Додати додаток BMB на головний екран"
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        {/* Квадратний логотип (світло-сіра кнопка) */}
+        {/* Квадратний логотип (можеш замінити на /icons/icon-192.png) */}
         <div
           style={{
             width: 48,
@@ -171,9 +220,8 @@ export default function A2HS() {
             overflow: 'hidden',
           }}
         >
-          {/* Підстав свій квадратний PNG/SVG з /public */}
           <img
-            src="/mUSD-icon.svg" // заміни на ваш справжній логотип, напр. /icons/icon-192.png
+            src="/mUSD-icon.svg"
             alt="BMB"
             style={{ width: 36, height: 36 }}
             onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
@@ -184,15 +232,19 @@ export default function A2HS() {
           <div style={{ fontWeight: 700, color: BLACK, marginBottom: 4 }}>
             Додати іконку на головний екран
           </div>
-          {promptUnavailable ? (
+          {isIosSafari() ? (
+            <div style={{ fontSize: 12, opacity: 0.85 }}>
+              На iPhone: <strong>Поділитись</strong> → <strong>Додати на екран «Додому»</strong>.
+            </div>
+          ) : promptUnavailable ? (
             <div style={{ fontSize: 12, opacity: 0.8 }}>
               Промпт недоступний.
               {isInAppBrowser()
-                ? ' Відкрийте сайт у Chrome напряму (не через вбудований браузер).'
+                ? ' Відкрийте сайт у Chrome/Edge/Opera напряму (не через вбудований браузер).'
                 : ' Переконайтесь у HTTPS, валідному manifest і активному service worker.'}
             </div>
           ) : (
-            <div style={{ fontSize: 12, opacity: 0.8 }}>
+            <div style={{ fontSize: 12, opacity: 0.85 }}>
               Натисніть і підтвердьте у системному діалозі — ярлик з’явиться на робочому столі.
             </div>
           )}
@@ -213,7 +265,7 @@ export default function A2HS() {
             fontWeight: 600,
           }}
         >
-          {busy ? 'Встановлюємо…' : 'Додати іконку'}
+          {busy ? 'Встановлюємо…' : isIosSafari() ? 'Як додати?' : 'Додати іконку'}
         </button>
         <button
           onClick={onHideForWeek}
@@ -246,7 +298,7 @@ export default function A2HS() {
       </div>
 
       {error && (
-        <div style={{ marginTop: 10, fontSize: 12, color: '#b00020' }}>
+        <div style={{ marginTop: 10, fontSize: 12, color: '#b00020' }} role="alert">
           {error}
         </div>
       )}

@@ -15,6 +15,7 @@ import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 
+// ── Lazy routes (залишаю як є)
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
 const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
@@ -22,17 +23,22 @@ const Manifest          = lazy(() => import('./components/Manifest'));
 const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
 const ScenarioLocation  = lazy(() => import('./components/ScenarioLocation')); // ✅ окремий маршрут
 
+// ✅ ДОДАНО: демо корпоративних модалок (тільки для перевірки дизайну/станів)
+const BmbModalsDemo     = lazy(() => import('./components/BmbModalsDemo'));
+
 function RequireAuth({ user, children }: { user: User | null | undefined; children: React.ReactElement; }) {
   const location = useLocation();
   if (user === undefined) return null;
   if (user === null) return <Navigate to="/register" replace state={{ from: location.pathname }} />;
   return children;
 }
+
 function RedirectIfAuthed({ user, children }: { user: User | null | undefined; children: React.ReactElement; }) {
   if (user === undefined) return null;
   if (user) return <Navigate to="/map" replace />;
   return children;
 }
+
 function HomeGate() { return <Navigate to="/map" replace />; }
 
 export default function App() {
@@ -57,6 +63,7 @@ export default function App() {
 
   return (
     <>
+      {/* Глобальні системні компоненти */}
       <A2HS />
       <NetworkToast />
       <SWUpdateToast />
@@ -72,6 +79,9 @@ export default function App() {
           <Route path="/map/select"   element={<ScenarioLocation />} />  {/* ✅ вибір місця */}
           <Route path="/behaviors"    element={<BehaviorsFeed />} />
           <Route path="/manifest"     element={<Manifest />} />
+
+          {/* 🔎 ДЕМО МОДАЛОК (нечутливе, публічний роут; за потреби можна закрити авторизацією) */}
+          <Route path="/modals"       element={<BmbModalsDemo />} />
 
           {/* Реєстрація */}
           <Route
