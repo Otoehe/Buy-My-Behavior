@@ -1,3 +1,4 @@
+// src/App.tsx
 import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import type { User } from '@supabase/supabase-js';
@@ -6,15 +7,15 @@ import { supabase } from './lib/supabase';
 import BehaviorsFeed   from './components/BehaviorsFeed';
 import NavigationBar   from './components/NavigationBar';
 import Register        from './components/Register';
-// import Profile      from './components/Profile'; // ⛔️ більше не напряму
+import Profile         from './components/Profile';       // ✅ напряму профіль
 import AuthCallback    from './components/AuthCallback';
 import A2HS            from './components/A2HS';
-import ProfilePage     from './components/ProfilePage';   // ✅ обгортка з CTA
 
 import useViewportVH        from './lib/useViewportVH';
 import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
+import BMBModalHost         from './components/BMBModalHost'; // якщо підключали модалки
 
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
@@ -63,6 +64,7 @@ export default function App() {
       <NetworkToast />
       <SWUpdateToast />
       <NavigationBar />
+      <BMBModalHost />
 
       <Suspense fallback={null}>
         <Routes>
@@ -91,7 +93,7 @@ export default function App() {
             path="/profile"
             element={
               <RequireAuth user={user}>
-                <ProfilePage /> {/* ✅ тут тепер CTA + ваш існуючий Profile */}
+                <Profile />   {/* ✅ без обгортки ProfilePage — кнопка лиш одна */}
               </RequireAuth>
             }
           />
