@@ -1,3 +1,4 @@
+// src/components/BmbModalHost.tsx
 import React, { useEffect, useState } from "react";
 
 /**

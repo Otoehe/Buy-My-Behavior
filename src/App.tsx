@@ -7,7 +7,7 @@ import { supabase } from './lib/supabase';
 import BehaviorsFeed   from './components/BehaviorsFeed';
 import NavigationBar   from './components/NavigationBar';
 import Register        from './components/Register';
-import Profile         from './components/Profile';       // ✅ напряму профіль
+import Profile         from './components/Profile';
 import AuthCallback    from './components/AuthCallback';
 import A2HS            from './components/A2HS';
 
@@ -15,7 +15,9 @@ import useViewportVH        from './lib/useViewportVH';
 import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
-import BmbModalHost         from './components/BmbModalHost'; // ✅ правильний шлях/регістр
+
+// ✅ імпорт з тим регістром, який реально лежить у репо
+import BmbModalHost         from './components/BmbModalHost';
 
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
@@ -23,15 +25,12 @@ const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
 const Manifest          = lazy(() => import('./components/Manifest'));
 const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
 const ScenarioLocation  = lazy(() => import('./components/ScenarioLocation'));
-const BmbModalsDemo     = lazy(() => import('./components/BmbModalsDemo'));
+const BMBModalsDemo     = lazy(() => import('./components/BMBModalsDemo'));
 
 function RequireAuth({
   user,
   children,
-}: {
-  user: User | null | undefined;
-  children: React.ReactElement;
-}) {
+}: { user: User | null | undefined; children: React.ReactElement }) {
   const location = useLocation();
   if (user === undefined) return null;
   if (user === null) return <Navigate to="/register" replace state={{ from: location.pathname }} />;
@@ -41,18 +40,13 @@ function RequireAuth({
 function RedirectIfAuthed({
   user,
   children,
-}: {
-  user: User | null | undefined;
-  children: React.ReactElement;
-}) {
+}: { user: User | null | undefined; children: React.ReactElement }) {
   if (user === undefined) return null;
   if (user) return <Navigate to="/map" replace />;
   return children;
 }
 
-function HomeGate() {
-  return <Navigate to="/map" replace />;
-}
+function HomeGate() { return <Navigate to="/map" replace />; }
 
 export default function App() {
   useViewportVH();
@@ -69,10 +63,7 @@ export default function App() {
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setUser(session?.user ?? null);
     });
-    return () => {
-      mounted = false;
-      sub.subscription.unsubscribe();
-    };
+    return () => { mounted = false; sub.subscription.unsubscribe(); };
   }, []);
 
   if (user === undefined) return null;
@@ -83,7 +74,8 @@ export default function App() {
       <NetworkToast />
       <SWUpdateToast />
       <NavigationBar />
-      <BmbModalHost /> {/* ✅ глобальний хост модалок */}
+      {/* ✅ глобальний хост BMB-модалок */}
+      <BmbModalHost />
 
       <Suspense fallback={null}>
         <Routes>
@@ -112,7 +104,7 @@ export default function App() {
             path="/profile"
             element={
               <RequireAuth user={user}>
-                <Profile /> {/* ✅ кнопка A2HS лише в профілі */}
+                <Profile />
               </RequireAuth>
             }
           />
