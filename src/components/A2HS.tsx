@@ -1,48 +1,31 @@
+// src/components/A2HS.tsx
 import React, { useEffect } from 'react';
 
-declare global {
-  interface Window { __bmbA2HS?: BeforeInstallPromptEvent | null; }
-  interface WindowEventMap {
-    beforeinstallprompt: Event;
-    appinstalled: Event;
-    'bmb:a2hs-available': CustomEvent<undefined>;
-    'bmb:a2hs-installed': CustomEvent<undefined>;
-  }
-}
-interface BeforeInstallPromptEvent extends Event {
+type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
-function isStandalone(): boolean {
-  const mm = (window as any).matchMedia;
-  if (mm && mm('(display-mode: standalone)').matches) return true;
-  // @ts-ignore iOS legacy
-  if (typeof navigator !== 'undefined' && (navigator as any).standalone === true) return true;
-  return false;
-}
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+};
 
 export default function A2HS() {
   useEffect(() => {
     const onBIP = (e: Event) => {
       e.preventDefault();
       const ev = e as BeforeInstallPromptEvent;
-      window.__bmbA2HS = ev;
-      try { window.dispatchEvent(new CustomEvent('bmb:a2hs-available')); } catch {}
-    };
-    const onInstalled = () => {
-      window.__bmbA2HS = null;
-      try { window.dispatchEvent(new CustomEvent('bmb:a2hs-installed')); } catch {}
+      try { localStorage.setItem('bmb.a2hs.supported', '1'); } catch {}
+      (window as any).__bmbA2HS = ev;
+      // повідомляємо всі компоненти (InstallPWAButton/Profile)
+      window.dispatchEvent(new CustomEvent('bmb:a2hs-available'));
     };
 
-    window.addEventListener('beforeinstallprompt', onBIP);
+    const onInstalled = () => {
+      try { localStorage.setItem('bmb.a2hs.done', '1'); } catch {}
+    };
+
+    window.addEventListener('beforeinstallprompt', onBIP as any);
     window.addEventListener('appinstalled', onInstalled);
 
-    if (isStandalone()) {
-      try { window.dispatchEvent(new CustomEvent('bmb:a2hs-installed')); } catch {}
-    }
-
     return () => {
-      window.removeEventListener('beforeinstallprompt', onBIP);
+      window.removeEventListener('beforeinstallprompt', onBIP as any);
       window.removeEventListener('appinstalled', onInstalled);
     };
   }, []);

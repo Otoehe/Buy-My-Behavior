@@ -1,136 +1,90 @@
-/* ІЗОЛЯЦІЯ + sticky під навбаром */
-[data-bmb-storybar]{
-  position: sticky;
-  top: var(--nav-h,56px);
-  z-index: 30;
-  background: #fff;
-  border-bottom: 1px solid rgba(0,0,0,.06);
-  contain: layout paint;
-}
+/* src/components/StoryBar.css */
 
-/* ======= Варіативні змінні ======= */
-:root {
-  --story-size: 64px;   /* діаметр кружка */
-  --story-gap: 10px;    /* відстань між кружками */
-  --story-label-fs: 12px;
-  --story-label-lh: 16px;
-}
-
-/* стрічка сторіс */
+/* сам StoryBar прозорий — стрічку робить sb-container */
 .story-bar {
-  display: flex;
-  justify-content: flex-start;
-  align-items: center;
-  gap: var(--story-gap);
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 8px 12px;
-  box-sizing: border-box;
-  -webkit-overflow-scrolling: touch;
-  scroll-behavior: smooth;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-
-  /* Резервуємо висоту → не стрибає */
-  min-height: calc(var(--story-size) + 28px);
-}
-.story-bar::-webkit-scrollbar { display: none; width: 0; height: 0; }
-.story-bar--sticky{ background:#fff; }
-
-/* елемент стрічки */
-.story-item {
-  flex: 0 0 auto;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
+  position: relative;
+  z-index: 1;
+  width: 100%;
   background: transparent;
-  border: 0;
+  padding: 0;
+}
+
+/* стрічка під навбаром: менші відступи (було ~14px, стало 8px) */
+.sb-container {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;          /* Firefox */
+
+  padding: 8px 12px;              /* ← вдвічі менше */
+  background: #ffffff;            /* продовження білого хедера */
+  border-radius: 0;
+  box-shadow: none;               /* без тіні під смугою */
+}
+
+/* кружечки */
+.sb-item {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+  border: 2px solid #fff;               /* біла обводка */
+  background: #f6f7f9;                  /* світло-сірий бек */
+  box-shadow: 0 4px 12px rgba(0,0,0,.15);/* м’яка тінь */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
   cursor: pointer;
-  transition: transform .12s ease;
-  line-height: 1;
-}
-.story-item:active { transform: translateY(1px) scale(.985); }
-
-/* «привид» (на холодному старті) */
-.story-item.is-ghost { cursor: default; }
-.story-item.is-ghost .story-circle{ background: #f4f4f5; }
-.story-item.is-ghost .story-label{ visibility: hidden; }
-
-/* кружок */
-.story-circle {
-  inline-size: var(--story-size);
-  block-size: var(--story-size);
-  border-radius: 9999px;
-  background: #fff;
-  border: 3px solid #fff !important;
-  box-shadow:
-    0 6px 14px rgba(0,0,0,.14),
-    0 2px  4px rgba(0,0,0,.10) !important;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
   position: relative;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.sb-item:active { transform: scale(.96); }
+
+/* медіа всередині кружечка (і img, і video) */
+.sb-media,
+.sb-item img,
+.sb-item video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 50%;
 }
 
-/* скелет під час завантаження */
-.story-circle--loading{
-  background: linear-gradient(90deg,#f3f4f6,#f8f8f8,#f3f4f6);
-  background-size: 300% 100%;
-  animation: storyShimmer 1.2s infinite;
-}
-@keyframes storyShimmer{
-  0%{ background-position: 0% 0; }
-  100%{ background-position: 100% 0; }
-}
-
-/* медіа усередині — коло, без зайвих фільтрів/затримок */
-.story-video,
-.story-poster {
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: cover !important;
-  display: block !important;
-  border-radius: 9999px !important;
-  pointer-events: none !important;
-  opacity: 1; /* без зайвого фейду — швидше */
-}
-
-/* підпис: фіксована висота */
-.story-label {
-  font-size: var(--story-label-fs);
-  line-height: var(--story-label-lh);
+/* плюс — СІРИЙ, не чорний */
+.sb-item-add {
+  background: linear-gradient(180deg, #f3f4f6, #e5e7eb);
   color: #111;
-  max-width: calc(var(--story-size) + 12px);
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  margin-top: 4px;
-  min-height: var(--story-label-lh);
+  border-color: #fff;
+  box-shadow: 0 4px 12px rgba(0,0,0,.15);
 }
-.story-label--empty{ visibility: hidden; }
+.sb-plus {
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 900;
+  transform: translateY(-1px);
+}
 
-/* кнопка "+" */
-.story-item.add-button .story-circle {
-  background: linear-gradient(135deg, #ffcdd6, #ffdfe6);
-  border: 3px solid #fff !important;
-  box-shadow:
-    0 6px 14px rgba(0,0,0,.14),
-    0 2px  4px rgba(0,0,0,.10) !important;
-  color: #000;
-  font-weight: 700;
-  font-size: 20px;
+/* fallback, якщо медіа не завантажилось */
+.sb-fallback {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(0,0,0,.06), transparent 40%),
+    repeating-linear-gradient(45deg,#eee,#eee 6px,#f7f7f7 6px,#f7f7f7 12px);
 }
-.story-item.add-button:hover .story-circle { transform: scale(1.04); }
-.story-item.add-button .story-label { color: #000; }
 
-/* трохи більші кружки на 480+ */
-@media (min-width: 480px) {
-  :root { --story-size: 72px; }
-}
-@media (min-width: 768px) {
-  :root { --story-size: 78px; }
-}
+/* скролбар (WebKit/Chromium) */
+.sb-container::-webkit-scrollbar { height: 8px; }
+.sb-container::-webkit-scrollbar-track { background: transparent; }
+.sb-container::-webkit-scrollbar-thumb { background: rgba(0,0,0,.12); border-radius: 9999px; }
+.sb-container::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.18); }
+
+/* скролбар (Firefox) */
+.sb-container { scrollbar-color: rgba(0,0,0,.12) transparent; }
+
+/* доступність */
+.sb-item:focus-visible { outline: 2px solid #111827; outline-offset: 2px; }

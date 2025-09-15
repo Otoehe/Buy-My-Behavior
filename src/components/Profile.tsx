@@ -1,6 +1,5 @@
 // src/components/Profile.tsx
 import ProfileInstallCTA from './ProfileInstallCTA';
-import InstallPWAButton   from './InstallPWAButton'; // ✅ ДОДАНО: імпорт кнопки
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import './Profile.css';
@@ -13,12 +12,6 @@ const roles = [
   'Репортер', 'Пранкер', 'Лицедій (імпровізатор)',
   'Артист дії', 'Інфлюенсер', 'Інше'
 ] as const;
-
-/** PWA beforeinstallprompt */
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
-}
 
 /** Зірочки 0..10 */
 const RatingStars: React.FC<{ value: number }> = ({ value }) => {
@@ -132,19 +125,9 @@ async function requestAccountsOnce(provider: Eip1193Provider): Promise<string[]>
   return pendingAccountsPromise;
 }
 
-/** Допоміжний deeplink для MetaMask App */
-function buildMetaMaskDappUrl(): string {
-  const href = window.location.href.startsWith('http')
-    ? window.location.href
-    : `https://${window.location.host}${window.location.pathname}${window.location.search}`;
-  return `https://metamask.app.link/dapp/${encodeURIComponent(href)}`;
-}
-
-// Helpers: платформи
+/** Helpers */
 const isStandaloneDisplay = () =>
   (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (navigator as any).standalone === true;
-
-const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
 
 /** Типи */
 type Scenario = { id: number; description: string; price: number; hidden?: boolean };
@@ -164,13 +147,10 @@ export default function Profile() {
   const [ratingAvg, setRatingAvg] = useState<number>(10);
   const [ratingCount, setRatingCount] = useState<number>(0);
 
-  // ---------- A2HS ----------
-  const [installEvt, setInstallEvt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [installAvailable, setInstallAvailable] = useState(false);
+  // ---------- A2HS: лише трекаємо факт встановлення, банери/модалки видалено ----------
   const [installed, setInstalled] = useState<boolean>(() => {
     return isStandaloneDisplay() || localStorage.getItem('bmb.a2hs.done') === '1';
   });
-  const [showA2HSModal, setShowA2HSModal] = useState(false);
 
   // ---------- Settings: Гео/Пуші ----------
   const [geoEnabled, setGeoEnabled] = useState<boolean>(() => localStorage.getItem('bmb.geo') !== '0');
@@ -189,46 +169,18 @@ export default function Profile() {
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
-  // ---- A2HS listeners ----
+  // ---- A2HS listeners: тільки оновлюємо installed ----
   useEffect(() => {
-    // ✅ ДОДАНО: підхопити подію, якщо її вже поклали в window
-    const existing = (window as any).__bmbA2HS as BeforeInstallPromptEvent | undefined;
-    if (existing) {
-      setInstallEvt(existing);
-      setInstallAvailable(true);
-    }
-
-    const onBIP = (e: Event) => {
-      e.preventDefault();
-      const ev = e as BeforeInstallPromptEvent;
-      setInstallEvt(ev);
-      setInstallAvailable(true);
-      localStorage.setItem('bmb.a2hs.supported', '1');
-
-      // ✅ ДОДАНО: зберегти подію глобально й повідомити інші компоненти
-      (window as any).__bmbA2HS = ev;
-      window.dispatchEvent(new CustomEvent('bmb:a2hs-available'));
-    };
     const onInstalled = () => {
       setInstalled(true);
-      setInstallAvailable(false);
-      setInstallEvt(null);
-      setShowA2HSModal(false);
-      localStorage.setItem('bmb.a2hs.done', '1');
+      try { localStorage.setItem('bmb.a2hs.done', '1'); } catch {}
     };
-
-    window.addEventListener('beforeinstallprompt', onBIP as any);
     window.addEventListener('appinstalled', onInstalled);
-
     if (isStandaloneDisplay()) {
-      localStorage.setItem('bmb.a2hs.done', '1');
+      try { localStorage.setItem('bmb.a2hs.done', '1'); } catch {}
       setInstalled(true);
     }
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', onBIP as any);
-      window.removeEventListener('appinstalled', onInstalled);
-    };
+    return () => window.removeEventListener('appinstalled', onInstalled);
   }, []);
 
   // 1) Профіль + драфти
@@ -470,7 +422,7 @@ export default function Profile() {
 
       // Мобільний — відкриваємо у MetaMask App браузері
       if (!provider && /android|iphone|ipad|ipod/i.test(navigator.userAgent)) {
-        const deeplink = buildMetaMaskDappUrl();
+        const deeplink = `https://metamask.app.link/dapp/${encodeURIComponent(window.location.host + window.location.pathname)}`;
         window.location.href = deeplink;
         return;
       }
@@ -533,102 +485,8 @@ export default function Profile() {
     <div className="profile-container">
       <h1 className="title">Профіль</h1>
 
-      {/* PWA: Add to Home Screen (ховається коли встановлено) */}
-      {!installed && (
-        <div className="a2hs-card">
-          <div className="a2hs-row">
-            <div className="a2hs-emoji">📲</div>
-            <div className="a2hs-text">
-              Додати іконку на робочий стіл
-              <div className="a2hs-sub">Працює офлайн і відкривається як окремий додаток</div>
-            </div>
-          </div>
-          <div className="a2hs-actions">
-            <button
-              className="button a2hs-btn"
-              onClick={() => setShowA2HSModal(true)}
-            >
-              <span className="btn-icon" aria-hidden>
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#ff83b0" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="5" y="2.5" width="14" height="19" rx="3.5"/>
-                  <path d="M12 6v8M8 10h8"/>
-                </svg>
-              </span>
-              <span>{installAvailable || !isIOS() ? 'Додати іконку' : 'Як додати'}</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ✅ КНОПКА по центру, на ширину контенту */}
-      <style>{`
-        .profile-install-cta{width:100%;max-width:760px;margin:16px auto 24px;display:flex;flex-direction:column;align-items:center}
-        .profile-install-cta button{width:100%;justify-content:center}
-      `}</style>
-      <InstallPWAButton className="profile-install-cta" iconSrc="/icons/icon-192.png" />
-
-      {/* A2HS Modal */}
-      {showA2HSModal && !installed && (
-        <div className="bmb-modal-backdrop" onClick={() => setShowA2HSModal(false)}>
-          <div className="bmb-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="bmb-modal-header">
-              <div className="bmb-logo-square" aria-hidden />
-              <h3>ДОДАТИ ІКОНКУ НА РОБОЧИЙ СТІЛ</h3>
-            </div>
-
-            {!isIOS() ? (
-              <div className="bmb-modal-body">
-                <p>Встановіть застосунок як PWA для швидкого доступу.</p>
-                <ol className="bmb-steps">
-                  <li>Натисніть кнопку <b>Встановити</b> нижче.</li>
-                  <li>Підтвердіть у вікні браузера.</li>
-                </ol>
-              </div>
-            ) : (
-              <div className="bmb-modal-body">
-                <p>На iPhone / iPad:</p>
-                <ol className="bmb-steps">
-                  <li>Торкніться іконки <b>Поділитися</b> в Safari.</li>
-                  <li>Обирайте <b>На Початковий екран</b>.</li>
-                  <li>Підтвердіть назву і додайте.</li>
-                </ol>
-              </div>
-            )}
-
-            <div className="bmb-modal-actions">
-              {!isIOS() && installEvt && (
-                <button
-                  className="button bmb-primary"
-                  onClick={async () => {
-                    try {
-                      await installEvt.prompt();
-                      const choice = await installEvt.userChoice;
-                      if (choice?.outcome === 'accepted') {
-                        localStorage.setItem('bmb.a2hs.done', '1');
-                        setInstalled(true);
-                        setShowA2HSModal(false);
-                        setInstallAvailable(false);
-                        setInstallEvt(null);
-                      }
-                    } catch {/* ignore */}
-                  }}
-                >
-                  Встановити
-                </button>
-              )}
-              {(!installEvt || isIOS()) && (
-                <button
-                  className="button bmb-secondary"
-                  onClick={() => window.alert('Використайте стандартне меню браузера: Install App / Add to Home Screen')}
-                >
-                  Відкрити підказку
-                </button>
-              )}
-              <button className="button bmb-ghost" onClick={() => setShowA2HSModal(false)}>Закрити</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ✅ ЄДИНА CTA: акуратно по центру; якщо встановлено — ховаємо */}
+      {!installed && <ProfileInstallCTA />}
 
       {/* Аватар */}
       <div

@@ -1,66 +1,72 @@
 /* MapView.css */
 
+/* ===== Контейнер мапи: стабільна висота без "джиттера" ===== */
 .map-view-container {
   position: relative;
   width: 100%;
-  height: 100vh;
+  height: calc(var(--app-vh, 1vh) * 100); /* стабільніше, ніж чистий 100vh */
+  min-height: 100vh;
+  overscroll-behavior: none;
   overflow: hidden;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
+/* Мапа займає весь простір */
 .map-container {
   width: 100%;
   height: 100%;
   z-index: 1;
 }
 
-/* Story Bar — верхній елемент для перегляду та додавання відео */
+/* ===== Оверлей сторісбару ===== */
+/* Прилягає щільно до навбару, без просвіту */
+.storybar-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;                 /* було 8px → 0, щоб не проглядалася карта між навбаром і сторісбаром */
+  z-index: 1100;
+  pointer-events: none;   /* не блокуємо карту, але всередині дозволяємо кліки */
+}
+.storybar-overlay .story-bar { pointer-events: auto; }
+
+/* ===== Стрічка сторісів (смуга під навбаром) ===== */
 .story-bar {
   display: flex;
   justify-content: flex-start;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
-  background-color: #ffffff;
+
+  padding: 8px 12px;              /* відступи зменшені рівно вдвічі (було 14px 16px) */
+  background-color: #ffffff;      /* білий фон, як у хедера */
+  border-radius: 0;               /* без картки */
+  box-shadow: none;               /* без тіні під смугою */
+
+  position: relative;             /* якщо компонент стоїть просто у потоці */
   z-index: 1000;
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 70px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
 }
 
+/* ===== Кружечки ===== */
 .story-circle {
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  border: 3px solid white;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-  background-color: #f0f0f0;
+  border: 2px solid #ffffff;                  /* біла обводка */
+  background-color: #f6f7f9;                  /* світло-сірий бек */
+  box-shadow: 0 4px 12px rgba(0,0,0,.15);     /* м’яка тінь */
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   cursor: pointer;
   flex-shrink: 0;
+  transition: transform .12s ease, box-shadow .12s ease;
 }
-
-.story-circle.plus {
-  background-color: #ffffff;
-  border: 2px solid #cccccc;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
-}
-
-.plus-sign {
-  font-size: 32px;
-  font-weight: bold;
-  color: #444444;
-  user-select: none;
-}
+.story-circle:active { transform: scale(.96); }
 
 .story-avatar-img {
   width: 100%;
@@ -69,7 +75,21 @@
   border-radius: 50%;
 }
 
-/* Стиль для кружечка + в сторіс барі */
+/* Перший кружок — ПЛЮС (світло-сірий, не чорний) */
+.story-circle.plus {
+  background: linear-gradient(180deg, #f3f4f6, #e5e7eb);
+  border: 2px solid #ffffff;
+  box-shadow: 0 4px 12px rgba(0,0,0,.15);
+}
+.plus-sign {
+  font-size: 28px;
+  font-weight: 900;
+  color: #111;  /* темно-сірий плюс */
+  user-select: none;
+  transform: translateY(-1px);
+}
+
+/* Альтернативна кнопка-плитка (якщо десь використовується) */
 .story-full-tile {
   width: 64px;
   height: 64px;
@@ -79,19 +99,17 @@
   justify-content: center;
   font-size: 36px;
   font-weight: bold;
-  color: #007bff;
-  background-color: #ffffff;
-  border: 2px solid #ccc;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  color: #111;
+  background-color: #f3f4f6;
+  border: 2px solid #fff;
+  box-shadow: 0 4px 12px rgba(0,0,0,.15);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background-color 0.3s ease;
+  transition: background-color .2s ease, transform .12s ease;
 }
+.story-full-tile:hover { background-color: #eef2f7; }
 
-.story-full-tile:hover {
-  background-color: #f0f8ff;
-}
-
+/* Підпис під кружечком (якщо десь показуєш) */
 .story-label {
   text-align: center;
   font-size: 12px;
@@ -100,7 +118,7 @@
   font-weight: 500;
 }
 
-/* Маячки на карті */
+/* ===== Маячки на карті ===== */
 .custom-marker.small {
   width: 40px;
   height: 40px;
@@ -112,7 +130,6 @@
   justify-content: center;
   align-items: center;
 }
-
 .marker-img {
   width: 100%;
   height: 100%;
@@ -120,26 +137,24 @@
   border-radius: 50%;
 }
 
-/* --------- Рейтинг (10 чорних зірок) --------- */
+/* ===== Рейтинг (10 чорних зірок) ===== */
 .rating-row{
   display:flex;
   align-items:center;
   justify-content:center;
   gap:8px;
   margin:6px 0 14px;
-  white-space:nowrap;        /* все в один рядок */
+  white-space:nowrap;
 }
-
 .stars-wrap{
   position:relative;
-  width:172px;               /* ~10 зірок по 17px */
+  width:172px;
   height:18px;
   line-height:18px;
   font-size:17px;
   letter-spacing:2px;
   user-select:none;
 }
-
 .stars-bg,
 .stars-fill{
   position:absolute;
@@ -147,30 +162,12 @@
   overflow:hidden;
   font-weight:700;
 }
+.stars-bg{ color:#e5e7eb; width:100%; }
+.stars-fill{ color:#111827; width:0; }
+.rating-number{ font-weight:700; color:#111827; font-size:14px; }
 
-.stars-bg{
-  color:#e5e7eb;             /* світло-сірий фон зірок */
-  width:100%;
-}
-
-.stars-fill{
-  color:#111827;             /* ЧОРНІ зірочки */
-  width:0;                   /* ширину задає inline-стиль із TS */
-}
-
-.rating-number{
-  font-weight:700;
-  color:#111827;
-  font-size:14px;
-}
-/* --------------------------------------------- */
-
-/* Попап/шторка профілю (загальні допоміжні стилі) */
-.profile-popup-overlay {
-  z-index: 1001;
-  pointer-events: auto;
-}
-
+/* ===== Попап/шторка профілю ===== */
+.profile-popup-overlay { z-index:1001; pointer-events:auto; }
 .profile-popup {
   width: 300px;
   background: white;
@@ -184,22 +181,15 @@
   filter: blur(3px);
   transition: opacity 0.4s ease, transform 0.4s ease, filter 0.4s ease;
 }
-
-.profile-popup.show {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  filter: blur(0);
-}
-
+.profile-popup.show { opacity:1; transform: translateY(0) scale(1); filter:none; }
 .profile-popup img {
   width: 72px;
   height: 72px;
   border-radius: 50%;
   border: 3px solid white;
-  box-shadow: 0 0 6px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 0 6px rgba(0,0,0,0.2);
   margin-bottom: 10px;
 }
-
 .profile-role {
   display: inline-block;
   background-color: #4caf50;
@@ -209,7 +199,6 @@
   font-size: 12px;
   margin: 5px 0;
 }
-
 .profile-scenario {
   margin: 8px 0;
   display: flex;
@@ -217,6 +206,7 @@
   font-size: 14px;
 }
 
+/* Центрований плюс для будь-яких круглих кнопок */
 .center-plus {
   display: flex;
   align-items: center;
@@ -225,11 +215,9 @@
   font-weight: bold;
   color: #888888;
 }
+.grey-bg { background: #e0e0e0 !important; }
 
-.grey-bg {
-  background: #e0e0e0 !important;
-}
-
+/* Кнопка додавання біхейвору (якщо використаєш) */
 .profile-button {
   margin-top: 12px;
   background-color: #007bff;
@@ -240,12 +228,8 @@
   cursor: pointer;
   font-weight: bold;
 }
+.profile-button:hover { background-color: #0056b3; }
 
-.profile-button:hover {
-  background-color: #0056b3;
-}
-
-/* Кнопка додавання біхейвору (на майбутнє) */
 .add-behavior-button {
   position: absolute;
   bottom: 20px;
@@ -262,24 +246,17 @@
   cursor: pointer;
   transition: background-color 0.3s ease;
 }
-
-.add-behavior-button:hover {
-  background-color: #0056b3;
-}
-
-.plus-icon {
-  font-size: 36px;
-  color: white;
-  font-weight: bold;
-  user-select: none;
-}
-
-.pulse {
-  animation: pulse-animation 2s infinite;
-}
-
+.add-behavior-button:hover { background-color: #0056b3; }
+.plus-icon { font-size: 36px; color: white; font-weight: bold; user-select: none; }
+.pulse { animation: pulse-animation 2s infinite; }
 @keyframes pulse-animation {
-  0% { box-shadow: 0 0 0 0 rgba(0, 123, 255, 0.6); }
-  70% { box-shadow: 0 0 0 15px rgba(0, 123, 255, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(0, 123, 255, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(0,123,255,.6); }
+  70% { box-shadow: 0 0 0 15px rgba(0,123,255,0); }
+  100% { box-shadow: 0 0 0 0 rgba(0,123,255,0); }
+}
+
+/* ===== Опустити leaflet-контроли рівно під новою висотою сторісбару ===== */
+/* 64px (кружок) + 8px*2 (паддінги) = ~80px → невеликий запас */
+.map-view-container .leaflet-top.leaflet-left {
+  top: 88px;
 }

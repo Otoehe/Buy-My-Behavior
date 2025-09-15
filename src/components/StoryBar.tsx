@@ -1,412 +1,157 @@
-// Показує прев’ю відео (луп, muted) і ПІДПИС = ім'я профілю автора з profiles.name (ключ profiles.user_id).
-// Якщо name порожнє — підпис не рендеримо (не fallback-имо на title/“Video evidence”).
-import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
-import { supabase } from "../lib/supabase";
-import UploadBehavior from "./UploadBehavior";
-import "./StoryBar.css";
+// src/components/StoryBar.tsx
+// ЄДИНИЙ сторісбар: 24 останні behaviors, realtime INSERT, відписування.
+// Підтримка прев'ю відео (перша рамка) та зображень.
+// Сінглтон-захист від дубльованого монтування.
 
-type Nullable<T> = T | null | undefined;
+import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
+import UploadBehavior from './UploadBehavior';
+import './StoryBar.css';
 
-const PROFILE_TABLE = "profiles";
-const PROFILE_ID_COL: "user_id" = "user_id";
-
-interface Behavior {
+type Behavior = {
   id: number;
   user_id: string | null;
   title: string | null;
   description: string | null;
-
-  file_url?: Nullable<string>;
-  video_url?: Nullable<string>;
-  image_url?: Nullable<string>;
-  thumbnail_url?: Nullable<string>;
-  storage_path?: Nullable<string>;
-  ipfs_cid?: Nullable<string>;
-
+  ipfs_cid: string | null;
+  file_url?: string | null;
   created_at: string;
-  is_dispute_evidence?: boolean | null;
-  dispute_id?: string | null;
-}
-
-interface ProfileRow {
-  user_id?: string | null;
-  name?: string | null;
-}
-
-type CacheShape = {
-  t: number; // timestamp
-  behaviors: Pick<Behavior, "id" | "user_id" | "thumbnail_url" | "image_url" | "video_url" | "file_url" | "storage_path" | "ipfs_cid" | "created_at">[];
-  srcMap: Record<number, string | null>;
-  posterMap: Record<number, string | null>;
-  nameByUser: Record<string, string>;
 };
 
-const CACHE_KEY = "bmb.story.cache.v2";
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 хвилин
+declare global {
+  interface Window { __BMB_STORYBAR_MOUNTED__?: boolean }
+}
 
-const gateways = [
-  (cid: string) => `https://gateway.lighthouse.storage/ipfs/${cid}`,
-  (cid: string) => `https://ipfs.io/ipfs/${cid}`,
-];
-
-const isHttp = (s?: string | null) => !!s && /^https?:\/\//i.test(s);
-const isCid  = (s?: string | null) => !!s && /^[a-z0-9]{46,}$/i.test(s);
-const firstNonEmpty = (...vals: Array<Nullable<string>>) => {
-  for (const v of vals) { if (v && String(v).trim()) return String(v); }
-  return null;
+const isVideo = (url?: string | null) => {
+  if (!url) return false;
+  const u = url.split('?')[0].toLowerCase();
+  return /\.(mp4|webm|ogg|mov|m4v)$/.test(u);
 };
+
+const buildSrc = (b: Behavior) =>
+  b.file_url || (b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : null);
 
 export default function StoryBar() {
-  const [behaviors, setBehaviors] = useState<Behavior[]>([]);
-  const [srcMap, setSrcMap] = useState<Record<number, string | null>>({});
-  const [posterMap, setPosterMap] = useState<Record<number, string | null>>({});
-  const [nameByUser, setNameByUser] = useState<Record<string, string>>({});
-  const [loadedMap, setLoadedMap] = useState<Record<number, boolean>>({});
+  const [items, setItems] = useState<Behavior[]>([]);
+  const [broken, setBroken] = useState<Set<number>>(new Set());
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-
-  const barRef = useRef<HTMLElement | null>(null);
+  const chRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const navigate = useNavigate();
 
-  // ====== 0) Миттєве відмалювання з кешу (якщо є) ======
+  // 🔒 Сінглтон
+  const [active, setActive] = useState(false);
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(CACHE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as CacheShape;
-      if (!parsed?.t || Date.now() - parsed.t > CACHE_TTL_MS) return;
-
-      // показуємо моментально
-      setSrcMap(parsed.srcMap || {});
-      setPosterMap(parsed.posterMap || {});
-      setNameByUser(parsed.nameByUser || {});
-      setBehaviors((parsed.behaviors || []) as Behavior[]);
-      // вважаємо «завантаженими» те, що має постер
-      const lm: Record<number, boolean> = {};
-      Object.keys(parsed.posterMap || {}).forEach((k) => (lm[Number(k)] = true));
-      setLoadedMap(lm);
-    } catch {}
+    if (!window.__BMB_STORYBAR_MOUNTED__) {
+      window.__BMB_STORYBAR_MOUNTED__ = true;
+      setActive(true);
+      return () => { window.__BMB_STORYBAR_MOUNTED__ = false; };
+    } else {
+      setActive(false);
+    }
   }, []);
 
-  // ====== 1) Свіже завантаження behaviors ======
+  // Initial
   useEffect(() => {
-    let alive = true;
+    if (!active) return;
+    let cancelled = false;
     (async () => {
       const { data, error } = await supabase
-        .from<Behavior>("behaviors")
-        .select("*")
-        .order("created_at", { ascending: false })
+        .from('behaviors')
+        .select('*')
+        .order('created_at', { ascending: false })
         .limit(24);
-      if (!alive) return;
-      if (!error && data) setBehaviors(data);
-    })();
-    return () => { alive = false; };
-  }, []);
-
-  // ====== 2) Realtime INSERT ======
-  useEffect(() => {
-    const ch = supabase
-      .channel("realtime:behaviors")
-      .on("postgres_changes",
-        { event: "INSERT", schema: "public", table: "behaviors" },
-        async (payload) => {
-          const b = payload.new as Behavior;
-          setBehaviors(prev => (prev.some(x => x.id === b.id) ? prev : [b, ...prev]));
-          const uid = (b.user_id || "").trim();
-          if (uid && !nameByUser[uid]) {
-            try {
-              const { data } = await supabase
-                .from<ProfileRow>(PROFILE_TABLE)
-                .select("user_id,name")
-                .eq(PROFILE_ID_COL, uid)
-                .maybeSingle();
-              const key = (data?.user_id || "").trim();
-              const n = (data?.name || "").trim();
-              if (key && n) setNameByUser(prev => ({ ...prev, [key]: n }));
-            } catch {}
-          }
-        }
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [nameByUser]);
-
-  // ===== helpers для URL =====
-  const resolveDirect = (b: Behavior) => {
-    const direct = firstNonEmpty(b.file_url, b.video_url, b.image_url);
-    if (isHttp(direct)) return direct!;
-    if (isCid(b.ipfs_cid)) return gateways[0](b.ipfs_cid!);
-    return null;
-  };
-  const resolveStorage = (b: Behavior) => {
-    const rel = firstNonEmpty(b.storage_path, b.file_url, b.video_url, b.image_url);
-    if (!rel || isHttp(rel)) return null;
-    const m = rel.match(/^([a-z0-9_-]+)\/(.+)$/i);
-    const candidates: Array<{ bucket: string; path: string }> = [];
-    if (m) candidates.push({ bucket: m[1], path: m[2] });
-    else {
-      for (const bucket of ["behaviors", "evidence", "uploads", "public", "videos"]) {
-        candidates.push({ bucket, path: rel });
+      if (!error && !cancelled && Array.isArray(data)) {
+        setItems(data as Behavior[]);
       }
-    }
-    for (const c of candidates) {
-      try {
-        const { data } = supabase.storage.from(c.bucket).getPublicUrl(c.path);
-        if (data?.publicUrl) return data.publicUrl; // синхронно формує URL
-      } catch {}
-    }
-    return null;
-  };
-  const computePosterUrl = (b: Behavior) => {
-    const poster = firstNonEmpty(b.thumbnail_url, b.image_url);
-    if (isHttp(poster)) return poster!;
-    if (isCid(poster)) return gateways[0](poster!);
-    return null;
-  };
-
-  // Якщо немає постера — пробуємо витягнути кадр (потім, асинхронно)
-  const grabPosterFrame = (url: string): Promise<string | null> => new Promise((resolve) => {
-    try {
-      const video = document.createElement("video");
-      video.crossOrigin = "anonymous";
-      video.muted = true;
-      video.playsInline = true;
-      video.preload = "metadata";
-      video.src = url;
-
-      const clean = () => { try { video.src = ""; } catch {} };
-      const onError = () => { clean(); resolve(null); };
-      video.onerror = onError;
-
-      video.onloadedmetadata = () => {
-        try { video.currentTime = Math.min(0.25, (video.duration || 1) / 10); } catch { onError(); }
-      };
-      video.onseeked = () => {
-        try {
-          const size = 144;
-          const canvas = document.createElement("canvas");
-          canvas.width = size; canvas.height = size;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) return onError();
-          ctx.drawImage(video, 0, 0, size, size);
-          resolve(canvas.toDataURL("image/jpeg", 0.76));
-          clean();
-        } catch { onError(); }
-      };
-    } catch { resolve(null); }
-  });
-
-  // ===== 3) Обчислюємо URL/постери + ОНОВЛЮЄМО КЕШ =====
-  useEffect(() => {
-    (async () => {
-      const nextSrc: Record<number, string | null> = {};
-      const nextPoster: Record<number, string | null> = {};
-
-      for (const b of behaviors) {
-        let src = resolveDirect(b);
-        if (!src) src = resolveStorage(b);
-        if (!src && isCid(b.ipfs_cid)) src = gateways[0](b.ipfs_cid!);
-
-        let poster = computePosterUrl(b);
-
-        nextSrc[b.id] = src;
-        nextPoster[b.id] = poster ?? null;
-      }
-
-      setSrcMap(nextSrc);
-      setPosterMap(nextPoster);
-
-      // асинхронно довантажимо кадри-постери
-      for (const b of behaviors) {
-        if (!nextPoster[b.id] && nextSrc[b.id]) {
-          try {
-            const dataUrl = await grabPosterFrame(nextSrc[b.id]!);
-            if (dataUrl) setPosterMap(prev => {
-              const updated = { ...prev, [b.id]: dataUrl };
-              // оновлюємо кеш live
-              try {
-                const raw = sessionStorage.getItem(CACHE_KEY);
-                if (raw) {
-                  const parsed = JSON.parse(raw) as CacheShape;
-                  parsed.posterMap = updated;
-                  parsed.t = Date.now();
-                  sessionStorage.setItem(CACHE_KEY, JSON.stringify(parsed));
-                }
-              } catch {}
-              return updated;
-            });
-          } catch {}
-        }
-      }
-
-      // кладемо в кеш (мінімальні поля + карти посилань)
-      try {
-        const cache: CacheShape = {
-          t: Date.now(),
-          behaviors: behaviors.map(b => ({
-            id: b.id,
-            user_id: b.user_id,
-            thumbnail_url: b.thumbnail_url,
-            image_url: b.image_url,
-            video_url: b.video_url,
-            file_url: b.file_url,
-            storage_path: b.storage_path,
-            ipfs_cid: b.ipfs_cid,
-            created_at: b.created_at,
-          })),
-          srcMap: nextSrc,
-          posterMap: nextPoster,
-          nameByUser,
-        };
-        sessionStorage.setItem(CACHE_KEY, JSON.stringify(cache));
-      } catch {}
     })();
-  }, [behaviors, nameByUser]);
+    return () => { cancelled = true; };
+  }, [active]);
 
-  // ===== 4) Підтягнути імена для видимих user_id, яких немає в кеші =====
+  // Realtime INSERT
   useEffect(() => {
-    (async () => {
-      const want = Array.from(
-        new Set(
-          behaviors
-            .map(b => (b.user_id || "").trim())
-            .filter(uid => uid && !nameByUser[uid])
-        )
-      );
-      if (want.length === 0) return;
-
-      try {
-        const { data, error } = await supabase
-          .from<ProfileRow>(PROFILE_TABLE)
-          .select("user_id,name")
-          .in(PROFILE_ID_COL, want);
-        if (!error && data) {
-          const patch: Record<string, string> = {};
-          for (const p of data) {
-            const key = (p.user_id || "").trim();
-            const n = (p.name || "").trim();
-            if (key && n) patch[key] = n;
-          }
-          if (Object.keys(patch).length) setNameByUser(prev => ({ ...prev, ...patch }));
-        }
-      } catch {}
-    })();
-  }, [behaviors, nameByUser]);
-
-  // ===== керування відео: грає тільки коли видно =====
-  const prefersReduceMotion = useMemo(
-    () => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false,
-    []
-  );
-  useEffect(() => {
-    if (prefersReduceMotion) return;
-    const root = barRef.current;
-    if (!root) return;
-    const videos = Array.from(root.querySelectorAll<HTMLVideoElement>("video.story-video"));
-    if (!videos.length) return;
-
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          const v = e.target as HTMLVideoElement;
-          if (e.isIntersecting && e.intersectionRatio >= 0.35) {
-            v.play().catch(() => {});
-          } else {
-            v.pause();
-          }
-        }
-      },
-      { root: root.parentElement, threshold: [0, 0.35, 1] }
+    if (!active) return;
+    const ch = supabase.channel('realtime:behaviors', {
+      config: { broadcast: { ack: false }, presence: { key: 'storybar' } },
+    });
+    ch.on('postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'behaviors' },
+      (payload: any) => {
+        const row = payload.new as Behavior;
+        setItems(prev => {
+          if (prev.some(x => x.id === row.id)) return prev;
+          const next = [row, ...prev];
+          return next.slice(0, 24);
+        });
+      }
     );
-    videos.forEach((v) => io.observe(v));
-    return () => io.disconnect();
-  }, [srcMap, prefersReduceMotion]);
+    ch.subscribe();
+    chRef.current = ch;
+    return () => { try { if (chRef.current) supabase.removeChannel(chRef.current); } catch {} chRef.current = null; };
+  }, [active]);
 
-  // UI callbacks
-  const openUpload = useCallback(() => setIsUploadOpen(true), []);
-  const closeUpload = useCallback(() => setIsUploadOpen(false), []);
-  const goToBehaviors = useCallback(() => navigate("/behaviors"), [navigate]);
-  const onMediaLoaded = (id: number) => setLoadedMap((m) => (m[id] ? m : { ...m, [id]: true }));
+  const markBroken = (id: number) => setBroken(prev => new Set(prev).add(id));
+  const openFeed = () => navigate('/behaviors');
 
-  // Якщо ще немає behaviors і немає кешу — показати «привидів», щоб виглядало миттєво
-  const noDataYet = behaviors.length === 0 && Object.keys(posterMap).length === 0;
+  if (!active) return null;
 
   return (
-    <>
-      <section
-        data-bmb-storybar=""
-        style={{ ["--nav-h" as any]: "56px" }}
-        ref={barRef as any}
-      >
-        <div className="story-bar story-bar--tall story-bar--sticky" role="list" aria-label="Останні Behaviors">
-          <button
-            type="button"
-            className="story-item add-button"
-            onClick={openUpload}
-            aria-label="Додати Behavior"
-            role="listitem"
-          >
-            <div className="story-circle">+</div>
-            <div className="story-label">Додати</div>
-          </button>
+    <div className="story-bar" data-bmb-storybar="">
+      <div className="sb-container">
+        {/* PLUS */}
+        <button
+          type="button"
+          className="sb-item sb-item-add"
+          onClick={() => setIsUploadOpen(true)}
+          aria-label="Додати Behavior"
+          title="Додати Behavior"
+        >
+          <span className="sb-plus">+</span>
+        </button>
 
-          {/* Привиди для миттєвого вигляду на холодному старті */}
-          {noDataYet &&
-            Array.from({ length: 12 }).map((_, i) => (
-              <div key={`ghost-${i}`} className="story-item is-ghost" role="listitem" aria-hidden="true">
-                <div className="story-circle story-circle--loading" />
-                <div className="story-label story-label--empty" />
-              </div>
-            ))}
+        {/* BEHAVIORS */}
+        {items.map((b) => {
+          const src = buildSrc(b);
+          const isBroken = broken.has(b.id);
 
-          {behaviors.map((b) => {
-            const media = srcMap[b.id] || null;
-            const poster = posterMap[b.id] || "/placeholder.jpg";
-            const authorName = b.user_id ? nameByUser[b.user_id] : undefined;
-            const isLoaded = !!loadedMap[b.id] || !!posterMap[b.id];
+          return (
+            <button
+              key={b.id}
+              type="button"
+              className="sb-item"
+              title={b.title ?? 'Переглянути'}
+              onClick={openFeed}
+            >
+              {src && !isBroken ? (
+                isVideo(src) ? (
+                  <video
+                    className="sb-media"
+                    src={`${src}#t=0.001`}
+                    preload="metadata"
+                    muted
+                    playsInline
+                    onError={() => markBroken(b.id)}
+                  />
+                ) : (
+                  <img
+                    className="sb-media"
+                    src={src}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    crossOrigin="anonymous"
+                    onError={() => markBroken(b.id)}
+                  />
+                )
+              ) : (
+                <div className="sb-fallback" />
+              )}
+            </button>
+          );
+        })}
+      </div>
 
-            return (
-              <button
-                type="button"
-                key={b.id}
-                className={`story-item${isLoaded ? " is-loaded" : ""}`}
-                onClick={goToBehaviors}
-                role="listitem"
-                aria-label={authorName || "Behavior"}
-                title={authorName || ""}
-                onKeyDown={(e) => (e.key === "Enter" ? goToBehaviors() : null)}
-              >
-                <div className={`story-circle${isLoaded ? " story-circle--ready" : " story-circle--loading"}`}>
-                  {media ? (
-                    <video
-                      className="story-video"
-                      src={media}
-                      poster={poster}
-                      muted
-                      playsInline
-                      loop
-                      preload="metadata"
-                      autoPlay={!prefersReduceMotion}
-                      aria-hidden="true"
-                      onLoadedData={() => onMediaLoaded(b.id)}
-                    />
-                  ) : (
-                    <img
-                      className="story-poster"
-                      src={poster}
-                      alt={authorName || ""}
-                      onLoad={() => onMediaLoaded(b.id)}
-                    />
-                  )}
-                </div>
-                {authorName ? <div className="story-label">{authorName}</div> : <div className="story-label story-label--empty" aria-hidden="true" />}
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      {isUploadOpen && <UploadBehavior onClose={closeUpload} />}
-    </>
+      {isUploadOpen && <UploadBehavior onClose={() => setIsUploadOpen(false)} />}
+    </div>
   );
 }

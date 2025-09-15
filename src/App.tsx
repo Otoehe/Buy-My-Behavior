@@ -15,8 +15,6 @@ import useViewportVH        from './lib/useViewportVH';
 import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
-
-// ⬇️ ВАЖЛИВО: імпорт з ВЕЛИКИМИ літерами (BMB), як і назва файла
 import BMBModalHost         from './components/BMBModalHost';
 
 const MapView           = lazy(() => import('./components/MapView'));
@@ -30,29 +28,39 @@ const BmbModalsDemo     = lazy(() => import('./components/BmbModalsDemo'));
 function RequireAuth({
   user,
   children,
-}: { user: User | null | undefined; children: React.ReactElement }) {
+}: {
+  user: User | null | undefined;
+  children: React.ReactElement;
+}) {
   const location = useLocation();
   if (user === undefined) return null;
-  if (user === null) return <Navigate to="/register" replace state={{ from: location.pathname }} />;
+  if (user === null)
+    return <Navigate to="/register" replace state={{ from: location.pathname }} />;
   return children;
 }
 
 function RedirectIfAuthed({
   user,
   children,
-}: { user: User | null | undefined; children: React.ReactElement }) {
+}: {
+  user: User | null | undefined;
+  children: React.ReactElement;
+}) {
   if (user === undefined) return null;
   if (user) return <Navigate to="/map" replace />;
   return children;
 }
 
-function HomeGate() { return <Navigate to="/map" replace />; }
+function HomeGate() {
+  return <Navigate to="/map" replace />;
+}
 
 export default function App() {
-  useViewportVH();
+  useViewportVH();       // мобільний 100vh-фікс (встановлює --app-vh)
   useGlobalImageHints();
 
   const [user, setUser] = useState<User | null | undefined>(undefined);
+  const location = useLocation();
 
   useEffect(() => {
     let mounted = true;
@@ -63,18 +71,22 @@ export default function App() {
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setUser(session?.user ?? null);
     });
-    return () => { mounted = false; sub.subscription.unsubscribe(); };
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   if (user === undefined) return null;
 
+  const showGlobalA2HS = location.pathname !== '/profile';
+
   return (
     <>
-      <A2HS />
+      {showGlobalA2HS && <A2HS />}
       <NetworkToast />
       <SWUpdateToast />
       <NavigationBar />
-      {/* Глобальний хост BMB-модалок */}
       <BMBModalHost />
 
       <Suspense fallback={null}>
