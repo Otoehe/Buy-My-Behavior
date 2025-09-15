@@ -34,7 +34,6 @@ interface Scenario { id: string; description: string; price: number }
 const CenterMap: React.FC<{ center: [number, number] }> = ({ center }) => {
   const map = useMap();
   useEffect(() => {
-    // без анімації, щоб не було мікро-ридравів
     map.setView(center, map.getZoom(), { animate: false });
   }, [center, map]);
   return null;
@@ -70,6 +69,8 @@ export default function MapView() {
   const lastX = useRef<number | null>(null);
   const dragXRef = useRef(0);
   const rafRef = useRef<number | null>(null);
+
+  /* ——— прибрано lockBodyScroll — тепер це не потрібно з fixed-контейнером ——— */
 
   const setTransform = (dx: number) => {
     dragXRef.current = dx;
@@ -219,7 +220,6 @@ export default function MapView() {
 
   return (
     <div className="map-view-container" onClick={handleMapClick}>
-      {/* ✅ Сторісбар як оверлей — не впливає на висоту, не викликає «джиттер» */}
       {!isSelectMode && (
         <div className="storybar-overlay">
           <StoryBar />
@@ -274,7 +274,7 @@ export default function MapView() {
           <div
             style={{
               position: 'absolute',
-              left: '50%', top: '50%', transform: 'translate(-50%, 6px)',
+              left: '50%', top: '50%', transform: 'translateX(-50%) translateY(6px)',
               width: 22, height: 6, borderRadius: 999,
               background: 'rgba(0,0,0,.18)', filter: 'blur(1px)',
               zIndex: 3999, pointerEvents: 'none',
@@ -323,7 +323,7 @@ export default function MapView() {
           ref={panelRef}
           className="drawer-overlay"
           style={{
-            position: 'fixed', zIndex: 2000, top: 0, right: 0, bottom: 0, width: drawerWidth,
+            position: 'fixed', zIndex: 2000, top: 0, right: 0, bottom: 0, width: 340,
             background: '#fff', boxShadow: '-8px 0 24px rgba(0,0,0,0.22)',
             padding: 20, overflowY: 'auto',
             transform: 'translate3d(0,0,0)',

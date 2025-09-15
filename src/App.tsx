@@ -11,7 +11,8 @@ import Profile         from './components/Profile';
 import AuthCallback    from './components/AuthCallback';
 import A2HS            from './components/A2HS';
 
-import useViewportVH        from './lib/useViewportVH';
+// ⛔️ useViewportVH видаляємо, щоб не було постійних перерахунків висоти
+// import useViewportVH        from './lib/useViewportVH';
 import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
@@ -56,7 +57,7 @@ function HomeGate() {
 }
 
 export default function App() {
-  useViewportVH();       // мобільний 100vh-фікс (встановлює --app-vh)
+  // useViewportVH();   // ❌ прибрано
   useGlobalImageHints();
 
   const [user, setUser] = useState<User | null | undefined>(undefined);
