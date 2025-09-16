@@ -14,8 +14,7 @@ import useViewportVH        from './lib/useViewportVH';
 import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
-import BMBModalHost         from './components/BmbModalHost';
-import StoryBarRoot         from './components/StoryBarRoot';
+import BmbModalHost         from './components/BmbModalHost';   // ✅ правильний імпорт
 
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
@@ -56,13 +55,11 @@ function HomeGate() {
 }
 
 export default function App() {
-  useViewportVH();
+  useViewportVH();       // мобільний 100vh-фікс (встановлює --app-vh)
   useGlobalImageHints();
 
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const location = useLocation();
-  const isMap = location.pathname.startsWith('/map');
-  const showGlobalA2HS = location.pathname !== '/profile';
 
   useEffect(() => {
     let mounted = true;
@@ -81,16 +78,15 @@ export default function App() {
 
   if (user === undefined) return null;
 
+  const showGlobalA2HS = location.pathname !== '/profile';
+
   return (
     <>
       {showGlobalA2HS && <A2HS />}
       <NetworkToast />
       <SWUpdateToast />
       <NavigationBar />
-      <BMBModalHost />
-
-      {/* ЄДИНИЙ глобальний сторісбар */}
-      <StoryBarRoot hidden={!isMap} />
+      <BmbModalHost />  {/* ✅ правильне використання */}
 
       <Suspense fallback={null}>
         <Routes>

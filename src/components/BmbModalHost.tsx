@@ -1,4 +1,3 @@
-// src/components/BmbModalHost.tsx
 import React, { useEffect, useState } from "react";
 
 /**
@@ -50,9 +49,11 @@ const WalletBadges = () => (
          style={{ borderRadius:9999, border:"3px solid #fff", boxShadow:"0 2px 8px rgba(0,0,0,.15)" }}/>
   </div>
 );
+
 const WalletDoneBadge = () => (
   <BadgeCircle><img src="/mUSD-icon.svg" alt="" width={52} height={52}/></BadgeCircle>
 );
+
 const InfoIcon = () => (
   <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#111" strokeWidth="1.8">
     <circle cx="12" cy="12" r="10"/><path d="M12 10v7m0-11h.01"/>
