@@ -1,4 +1,3 @@
-// src/App.tsx
 import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import type { User } from '@supabase/supabase-js';
@@ -11,12 +10,12 @@ import Profile         from './components/Profile';
 import AuthCallback    from './components/AuthCallback';
 import A2HS            from './components/A2HS';
 
-// ⛔️ useViewportVH видаляємо, щоб не було постійних перерахунків висоти
-// import useViewportVH        from './lib/useViewportVH';
+import useViewportVH        from './lib/useViewportVH';
 import useGlobalImageHints  from './lib/useGlobalImageHints';
 import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
-import BMBModalHost         from './components/BMBModalHost';
+import BMBModalHost         from './components/BmbModalHost';
+import StoryBarRoot         from './components/StoryBarRoot';
 
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
@@ -57,11 +56,13 @@ function HomeGate() {
 }
 
 export default function App() {
-  // useViewportVH();   // ❌ прибрано
+  useViewportVH();
   useGlobalImageHints();
 
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const location = useLocation();
+  const isMap = location.pathname.startsWith('/map');
+  const showGlobalA2HS = location.pathname !== '/profile';
 
   useEffect(() => {
     let mounted = true;
@@ -80,8 +81,6 @@ export default function App() {
 
   if (user === undefined) return null;
 
-  const showGlobalA2HS = location.pathname !== '/profile';
-
   return (
     <>
       {showGlobalA2HS && <A2HS />}
@@ -89,6 +88,9 @@ export default function App() {
       <SWUpdateToast />
       <NavigationBar />
       <BMBModalHost />
+
+      {/* ЄДИНИЙ глобальний сторісбар */}
+      <StoryBarRoot hidden={!isMap} />
 
       <Suspense fallback={null}>
         <Routes>

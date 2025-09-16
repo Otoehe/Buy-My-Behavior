@@ -5,13 +5,11 @@ import StoryBar from './StoryBar';
 export default function StoryBarLayer() {
   return createPortal(
     <div
-      className="bmb-storybar-fixed"
       style={{
         position: 'fixed',
-        left: 0,
-        right: 0,
-        top: 64,           // піджени під висоту твого навбару
-        zIndex: 4000,
+        left: 0, right: 0,
+        top: 'var(--nav-h, 56px)',
+        zIndex: 1500,
         pointerEvents: 'none',
       }}
     >

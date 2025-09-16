@@ -1,5 +1,3 @@
-/* src/components/StoryBar.css */
-
 /* сам StoryBar прозорий — стрічку робить sb-container */
 .story-bar {
   position: relative;
@@ -9,19 +7,29 @@
   padding: 0;
 }
 
-/* стрічка під навбаром: менші відступи (було ~14px, стало 8px) */
+/* стабільна висота під навбаром */
+:root { --sb-h: 80px; } /* 64px кружок + паддинги */
+
 .sb-container {
   display: flex;
   gap: 12px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;          /* Firefox */
+  align-items: center;
+  height: var(--sb-h);
 
-  padding: 8px 12px;              /* ← вдвічі менше */
-  background: #ffffff;            /* продовження білого хедера */
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 12px;
+
+  background: #ffffff;
   border-radius: 0;
-  box-shadow: none;               /* без тіні під смугою */
+  box-shadow: none;
+
+  /* анти-джиттер при появі/зникненні скролбару/банерів */
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: none;          /* Firefox */
 }
+.sb-container::-webkit-scrollbar { display: none; } /* WebKit/Chromium */
 
 /* кружечки */
 .sb-item {
@@ -29,9 +37,9 @@
   height: 64px;
   flex: 0 0 auto;
   border-radius: 9999px;
-  border: 2px solid #fff;               /* біла обводка */
-  background: #f6f7f9;                  /* світло-сірий бек */
-  box-shadow: 0 4px 12px rgba(0,0,0,.15);/* м’яка тінь */
+  border: 2px solid #fff;
+  background: #f6f7f9;
+  box-shadow: 0 4px 12px rgba(0,0,0,.15);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -42,7 +50,7 @@
 }
 .sb-item:active { transform: scale(.96); }
 
-/* медіа всередині кружечка (і img, і video) */
+/* медіа всередині кружечка */
 .sb-media,
 .sb-item img,
 .sb-item video {
@@ -53,7 +61,7 @@
   border-radius: 50%;
 }
 
-/* плюс — СІРИЙ, не чорний */
+/* плюс — СІРИЙ */
 .sb-item-add {
   background: linear-gradient(180deg, #f3f4f6, #e5e7eb);
   color: #111;
@@ -76,15 +84,6 @@
     radial-gradient(circle at 30% 30%, rgba(0,0,0,.06), transparent 40%),
     repeating-linear-gradient(45deg,#eee,#eee 6px,#f7f7f7 6px,#f7f7f7 12px);
 }
-
-/* скролбар (WebKit/Chromium) */
-.sb-container::-webkit-scrollbar { height: 8px; }
-.sb-container::-webkit-scrollbar-track { background: transparent; }
-.sb-container::-webkit-scrollbar-thumb { background: rgba(0,0,0,.12); border-radius: 9999px; }
-.sb-container::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.18); }
-
-/* скролбар (Firefox) */
-.sb-container { scrollbar-color: rgba(0,0,0,.12) transparent; }
 
 /* доступність */
 .sb-item:focus-visible { outline: 2px solid #111827; outline-offset: 2px; }

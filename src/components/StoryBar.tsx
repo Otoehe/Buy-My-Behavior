@@ -1,7 +1,5 @@
-// src/components/StoryBar.tsx
-// ЄДИНИЙ сторісбар: 24 останні behaviors, realtime INSERT, відписування.
-// Підтримка прев'ю відео (перша рамка) та зображень.
-// Сінглтон-захист від дубльованого монтування.
+// ЄДИНИЙ сторісбар: 24 останні behaviors, realtime INSERT.
+// Сінглтон-захист від дубльованого монтування та підписок.
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -19,9 +17,9 @@ type Behavior = {
   created_at: string;
 };
 
-declare global {
-  interface Window { __BMB_STORYBAR_MOUNTED__?: boolean }
-}
+// ───── сінглтон охорона (на рівні модуля) ─────
+let SB_INITED = false;
+let SB_CHANNEL: ReturnType<typeof supabase.channel> | null = null;
 
 const isVideo = (url?: string | null) => {
   if (!url) return false;
@@ -36,64 +34,47 @@ export default function StoryBar() {
   const [items, setItems] = useState<Behavior[]>([]);
   const [broken, setBroken] = useState<Set<number>>(new Set());
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const chRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const navigate = useNavigate();
 
-  // 🔒 Сінглтон
-  const [active, setActive] = useState(false);
+  // ініціальна вибірка + realtime підписка — тільки один раз на весь app
   useEffect(() => {
-    if (!window.__BMB_STORYBAR_MOUNTED__) {
-      window.__BMB_STORYBAR_MOUNTED__ = true;
-      setActive(true);
-      return () => { window.__BMB_STORYBAR_MOUNTED__ = false; };
-    } else {
-      setActive(false);
-    }
-  }, []);
+    if (!SB_INITED) {
+      SB_INITED = true;
+      (async () => {
+        const { data } = await supabase
+          .from('behaviors')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(24);
+        if (Array.isArray(data)) setItems(data as Behavior[]);
+      })();
 
-  // Initial
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    (async () => {
-      const { data, error } = await supabase
-        .from('behaviors')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(24);
-      if (!error && !cancelled && Array.isArray(data)) {
-        setItems(data as Behavior[]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [active]);
-
-  // Realtime INSERT
-  useEffect(() => {
-    if (!active) return;
-    const ch = supabase.channel('realtime:behaviors', {
-      config: { broadcast: { ack: false }, presence: { key: 'storybar' } },
-    });
-    ch.on('postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'behaviors' },
-      (payload: any) => {
-        const row = payload.new as Behavior;
-        setItems(prev => {
-          if (prev.some(x => x.id === row.id)) return prev;
-          const next = [row, ...prev];
-          return next.slice(0, 24);
+      if (!SB_CHANNEL) {
+        const ch = supabase.channel('realtime:behaviors', {
+          config: { broadcast: { ack: false }, presence: { key: 'storybar' } },
         });
+        ch.on('postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'behaviors' },
+          (payload: any) => {
+            const row = payload.new as Behavior;
+            setItems(prev => (prev.some(x => x.id === row.id) ? prev : [row, ...prev].slice(0, 24)));
+          }
+        );
+        ch.subscribe();
+        SB_CHANNEL = ch;
       }
-    );
-    ch.subscribe();
-    chRef.current = ch;
-    return () => { try { if (chRef.current) supabase.removeChannel(chRef.current); } catch {} chRef.current = null; };
-  }, [active]);
+    }
+
+    // для відладки: очікуємо 1
+    (window as any).__BMB_SB_MOUNTS__ = ((window as any).__BMB_SB_MOUNTS__ || 0) + 1;
+
+    return () => {
+      // SB_CHANNEL не відписуємо — він глобальний і має жити весь runtime
+    };
+  }, []);
 
   const markBroken = (id: number) => setBroken(prev => new Set(prev).add(id));
   const openFeed = () => navigate('/behaviors');
-
-  if (!active) return null;
 
   return (
     <div className="story-bar" data-bmb-storybar="">

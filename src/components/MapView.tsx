@@ -1,4 +1,3 @@
-// src/components/MapView.tsx
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
@@ -7,7 +6,7 @@ import 'leaflet/dist/leaflet.css';
 import { supabase } from '../lib/supabase';
 
 import ReviewsModal from './ReviewsModal';
-import StoryBar from './StoryBar';
+import StoryBar from './StoryBar';            // ⬅️ сторісбар
 import './Pills.css';
 import './MapView.css';
 
@@ -33,9 +32,7 @@ interface Scenario { id: string; description: string; price: number }
 
 const CenterMap: React.FC<{ center: [number, number] }> = ({ center }) => {
   const map = useMap();
-  useEffect(() => {
-    map.setView(center, map.getZoom(), { animate: false });
-  }, [center, map]);
+  useEffect(() => { map.setView(center, map.getZoom(), { animate: false }); }, [center, map]);
   return null;
 };
 
@@ -69,8 +66,6 @@ export default function MapView() {
   const lastX = useRef<number | null>(null);
   const dragXRef = useRef(0);
   const rafRef = useRef<number | null>(null);
-
-  /* ——— прибрано lockBodyScroll — тепер це не потрібно з fixed-контейнером ——— */
 
   const setTransform = (dx: number) => {
     dragXRef.current = dx;
@@ -220,6 +215,7 @@ export default function MapView() {
 
   return (
     <div className="map-view-container" onClick={handleMapClick}>
+      {/* ⬇️ СТОРІСБАР під навбаром і нижче зета шторки */}
       {!isSelectMode && (
         <div className="storybar-overlay">
           <StoryBar />
@@ -274,7 +270,7 @@ export default function MapView() {
           <div
             style={{
               position: 'absolute',
-              left: '50%', top: '50%', transform: 'translateX(-50%) translateY(6px)',
+              left: '50%', top: '50%', transform: 'translateX(-50%)',
               width: 22, height: 6, borderRadius: 999,
               background: 'rgba(0,0,0,.18)', filter: 'blur(1px)',
               zIndex: 3999, pointerEvents: 'none',
@@ -312,7 +308,7 @@ export default function MapView() {
           ref={backdropRef}
           onClick={() => setSelectedProfile(null)}
           style={{
-            position: 'fixed', inset: 0, zIndex: 1999,
+            position: 'fixed', inset: 0, zIndex: 1999,                   // ⬅️ над сторісбаром
             background: 'rgba(0,0,0,0.35)', opacity: 0.35, transition: 'opacity 200ms ease',
           }}
         />
@@ -323,7 +319,8 @@ export default function MapView() {
           ref={panelRef}
           className="drawer-overlay"
           style={{
-            position: 'fixed', zIndex: 2000, top: 0, right: 0, bottom: 0, width: 340,
+            position: 'fixed', zIndex: 2000, top: 0, right: 0, bottom: 0, // ⬅️ ще вище
+            width: drawerWidth,
             background: '#fff', boxShadow: '-8px 0 24px rgba(0,0,0,0.22)',
             padding: 20, overflowY: 'auto',
             transform: 'translate3d(0,0,0)',
