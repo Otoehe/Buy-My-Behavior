@@ -36,49 +36,74 @@ export default function StoryBar() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const navigate = useNavigate();
 
+  const sbRef = useRef<HTMLDivElement | null>(null);
+
   // ініціальна вибірка + realtime підписка — тільки один раз на весь app
   useEffect(() => {
     if (!SB_INITED) {
       SB_INITED = true;
+
       (async () => {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('behaviors')
           .select('*')
           .order('created_at', { ascending: false })
           .limit(24);
-        if (Array.isArray(data)) setItems(data as Behavior[]);
+
+        if (!error && Array.isArray(data)) {
+          setItems(data as Behavior[]);
+        }
       })();
 
       if (!SB_CHANNEL) {
         const ch = supabase.channel('realtime:behaviors', {
           config: { broadcast: { ack: false }, presence: { key: 'storybar' } },
         });
-        ch.on('postgres_changes',
+
+        ch.on(
+          'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'behaviors' },
           (payload: any) => {
             const row = payload.new as Behavior;
-            setItems(prev => (prev.some(x => x.id === row.id) ? prev : [row, ...prev].slice(0, 24)));
+            setItems(prev =>
+              prev.some(x => x.id === row.id) ? prev : [row, ...prev].slice(0, 24)
+            );
           }
         );
+
         ch.subscribe();
         SB_CHANNEL = ch;
       }
     }
-
-    // для відладки: очікуємо 1
-    (window as any).__BMB_SB_MOUNTS__ = ((window as any).__BMB_SB_MOUNTS__ || 0) + 1;
-
-    return () => {
-      // SB_CHANNEL не відписуємо — він глобальний і має жити весь runtime
-    };
   }, []);
+
+  // Lazy play відео всередині горизонтального скрол-контейнера
+  useEffect(() => {
+    const root = sbRef.current;
+    if (!root || !('IntersectionObserver' in window)) return;
+
+    const videos = root.querySelectorAll<HTMLVideoElement>('video.sb-media');
+    const io = new IntersectionObserver(
+      entries => {
+        entries.forEach(e => {
+          const v = e.target as HTMLVideoElement;
+          if (e.isIntersecting) v.play().catch(() => {});
+          else v.pause();
+        });
+      },
+      { root, threshold: 0.5 }
+    );
+
+    videos.forEach(v => io.observe(v));
+    return () => io.disconnect();
+  }, [items]);
 
   const markBroken = (id: number) => setBroken(prev => new Set(prev).add(id));
   const openFeed = () => navigate('/behaviors');
 
   return (
     <div className="story-bar" data-bmb-storybar="">
-      <div className="sb-container">
+      <div className="sb-container" ref={sbRef}>
         {/* PLUS */}
         <button
           type="button"
@@ -91,7 +116,7 @@ export default function StoryBar() {
         </button>
 
         {/* BEHAVIORS */}
-        {items.map((b) => {
+        {items.map(b => {
           const src = buildSrc(b);
           const isBroken = broken.has(b.id);
 
@@ -110,6 +135,7 @@ export default function StoryBar() {
                     src={`${src}#t=0.001`}
                     preload="metadata"
                     muted
+                    loop
                     playsInline
                     onError={() => markBroken(b.id)}
                   />
@@ -117,7 +143,7 @@ export default function StoryBar() {
                   <img
                     className="sb-media"
                     src={src}
-                    alt=""
+                    alt={b.title ?? ''}
                     loading="lazy"
                     decoding="async"
                     crossOrigin="anonymous"

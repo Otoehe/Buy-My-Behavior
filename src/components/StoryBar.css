@@ -1,76 +1,62 @@
-<!-- ==== STORY BAR ===================================================== -->
-<div class="story-bar">
-  <div class="sb-container" id="storyBar">
-    <!-- кнопка додавання -->
-    <button class="sb-item sb-item-add" id="sbAddBtn" aria-label="Додати сторіс" type="button">
-      <span class="sb-plus">+</span>
-    </button>
-  </div>
-</div>
-
-<style>
-/* ----- каркас бару ----- */
+/* --- StoryBar (прозорий контейнер, смужку робить sb-container) --- */
 .story-bar{
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  background: transparent;
+  position:relative; z-index:1; width:100%;
+  background:transparent; padding:0;
 }
-:root{ --sb-h: 80px; } /* 64px кружок + відступи */
 
+/* стабільна висота під навігацією */
+:root{ --sb-h:80px; } /* 64px кружок + паддінги */
+
+/* смужка з кружечками */
 .sb-container{
-  display:flex; gap:12px; align-items:center;
-  height:var(--sb-h);
+  display:flex; gap:12px; align-items:center; height:var(--sb-h);
   overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch;
   padding:8px 12px;
-  background:#fff;
-  scrollbar-gutter:stable both-edges;
-  scrollbar-width:none;
-  box-shadow:0 4px 10px rgba(0,0,0,.03);
-}
-.sb-container::-webkit-scrollbar{ display:none; }
+  background:#fff; border-radius:0;
 
-/* ----- кружечки ----- */
+  /* легка сіра тінь під баром */
+  box-shadow:0 1px 4px rgba(0,0,0,.06);
+
+  /* прибрати скакання при появі/зникненні скролу */
+  scrollbar-gutter:stable both-edges;
+  scrollbar-width:none;            /* Firefox */
+}
+.sb-container::-webkit-scrollbar{ display:none; } /* Chrome/Safari */
+
+/* один кружечок */
 .sb-item{
-  width:64px; height:64px; flex:0 0 auto;
-  border-radius:9999px;
-  display:inline-flex; align-items:center; justify-content:center;
-  padding:0; position:relative; cursor:pointer;
-  transition:transform .12s ease, box-shadow .12s ease;
-  border:none;               /* не заважаємо кільцю */
-  background:#f6f7f9;
+  width:64px; height:64px; flex:0 0 auto; border-radius:9999px;
+
+  /* БІЛА ОБВОДКА */
+  border:2px solid #fff;
+
+  /* СІРИЙ фон всередині (коли прев’ю ще не прийшло) */
+  background:#e5e7eb;
+
+  /* СІРА ТІНЬ навколо кружечка */
   box-shadow:0 4px 12px rgba(0,0,0,.15);
+
+  display:inline-flex; align-items:center; justify-content:center;
+  padding:0; cursor:pointer; position:relative;
+  transition:transform .12s ease, box-shadow .12s ease;
 }
 .sb-item:active{ transform:scale(.96); }
 
-/* медіа всередині */
-.sb-item > img, .sb-item > video, .sb-media{
-  width:100%; height:100%; display:block; object-fit:cover; border-radius:50%;
+/* медіа всередині кружечка */
+.sb-media,
+.sb-item img,
+.sb-item video{
+  width:100%; height:100%; object-fit:cover; display:block; border-radius:50%;
 }
 
-/* кнопка "+" — сіра, з білою рамкою */
+/* кнопка “плюс”: сірі кола, та сама біла обводка й сіра тінь */
 .sb-item-add{
-  border:2px solid #fff;
-  background:linear-gradient(180deg,#f3f4f6,#e5e7eb);
-  color:#111;
+  background:linear-gradient(180deg,#f3f4f6,#e5e7eb); color:#111; border-color:#fff;
+  box-shadow:0 4px 12px rgba(0,0,0,.15);
 }
 .sb-plus{ font-size:28px; line-height:1; font-weight:900; transform:translateY(-1px); }
 
-/* кільце для непросмотрених */
-.sb-item--ring{
-  background: conic-gradient(#ff375f, #ff9f0a, #ff375f);
-  box-shadow:0 6px 18px rgba(0,0,0,.14);
-  padding:3px;            /* щоб кільце було видно */
-}
-.sb-item--ring > img, .sb-item--ring > video{ background:#000; }
-
-/* переглянуте (сіра обводка) */
-.sb-item--seen{
-  background:linear-gradient(#e5e7eb,#e5e7eb);
-  padding:3px;
-}
-
-/* фолбек, якщо прев’ю не встигло */
+/* fallback, якщо медіа не завантажилось */
 .sb-fallback{
   width:100%; height:100%; border-radius:50%;
   background:
@@ -80,85 +66,3 @@
 
 /* доступність */
 .sb-item:focus-visible{ outline:2px solid #111827; outline-offset:2px; }
-</style>
-
-<script>
-/* ===== Дані для прикладу (заміниш на свої) ===== */
-const stories = [
-  { id:'s1', title:'story 1', type:'image', preview:'https://picsum.photos/seed/bmb1/200/200', href:'#' },
-  { id:'s2', title:'story 2', type:'image', preview:'https://picsum.photos/seed/bmb2/200/200', href:'#' },
-  { id:'s3', title:'story 3', type:'video', preview:'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4', href:'#' },
-  { id:'s4', title:'story 4', type:'image', preview:'https://picsum.photos/seed/bmb3/200/200', href:'#' },
-  { id:'s5', title:'story 5', type:'image', preview:'https://picsum.photos/seed/bmb4/200/200', href:'#' },
-];
-
-/* ===== Рендер сторіс у контейнер ===== */
-const bar = document.getElementById('storyBar');
-const SEEN_KEY = 'bmb_seen_ids';
-
-function getSeen(){ try{ return new Set(JSON.parse(localStorage.getItem(SEEN_KEY)||'[]')); }catch{ return new Set(); } }
-function setSeen(set){ localStorage.setItem(SEEN_KEY, JSON.stringify([...set])); }
-
-function createItem(s){
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'sb-item ' + (getSeen().has(s.id) ? 'sb-item--seen' : 'sb-item--ring');
-  btn.title = s.title;
-  btn.setAttribute('aria-label', s.title);
-  btn.dataset.sid = s.id;
-
-  if (s.type === 'video'){
-    const v = document.createElement('video');
-    v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'metadata';
-    v.src = s.preview;
-    v.className = 'sb-media';
-    v.addEventListener('canplay', ()=>{ v.play().catch(()=>{}); }, {once:true});
-    btn.appendChild(v);
-  }else{
-    const img = new Image();
-    img.loading = 'lazy';
-    img.src = s.preview;
-    img.alt = s.title;
-    img.className = 'sb-media';
-    img.onerror = () => { img.replaceWith(Object.assign(document.createElement('div'),{className:'sb-fallback'})); };
-    btn.appendChild(img);
-  }
-
-  // Клік: позначаємо як переглянуте і відкриваємо сторіс/URL
-  btn.addEventListener('click', () => {
-    const seen = getSeen(); seen.add(s.id); setSeen(seen);
-    btn.classList.remove('sb-item--ring'); btn.classList.add('sb-item--seen');
-
-    // TODO: тут відкрий свій переглядач сторіс замість alert
-    if (s.href && s.href !== '#') window.open(s.href, '_blank');
-  });
-
-  return btn;
-}
-
-function renderStories(list){
-  // спочатку йде кнопка "+", вона вже є в DOM; додаємо решту
-  list.forEach(s => bar.appendChild(createItem(s)));
-}
-
-renderStories(stories);
-
-/* Кнопка "+" (додай свою логіку завантаження) */
-document.getElementById('sbAddBtn').addEventListener('click', ()=>{
-  alert('Тут відкриваємо форму додавання сторіс');
-});
-
-/* Невеликий lazy-play для відео, щоби не навантажувати сторінку */
-const io = 'IntersectionObserver' in window ? new IntersectionObserver(entries=>{
-  entries.forEach(e=>{
-    const v = e.target.tagName === 'VIDEO' ? e.target : null;
-    if(!v) return;
-    if(e.isIntersecting){ v.play().catch(()=>{}); } else { v.pause(); }
-  });
-},{ root:document.querySelector('.sb-container'), threshold:0.5 }) : null;
-
-if(io){
-  document.querySelectorAll('.sb-item video').forEach(v=>io.observe(v));
-}
-</script>
-<!-- ==== /STORY BAR =================================================== -->
