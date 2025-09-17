@@ -1,101 +1,133 @@
-/* ---- Story Bar (тонка стрічка з кружечками) ---- */
-.story-bar {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  background: transparent;
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
+import UploadBehavior from './UploadBehavior';
+import './StoryBar.css';
+
+type Behavior = {
+  id: number;
+  user_id: string | null;
+  title: string | null;
+  description: string | null;
+  ipfs_cid: string | null;
+  file_url?: string | null;
+  created_at: string;
+};
+
+const SEEN_KEY = 'bmb_seen_ids';
+const isVideo = (url?: string | null) => {
+  if (!url) return false;
+  const u = url.split('?')[0].toLowerCase();
+  return /\.(mp4|webm|ogg|mov|m4v)$/.test(u);
+};
+const buildSrc = (b: Behavior) =>
+  b.file_url || (b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : null);
+
+export default function StoryBar() {
+  const [items, setItems] = useState<Behavior[]>([]);
+  const [broken, setBroken] = useState<Set<number>>(new Set());
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [seen, setSeen] = useState<Set<number>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) || '[]')); }
+    catch { return new Set(); }
+  });
+
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    localStorage.setItem(SEEN_KEY, JSON.stringify([...seen]));
+  }, [seen]);
+
+  // 1) Початкова вибірка
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('behaviors')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(24);
+      if (Array.isArray(data)) setItems(data as Behavior[]);
+    })();
+  }, []);
+
+  // 2) Realtime INSERT
+  useEffect(() => {
+    const ch = supabase
+      .channel('realtime:behaviors')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'behaviors' },
+        (payload) => {
+          const row = payload.new as Behavior;
+          setItems((prev) => (prev.some((x) => x.id === row.id) ? prev : [row, ...prev].slice(0, 24)));
+        }
+      )
+      .subscribe();
+    return () => { ch.unsubscribe(); };
+  }, []);
+
+  const markBroken = (id: number) => setBroken((p) => new Set(p).add(id));
+  const openFeed = () => navigate('/behaviors');
+
+  return (
+    <div className="story-bar" data-bmb-storybar="">
+      <div className="sb-container">
+        {/* PLUS */}
+        <button
+          type="button"
+          className="sb-item sb-item-add"
+          onClick={() => setIsUploadOpen(true)}
+          aria-label="Додати Behavior"
+          title="Додати Behavior"
+        >
+          <span className="sb-plus">+</span>
+        </button>
+
+        {/* BEHAVIORS */}
+        {items.map((b) => {
+          const src = buildSrc(b);
+          const brokenMedia = broken.has(b.id);
+          const seenClass = seen.has(b.id) ? 'sb-item--seen' : 'sb-item--ring';
+
+          return (
+            <button
+              key={b.id}
+              type="button"
+              className={`sb-item ${seenClass}`}
+              title={b.title ?? 'Переглянути'}
+              onClick={() => { setSeen((s) => new Set(s).add(b.id)); openFeed(); }}
+            >
+              {src && !brokenMedia ? (
+                isVideo(src) ? (
+                  <video
+                    className="sb-media"
+                    src={`${src}#t=0.001`}
+                    preload="metadata"
+                    muted
+                    playsInline
+                    onError={() => markBroken(b.id)}
+                    onCanPlay={(e) => { try { (e.currentTarget as HTMLVideoElement).play().catch(()=>{}); } catch {} }}
+                  />
+                ) : (
+                  <img
+                    className="sb-media"
+                    src={src}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    crossOrigin="anonymous"
+                    onError={() => markBroken(b.id)}
+                  />
+                )
+              ) : (
+                <div className="sb-fallback" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {isUploadOpen && <UploadBehavior onClose={() => setIsUploadOpen(false)} />}
+    </div>
+  );
 }
-
-/* стабільна висота під навбаром */
-:root { --sb-h: 80px; } /* 64px кружок + відступи */
-
-.sb-container {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  height: var(--sb-h);
-
-  overflow-x: auto;
-  overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  padding: 8px 12px;
-
-  background: #fff;
-  border-radius: 0;
-  box-shadow: 0 1px 0 rgba(0,0,0,.06);
-
-  /* анти-джиттер при появі/зникненні скролбару/банерів */
-  scrollbar-gutter: stable both-edges;
-  scrollbar-width: none;          /* Firefox */
-}
-.sb-container::-webkit-scrollbar { display: none; }
-
-/* кружечки */
-.sb-item {
-  width: 64px;
-  height: 64px;
-  flex: 0 0 auto;
-  border-radius: 9999px;
-  border: 2px solid #fff;             /* біла обводка */
-  background: #f6f7f9;                /* сірий фон усередині */
-  box-shadow: 0 4px 12px rgba(0,0,0,.15);  /* сіра тінь навколо */
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  cursor: pointer;
-  position: relative;
-  transition: transform .12s ease, box-shadow .12s ease;
-}
-.sb-item:active { transform: scale(.96); }
-
-/* медіа всередині кружечка */
-.sb-media,
-.sb-item img,
-.sb-item video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  border-radius: 50%;
-}
-
-/* плюс — сіра “таблетка” з білою обводкою */
-.sb-item-add {
-  background: linear-gradient(180deg, #f3f4f6, #e5e7eb);
-  color: #111;
-}
-.sb-plus {
-  font-size: 28px;
-  line-height: 1;
-  font-weight: 900;
-  transform: translateY(-1px);
-}
-
-/* кільце для непросмотрених (як інста) */
-.sb-item--ring {
-  background: conic-gradient(#ff375f, #ff9f0a, #ff375f);
-  padding: 3px;                /* показує кільце */
-  box-shadow: 0 6px 18px rgba(0,0,0,.14);
-}
-.sb-item--ring > img,
-.sb-item--ring > video { background: #000; }
-
-/* переглянуте — сіра обводка */
-.sb-item--seen {
-  background: linear-gradient(#e5e7eb, #e5e7eb);
-  padding: 3px;
-}
-
-/* fallback, якщо прев’ю не встигло */
-.sb-fallback {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 30% 30%, rgba(0,0,0,.06), transparent 40%),
-    repeating-linear-gradient(45deg,#eee,#eee 6px,#f7f7f7 6px,#f7f7f7 12px);
-}
-
-/* доступність */
-.sb-item:focus-visible { outline: 2px solid #111827; outline-offset: 2px; }
