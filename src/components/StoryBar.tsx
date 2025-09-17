@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+// src/components/StoryBar.tsx
+import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import './StoryBar.css';
 
@@ -18,36 +18,31 @@ const isVideo = (url?: string | null) => {
   const u = url.split('?')[0].toLowerCase();
   return /\.(mp4|webm|ogg|mov|m4v)$/.test(u);
 };
+
 const buildSrc = (b: Behavior) =>
   b.file_url || (b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : null);
-
-const SEEN_KEY = 'bmb_seen_ids';
 
 export default function StoryBar() {
   const [items, setItems] = useState<Behavior[]>([]);
   const [broken, setBroken] = useState<Set<number>>(new Set());
-  const [seen, setSeen] = useState<Set<number>>(() => {
-    try { return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) || '[]')); }
-    catch { return new Set(); }
-  });
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
 
-  const navigate = useNavigate();
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  // 1) початкове завантаження
   useEffect(() => {
+    let mounted = true;
+
     (async () => {
       const { data } = await supabase
         .from('behaviors')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(24);
-      if (Array.isArray(data)) setItems(data as Behavior[]);
-    })();
-  }, []);
 
-  // 2) realtime INSERT
-  useEffect(() => {
+      if (mounted && Array.isArray(data)) {
+        setItems(data as Behavior[]);
+      }
+    })();
+
+    // Realtime INSERT (синглтон-канал не обов'язковий — простіше підписатися тут)
     const ch = supabase.channel('realtime:behaviors');
     ch.on(
       'postgres_changes',
@@ -56,70 +51,46 @@ export default function StoryBar() {
         const row = payload.new as Behavior;
         setItems(prev => (prev.some(x => x.id === row.id) ? prev : [row, ...prev].slice(0, 24)));
       }
-    );
-    ch.subscribe();
-    return () => { ch.unsubscribe(); };
+    ).subscribe();
+
+    return () => {
+      mounted = false;
+      ch.unsubscribe();
+    };
   }, []);
 
-  // 3) зберігаємо “переглянуті”
-  useEffect(() => {
-    localStorage.setItem(SEEN_KEY, JSON.stringify([...seen]));
-  }, [seen]);
-
-  // 4) lazy play/pause для відео в межах контейнера
-  useEffect(() => {
-    if (!containerRef.current || !('IntersectionObserver' in window)) return;
-    const root = containerRef.current;
-    const videos = root.querySelectorAll<HTMLVideoElement>('video[data-sb]');
-    const io = new IntersectionObserver((entries) => {
-      entries.forEach(e => {
-        const v = e.target as HTMLVideoElement;
-        if (e.isIntersecting) v.play().catch(() => {});
-        else v.pause();
-      });
-    }, { root, threshold: 0.5 });
-    videos.forEach(v => io.observe(v));
-    return () => io.disconnect();
-  }, [items]);
-
   const markBroken = (id: number) => setBroken(prev => new Set(prev).add(id));
-  const openFeed = () => navigate('/behaviors');
 
   return (
     <div className="story-bar" data-bmb-storybar="">
-      <div className="sb-container" ref={containerRef}>
-        {/* PLUS */}
+      <div className="sb-container">
+        {/* Кнопка "+" (поки без імпорту nft.storage) */}
         <button
           type="button"
           className="sb-item sb-item-add"
-          onClick={openFeed}
+          onClick={() => setIsUploadOpen(true)}
           aria-label="Додати Behavior"
           title="Додати Behavior"
         >
           <span className="sb-plus">+</span>
         </button>
 
-        {/* BEHAVIORS */}
+        {/* Список сторіс/біхейворсів */}
         {items.map((b) => {
           const src = buildSrc(b);
           const isBroken = broken.has(b.id);
-          const isSeen = seen.has(b.id);
 
           return (
             <button
               key={b.id}
               type="button"
-              className={`sb-item ${isSeen ? 'sb-item--seen' : 'sb-item--ring'}`}
+              className="sb-item"
               title={b.title ?? 'Переглянути'}
-              onClick={() => {
-                setSeen(prev => new Set(prev).add(b.id));
-                openFeed();
-              }}
+              onClick={() => window.location.assign('/behaviors')}
             >
               {src && !isBroken ? (
                 isVideo(src) ? (
                   <video
-                    data-sb
                     className="sb-media"
                     src={`${src}#t=0.001`}
                     preload="metadata"
@@ -145,6 +116,21 @@ export default function StoryBar() {
           );
         })}
       </div>
+
+      {/* Тимчасово сховаємо модалку аплоаду, щоб не чіпати nft.storage у білді */}
+      {isUploadOpen && (
+        <div
+          onClick={() => setIsUploadOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)',
+            display: 'grid', placeItems: 'center', color: '#fff'
+          }}
+        >
+          <div style={{ background: '#111', padding: 16, borderRadius: 12 }}>
+            Тут буде UploadBehavior. Закрити — клік поза модалкою.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
