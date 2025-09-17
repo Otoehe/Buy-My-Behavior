@@ -2,105 +2,133 @@
 import React, { useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { uploadVideoToLighthouse } from '../lib/lighthouseUpload';
-// опціонально: якщо хочеш вміти прив’язувати саме до спору
+// опціонально: якщо хочеш прив’язувати саме до спору (не блокує потік, обгорнуто в try/catch)
 import { uploadEvidenceAndAttach as attachToDispute } from '../lib/disputeApi';
 
 type Props = {
   onClose?: () => void;
-  // опціональні контексти
-  disputeId?: string;   // якщо переданий — завантаження піде як доказ спору
-  scenarioId?: string;  // не обов’язковий (для звичайного behavior не потрібен)
+  /** Якщо переданий — завантаження піде як доказ спору (позначимо в behaviors) */
+  disputeId?: string;
+  /** Необов’язковий простір імен для Lighthouse; на UX не впливає */
+  scenarioId?: string;
 };
 
-export default function UploadBehavior({ onClose, disputeId }: Props) {
+const MAX_MB = 30;
+const ACCEPT_MIME = ['video/mp4', 'video/webm'] as const;
+
+type LighthouseResult = { url?: string; cid?: string } | string | null | undefined;
+
+export default function UploadBehavior({ onClose, disputeId, scenarioId }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const pickFile = () => inputRef.current?.click();
 
-  const currentUserId = async () => {
-    const { data } = await supabase.auth.getUser();
-    const uid = data.user?.id;
-    if (!uid) throw new Error('Потрібно увійти.');
-    return uid;
+  const getCurrentUserId = async () => {
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data?.user?.id) throw new Error('Потрібно увійти в акаунт.');
+    return data.user.id as string;
   };
 
-  const uploadViaLighthouseWithFallback = async (file: File, namespace: string) => {
-    // 1) Lighthouse (нова/стара сигнатура)
+  /** Пробуємо обидві можливі сигнатури вашої функції uploadVideoToLighthouse */
+  const tryLighthouse = async (file: File, ns: string): Promise<{ url?: string; cid?: string } | null> => {
     try {
-      // @ts-ignore – підтримуємо синтаксис { scenarioId, files }
-      const up = await uploadVideoToLighthouse({ scenarioId: namespace, files: [file] });
-      const url = typeof up === 'string' ? up : up?.url;
-      if (url) return url as string;
+      // Нова/розширена сигнатура: uploadVideoToLighthouse({ scenarioId, files: [file] })
+      // @ts-ignore – тримаємо сумісність із різними версіями
+      const res1: LighthouseResult = await uploadVideoToLighthouse({ scenarioId: ns, files: [file] });
+      if (typeof res1 === 'string') return { url: res1 };
+      if (res1 && typeof res1 === 'object' && (res1.url || res1.cid)) return { url: res1.url, cid: res1.cid };
     } catch {
-      // ignore – спробуємо стару функцію
+      /* ignore – спробуємо стару сигнатуру нижче */
     }
     try {
-      // @ts-ignore – стара сигнатура (file) => string | { url }
-      const alt = await uploadVideoToLighthouse(file);
-      if (typeof alt === 'string' && alt) return alt;
-      if (typeof alt === 'object' && alt?.url) return alt.url as string;
+      // Стара сигнатура: uploadVideoToLighthouse(file) -> string | { url, cid? }
+      // @ts-ignore – сумісність
+      const res2: LighthouseResult = await uploadVideoToLighthouse(file);
+      if (typeof res2 === 'string') return { url: res2 };
+      if (res2 && typeof res2 === 'object' && (res2.url || res2.cid)) return { url: res2.url, cid: res2.cid };
     } catch {
-      // ignore – спробуємо Supabase Storage
+      /* ignore – повернемо null і підемо у fallback */
     }
+    return null;
+  };
 
-    // 2) Supabase Storage як fallback
-    const ext = file.name.split('.').pop() || 'mp4';
-    const path = `general/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+  /** Fallback у Supabase Storage (bucket behaviors) */
+  const uploadToStorage = async (uid: string, file: File): Promise<string> => {
+    const safeName = file.name.replace(/\s+/g, '_');
+    const path = `videos/${uid}/${Date.now()}_${Math.random().toString(36).slice(2)}_${safeName}`;
     const { error: upErr } = await supabase.storage
-      .from('dispute_evidence')
-      .upload(path, file, { upsert: true, contentType: file.type });
+      .from('behaviors')
+      .upload(path, file, { upsert: false, contentType: file.type || 'video/mp4', cacheControl: '3600' });
     if (upErr) throw upErr;
-    const { data: pub } = supabase.storage.from('dispute_evidence').getPublicUrl(path);
+    const { data: pub } = supabase.storage.from('behaviors').getPublicUrl(path);
+    if (!pub?.publicUrl) throw new Error('Не вдалося сформувати публічний URL.');
     return pub.publicUrl;
   };
 
-  const insertPlainBehavior = async (userId: string, url: string) => {
-    const { error: insErr } = await supabase.from('behaviors').insert([
-      {
-        author_id: userId,
-        title: 'Video evidence',
-        description: 'Завантажено з StoryBar',
-        ipfs_cid: null,
-        file_url: url,
-        is_dispute_evidence: false,
-        dispute_id: null,
-      },
-    ]);
-    if (insErr) throw insErr;
-  };
-
-  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Валідації (тип + розмір)
+    if (!ACCEPT_MIME.includes(file.type as any)) {
+      setError('Потрібно відео MP4 або WebM.'); e.target.value = ''; return;
+    }
+    if (file.size > MAX_MB * 1024 * 1024) {
+      setError(`Розмір відео перевищує ${MAX_MB}MB.`); e.target.value = ''; return;
+    }
+
     setError(null);
     setBusy(true);
     try {
-      const uid = await currentUserId();
+      const uid = await getCurrentUserId();
 
-      // Завантаження → отримуємо публічний URL (Lighthouse/Storage)
-      const url = await uploadViaLighthouseWithFallback(file, disputeId || 'general');
+      // 1) Lighthouse (за наявності/можливості), інакше fallback у Storage
+      const ns = scenarioId || disputeId || 'general';
+      const light = await tryLighthouse(file, ns);
 
-      if (disputeId) {
-        // Прив’язка як відеодоказ спору
-        await attachToDispute(disputeId, file, uid);
-      } else {
-        // Звичайний behavior без сценарію/спору
-        await insertPlainBehavior(uid, url);
+      let fileUrl: string | undefined = light?.url;
+      const ipfsCid: string | null = light?.cid ?? null;
+
+      if (!fileUrl) {
+        fileUrl = await uploadToStorage(uid, file);
       }
 
-      // нотифікація стрічці + закрити модалку
+      // 2) Створюємо запис у behaviors (єдиний джерело правди для StoryBar/фіду)
+      const payload = {
+        user_id: uid,                                 // 👈 канонічна колонка
+        title: disputeId ? 'Video evidence' : null,
+        description: disputeId ? 'Доказ для спору' : null,
+        ipfs_cid: ipfsCid,                            // буде null, якщо не з Lighthouse
+        file_url: fileUrl,                            // обов’язково
+        is_dispute_evidence: !!disputeId,
+        dispute_id: disputeId ?? null,
+      };
+
+      const { error: insErr } = await supabase.from('behaviors').insert([payload]);
+      if (insErr) throw insErr;
+
+      // 3) Додатково: стороння прив’язка до спору (не блокує користувача)
+      if (disputeId) {
+        try { await attachToDispute(disputeId, file, uid); } catch { /* ignore */ }
+      }
+
+      // 4) Нотифікуємо локальні слухачі (додатково до Supabase Realtime)
       window.dispatchEvent(new CustomEvent('behaviorUploaded'));
+
+      // Закриваємо модалку
       onClose?.();
     } catch (err: any) {
-      setError(err?.message || 'Помилка завантаження');
       console.error('UploadBehavior error:', err);
+      setError(err?.message || 'Помилка завантаження.');
     } finally {
       setBusy(false);
-      e.target.value = '';
+      e.target.value = ''; // скинути input, щоб можна було вибрати той самий файл знову
     }
   };
+
+  const handleBackdropClick = () => { if (!busy) onClose?.(); };
 
   return (
     <div
@@ -114,7 +142,7 @@ export default function UploadBehavior({ onClose, disputeId }: Props) {
         justifyContent: 'center',
         zIndex: 30000,
       }}
-      onClick={onClose}
+      onClick={handleBackdropClick}
     >
       <div
         className="upload-modal"
@@ -130,13 +158,18 @@ export default function UploadBehavior({ onClose, disputeId }: Props) {
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ margin: 0 }}>Завантажити відео</h3>
-          <button onClick={onClose} style={{ border: 'none', background: 'transparent', fontSize: 22 }}>
+          <button
+            onClick={onClose}
+            disabled={busy}
+            style={{ border: 'none', background: 'transparent', fontSize: 22, cursor: busy ? 'not-allowed' : 'pointer' }}
+            aria-label="Закрити"
+          >
             ×
           </button>
         </div>
 
         <p style={{ marginTop: 8, fontSize: 13, color: '#6b7280' }}>
-          📦 <b>Увага:</b> розмір Behavior не повинен перевищувати <b>30MB</b>
+          MP4 / WebM, максимум&nbsp;<b>{MAX_MB}MB</b>.
         </p>
 
         {error && (
@@ -148,9 +181,10 @@ export default function UploadBehavior({ onClose, disputeId }: Props) {
         <input
           ref={inputRef}
           type="file"
-          accept="video/*"
+          accept="video/mp4,video/webm"
           style={{ display: 'none' }}
-          onChange={onFile}
+          onChange={handleFile}
+          disabled={busy}
         />
 
         <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
@@ -164,6 +198,8 @@ export default function UploadBehavior({ onClose, disputeId }: Props) {
               borderRadius: 999,
               border: 'none',
               background: '#ffcdd6',
+              color: '#000',
+              fontWeight: 600,
               cursor: busy ? 'not-allowed' : 'pointer',
             }}
           >
