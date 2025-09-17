@@ -1,94 +1,182 @@
-/* ====== STORY BAR (білий обвід, сірий фон, сіра тінь) ====== */
+import { useEffect, useMemo, useRef, useState } from "react";
 
-.story-bar {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  background: transparent;
+type Story = {
+  id: string;
+  title: string;
+  type: "image" | "video";
+  preview: string; // image url or video url
+  href?: string;
+  poster?: string; // used for video preview
+};
+
+// Demo data — replace with your own payload
+const DEMO_STORIES: Story[] = [
+  { id: "s1", title: "story 1", type: "image", preview: "https://picsum.photos/seed/bmb1/200/200", href: "#" },
+  { id: "s2", title: "story 2", type: "image", preview: "https://picsum.photos/seed/bmb2/200/200", href: "#" },
+  { id: "s3", title: "story 3", type: "video", preview: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4", poster: "https://picsum.photos/seed/poster1/200/200", href: "#" },
+  { id: "s4", title: "story 4", type: "image", preview: "https://picsum.photos/seed/bmb3/200/200", href: "#" },
+  { id: "s5", title: "story 5", type: "image", preview: "https://picsum.photos/seed/bmb4/200/200", href: "#" },
+];
+
+const SEEN_KEY = "bmb_seen_ids";
+
+export default function App() {
+  const [stories, setStories] = useState<Story[]>(DEMO_STORIES);
+  const [seen, setSeen] = useState(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) || "[]"));
+    } catch {
+      return new Set();
+    }
+  });
+
+  // persist seen set
+  useEffect(() => {
+    localStorage.setItem(SEEN_KEY, JSON.stringify([...seen]));
+  }, [seen]);
+
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Lazy play/pause for videos inside the scroll container
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const root = containerRef.current;
+    const videos = root.querySelectorAll<HTMLVideoElement>("video[data-sb]");
+
+    if (!("IntersectionObserver" in window)) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => {
+          const v = e.target as HTMLVideoElement;
+          if (e.isIntersecting) {
+            v.play().catch(() => {});
+          } else {
+            v.pause();
+          }
+        });
+      },
+      { root, threshold: 0.5 }
+    );
+
+    videos.forEach((v) => io.observe(v));
+    return () => io.disconnect();
+  }, [stories]);
+
+  const handleOpen = (s: (typeof stories)[number]) => {
+    setSeen((prev) => new Set(prev).add(s.id));
+    // TODO: replace with your real story viewer
+    if (s.href && s.href !== "#") window.open(s.href, "_blank");
+  };
+
+  const addStory = () => {
+    // Demo: push a random story
+    const id = `s${Date.now()}`;
+    setStories((arr) => [
+      ...arr,
+      {
+        id,
+        title: `story ${arr.length + 1}`,
+        type: "image",
+        preview: `https://picsum.photos/seed/${id}/200/200`,
+        href: "#",
+      },
+    ]);
+  };
+
+  return (
+    <div className="min-h-screen w-full bg-white text-gray-900">
+      {/* hide scrollbars only for story bar */}
+      <style>{`
+        .sb-scroll::-webkit-scrollbar{ display:none }
+        .sb-scroll{ scrollbar-width:none }
+      `}</style>
+
+      {/* STORY BAR */}
+      <div className="w-full">
+        <div ref={containerRef} role="list" className="sb-scroll flex items-center gap-3 overflow-x-auto overflow-y-hidden px-3 py-2 h-20 bg-white shadow-sm"
+        >
+          {/* Add button */}
+          <button role="listitem"
+            type="button"
+            onClick={addStory}
+            aria-label="Додати сторіс"
+            className="relative w-16 h-16 flex-none rounded-full border-2 border-white shadow-md shadow-gray-300"
+            
+          >
+            <div className="w-full h-full rounded-full bg-gray-200 grid place-items-center">
+              <span className="text-2xl font-black -translate-y-[2px]">+</span>
+            </div>
+          </button>
+
+          {stories.map((s) => {
+            const isSeen = seen.has(s.id);
+
+            return (
+              <button
+                key={s.id} role="listitem"
+                type="button"
+                title={s.title}
+                aria-label={s.title}
+                onClick={() => handleOpen(s)}
+                className="relative w-16 h-16 flex-none rounded-full border-2 border-white shadow-md shadow-gray-300"
+              >
+                <div className="w-full h-full rounded-full overflow-hidden bg-gray-100">
+                  {s.type === "video" ? (
+                    <video
+                      data-sb
+                      muted
+                      loop
+                      playsInline
+                      preload="none"
+                      crossOrigin="anonymous"
+                      poster={s.poster}
+                      src={s.preview}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        const el = e.currentTarget as HTMLVideoElement;
+                        const fallback = Object.assign(document.createElement("div"), {
+                          className: "w-full h-full rounded-full",
+                          style: {
+                            background:
+                              "radial-gradient(circle at 30% 30%, rgba(0,0,0,.06), transparent 40%), repeating-linear-gradient(45deg,#eee,#eee 6px,#f7f7f7 6px,#f7f7f7 12px)",
+                          },
+                        });
+                        el.replaceWith(fallback);
+                      }}
+                    />
+                  ) : (
+                    <img
+                      loading="lazy"
+                      src={s.preview}
+                      alt={s.title}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        const el = e.currentTarget;
+                        el.replaceWith(Object.assign(document.createElement("div"), {
+                          className: "w-full h-full rounded-full",
+                          style: {
+                            background:
+                              "radial-gradient(circle at 30% 30%, rgba(0,0,0,.06), transparent 40%), repeating-linear-gradient(45deg,#eee,#eee 6px,#f7f7f7 6px,#f7f7f7 12px)",
+                          },
+                        }));
+                      }}
+                    />
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Demo content below to simulate the map area */}
+      <div className="mt-2 px-3">
+        <div className="h-[640px] w-full rounded-xl bg-[url('https://tile.openstreetmap.org/5/17/18.png')] bg-gray-100 bg-center bg-cover border border-gray-200 grid place-items-center text-gray-500">
+          <div className="backdrop-blur-sm bg-white/70 px-3 py-1 rounded-lg text-sm">
+            Тут може бути ваша карта. StoryBar стабільно тримає висоту зверху.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
-
-/* стабільна висота під навбаром */
-:root { --sb-h: 80px; } /* 64px кружок + відступи */
-
-.sb-container {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  height: var(--sb-h);
-
-  overflow-x: auto;
-  overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  padding: 8px 12px;
-
-  background: #ffffff;
-  border-radius: 0;
-  box-shadow: none;
-
-  /* анти-джиттер при появі/зникненні скролбару/банерів */
-  scrollbar-gutter: stable both-edges;
-  scrollbar-width: none;          /* Firefox */
-}
-.sb-container::-webkit-scrollbar { display: none; } /* WebKit/Chromium */
-
-/* кружечки */
-.sb-item {
-  width: 64px;
-  height: 64px;
-  flex: 0 0 auto;
-  border-radius: 9999px;
-
-  /* БІЛИЙ ОВАЛ */
-  border: 2px solid #fff;
-
-  /* СІРИЙ ФОН ВСЕРЕДИНІ */
-  background: #f6f7f9;
-
-  /* СІРА ТІНЬ */
-  box-shadow: 0 4px 12px rgba(0,0,0,.15);
-
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  cursor: pointer;
-  position: relative;
-  transition: transform .12s ease, box-shadow .12s ease;
-}
-.sb-item:active { transform: scale(.96); }
-
-/* медіа всередині кружечка */
-.sb-media,
-.sb-item img,
-.sb-item video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  border-radius: 50%;
-}
-
-/* плюс — СІРИЙ */
-.sb-item-add {
-  background: linear-gradient(180deg, #f3f4f6, #e5e7eb);
-  color: #111;
-}
-.sb-plus {
-  font-size: 28px;
-  line-height: 1;
-  font-weight: 900;
-  transform: translateY(-1px);
-}
-
-/* fallback, якщо медіа не завантажилось */
-.sb-fallback {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 30% 30%, rgba(0,0,0,.06), transparent 40%),
-    repeating-linear-gradient(45deg,#eee,#eee 6px,#f7f7f7 6px,#f7f7f7 12px);
-}
-
-/* доступність */
-.sb-item:focus-visible { outline: 2px solid #111827; outline-offset: 2px; }
