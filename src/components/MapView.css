@@ -1,49 +1,53 @@
 /* ===== Контейнер мапи: стабільна висота ===== */
 .map-view-container{
-  position:relative;
-  width:100%;
-  height:calc(var(--app-vh, 1vh) * 100);
-  min-height:100vh;
-  overscroll-behavior:none;
-  overflow:hidden;
-  font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  /* висота сторісбару: кружок 64 + падинги 8*2 */
+  --sb-h: 80px;
+
+  position: relative;
+  width: 100%;
+  height: calc(var(--app-vh, 1vh) * 100);
+  min-height: 100vh;
+  overscroll-behavior: none;
+  overflow: hidden;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 /* Мапа займає весь простір */
-.map-container{ width:100%; height:100%; z-index:1; }
+.map-container{ width: 100%; height: 100%; z-index: 1; }
 
 /* ===== СТОРІСБАР — ПІД НАВБАРОМ І НИЖЧЕ ШТОРКИ ===== */
 .storybar-overlay{
-  position:fixed;
-  left:0; right:0;
-  top:var(--nav-h, 56px);     /* впритул під навбар */
-  z-index:1500;               /* нижче backdrop:1999 та drawer:2000 */
-  pointer-events:none;
+  position: fixed;
+  left: 0; right: 0;
+  top: calc(var(--nav-h, 64px)); /* впритул під навбар */
+  z-index: 1500;                 /* нижче backdrop:1999 і drawer:2000 */
+  pointer-events: none;          /* не блокує карту */
 }
-.storybar-overlay .story-bar{ pointer-events:auto; }
+.storybar-overlay .story-bar{ pointer-events: auto; }
 
-/* Якщо StoryBar має власні стилі — цей блок не заважає */
+/* Внутрішня стрічка */
 .story-bar{
-  display:flex; align-items:center; gap:12px;
-  padding:8px 12px;
-  background:#fff;
-  overflow-x:auto; overflow-y:hidden;
-  -webkit-overflow-scrolling:touch;
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px;
+  background: #fff;
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 
-/* Ліфлет-контроли — з урахуванням висоти сторісбару (~80px) */
+/* ===== Ліфлет-контроли — опустити під сторісбар ===== */
 .map-view-container .leaflet-top.leaflet-left{
-  top:calc(var(--nav-h, 56px) + 80px);
+  top: calc(var(--nav-h, 64px) + var(--sb-h));
 }
 
-/* ===== Маячки на карті ===== */
+/* ===== Маячки на карті (аватар з білим кільцем) ===== */
 .custom-marker.small{
-  width:40px; height:40px; border-radius:50%;
-  overflow:hidden; border:3px solid #fff;
-  box-shadow:0 0 6px rgba(0,0,0,.9);
-  display:flex; justify-content:center; align-items:center;
+  width: 40px; height: 40px; border-radius: 50%;
+  overflow: hidden; border: 3px solid #fff;
+  box-shadow: 0 0 6px rgba(0,0,0,.9);
+  display: flex; justify-content: center; align-items: center;
 }
-.marker-img{ width:100%; height:100%; object-fit:cover; border-radius:50%; }
+.marker-img{ width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 
 /* ===== Рейтинг (10 чорних зірок) ===== */
 .rating-row{ display:flex; align-items:center; justify-content:center; gap:8px; margin:6px 0 14px; white-space:nowrap; }
