@@ -1,6 +1,7 @@
 // src/components/StoryBar.tsx
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import UploadBehavior from './UploadBehavior'; // ⟵ ДОДАНО
 import './StoryBar.css';
 
 type Behavior = {
@@ -31,18 +32,18 @@ export default function StoryBar() {
     let mounted = true;
 
     (async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('behaviors')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(24);
 
-      if (mounted && Array.isArray(data)) {
+      if (!error && mounted && Array.isArray(data)) {
         setItems(data as Behavior[]);
       }
     })();
 
-    // Realtime INSERT (синглтон-канал не обов'язковий — простіше підписатися тут)
+    // Realtime INSERT
     const ch = supabase.channel('realtime:behaviors');
     ch.on(
       'postgres_changes',
@@ -64,7 +65,7 @@ export default function StoryBar() {
   return (
     <div className="story-bar" data-bmb-storybar="">
       <div className="sb-container">
-        {/* Кнопка "+" (поки без імпорту nft.storage) */}
+        {/* Кнопка "+" */}
         <button
           type="button"
           className="sb-item sb-item-add"
@@ -117,19 +118,9 @@ export default function StoryBar() {
         })}
       </div>
 
-      {/* Тимчасово сховаємо модалку аплоаду, щоб не чіпати nft.storage у білді */}
+      {/* РЕАЛЬНА модалка аплоаду */}
       {isUploadOpen && (
-        <div
-          onClick={() => setIsUploadOpen(false)}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)',
-            display: 'grid', placeItems: 'center', color: '#fff'
-          }}
-        >
-          <div style={{ background: '#111', padding: 16, borderRadius: 12 }}>
-            Тут буде UploadBehavior. Закрити — клік поза модалкою.
-          </div>
-        </div>
+        <UploadBehavior onClose={() => setIsUploadOpen(false)} />
       )}
     </div>
   );
