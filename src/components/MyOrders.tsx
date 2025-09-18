@@ -1,4 +1,3 @@
-// src/pages/MyOrders.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { lockFunds, confirmCompletionOnChain, getDealOnChain } from '../lib/escrowContract';
@@ -29,6 +28,12 @@ async function waitForChainRelease(scenarioId: string, tries = 6, delayMs = 1200
   return 0;
 }
 
+/** ───────────────────────────────────────────────────────────────────────
+ * Допоміжні правила етапів (єдине джерело істини для кнопок/редагування)
+ * ─────────────────────────────────────────────────────────────────────── */
+const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
+const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
+
 export default function MyOrders() {
   const [userId, setUserId] = useState('');
   const [list, setList] = useState<Scenario[]>([]);
@@ -55,7 +60,9 @@ export default function MyOrders() {
     typeof s.latitude === 'number' && Number.isFinite(s.latitude) &&
     typeof s.longitude === 'number' && Number.isFinite(s.longitude);
 
-  const canAgree = (s: Scenario) => s.status === 'pending' && !s.is_agreed_by_customer;
+  // Кнопка “Погодити”: дозволена до ескроу і поки клієнт іще не погодив
+  const canAgree = (s: Scenario) =>
+    !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
 
   const canConfirm = (s: Scenario) => {
     if (!s.escrow_tx_hash) return false;
@@ -178,7 +185,7 @@ export default function MyOrders() {
   const handleLock = async (s: Scenario) => {
     if (lockBusy[s.id]) return;
     if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) { alert('Сума має бути > 0'); return; }
-    if (!(s.is_agreed_by_customer && s.is_agreed_by_executor)) { alert('Спершу потрібні дві згоди.'); return; }
+    if (!isBothAgreed(s)) { alert('Спершу потрібні дві згоди.'); return; }
     if (s.escrow_tx_hash) return;
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
@@ -281,49 +288,80 @@ export default function MyOrders() {
 
       {list.length === 0 && <div className="empty-hint">Немає активних замовлень.</div>}
 
-      {list.map(s => (
-        <ScenarioCard
-          key={s.id}
-          role="customer"
-          s={s}
-          onChangeDesc={(v) => setLocal(s.id, { description: v })}
-          onCommitDesc={async (v) => {
-            if (s.escrow_tx_hash || s.status === 'confirmed') return;
-            await supabase.from('scenarios').update({
-              description: v,
-              status: 'pending',
-              is_agreed_by_customer: false,
-              is_agreed_by_executor: false
-            }).eq('id', s.id);
-          }}
-          onChangeAmount={(v) => setLocal(s.id, { donation_amount_usdt: v })}
-          onCommitAmount={async (v) => {
-            if (s.escrow_tx_hash || s.status === 'confirmed') return;
-            if (v !== null && (!Number.isFinite(v) || v <= 0)) { alert('Сума має бути > 0'); setLocal(s.id, { donation_amount_usdt: null }); return; }
-            await supabase.from('scenarios').update({
-              donation_amount_usdt: v,
-              status: 'pending',
-              is_agreed_by_customer: false,
-              is_agreed_by_executor: false
-            }).eq('id', s.id);
-          }}
-          onAgree={() => handleAgree(s)}
-          onLock={() => handleLock(s)}
-          onConfirm={() => handleConfirm(s)}
-          onDispute={() => handleDispute(s)}
-          onOpenLocation={() => hasCoords(s) && window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank')}
-          canAgree={canAgree(s)}
-          canLock={(s.is_agreed_by_customer && s.is_agreed_by_executor && !s.escrow_tx_hash) || false}
-          canConfirm={canConfirm(s)}
-          canDispute={canDispute(s)}
-          hasCoords={hasCoords(s)}
-          busyAgree={!!agreeBusy[s.id]}
-          busyLock={!!lockBusy[s.id]}
-          busyConfirm={!!confirmBusy[s.id]}
-          isRated={ratedOrders.has(s.id)}
-          onOpenRate={() => openRateFor(s)}
-        />
-      ))}
+      {list.map(s => {
+        const bothAgreed = isBothAgreed(s);
+        const fieldsEditable = canEditFields(s);
+
+        return (
+          <ScenarioCard
+            key={s.id}
+            role="customer"
+            s={s}
+
+            /* ── Редагування опису ───────────────────────────────────── */
+            onChangeDesc={(v) => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
+            onCommitDesc={async (v) => {
+              if (!fieldsEditable) return;
+              await supabase.from('scenarios').update({
+                description: v,
+                status: 'pending',
+                is_agreed_by_customer: false,
+                is_agreed_by_executor: false
+              }).eq('id', s.id);
+            }}
+
+            /* ── Редагування суми ────────────────────────────────────── */
+            onChangeAmount={(v) => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
+            onCommitAmount={async (v) => {
+              if (!fieldsEditable) return;
+              if (v !== null && (!Number.isFinite(v) || v <= 0)) {
+                alert('Сума має бути > 0');
+                setLocal(s.id, { donation_amount_usdt: null });
+                return;
+              }
+              await supabase.from('scenarios').update({
+                donation_amount_usdt: v,
+                status: 'pending',
+                is_agreed_by_customer: false,
+                is_agreed_by_executor: false
+              }).eq('id', s.id);
+            }}
+
+            /* ── Дії ────────────────────────────────────────────────── */
+            onAgree={() => handleAgree(s)}
+            onLock={() => handleLock(s)}
+            onConfirm={() => handleConfirm(s)}
+            onDispute={() => handleDispute(s)}
+
+            /* “Показати локацію” — завжди активна */
+            onOpenLocation={() => {
+              if (hasCoords(s)) {
+                window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank');
+              } else {
+                alert('Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію.');
+              }
+            }}
+
+            /* ── Гатінг кнопок ──────────────────────────────────────── */
+            canAgree={canAgree(s)}
+            canLock={bothAgreed && !s.escrow_tx_hash}
+            canConfirm={canConfirm(s)}
+            canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
+
+            /* “Показати локацію” — завжди true (кнопка видима/активна) */
+            hasCoords={true}
+
+            /* Статуси завантаження */
+            busyAgree={!!agreeBusy[s.id]}
+            busyLock={!!lockBusy[s.id]}
+            busyConfirm={!!confirmBusy[s.id]}
+
+            /* Рейтинг — лише після confirmed */
+            isRated={ratedOrders.has(s.id)}
+            onOpenRate={() => openRateFor(s)}
+          />
+        );
+      })}
 
       <CelebrationToast open={toast} variant="customer" onClose={() => setToast(false)} />
 
