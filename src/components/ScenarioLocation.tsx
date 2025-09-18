@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   MapContainer,
@@ -30,7 +29,7 @@ function useQuery() {
   return new URLSearchParams(window.location.search);
 }
 
-// ── наш білий круглий пін з логотипом
+// наш білий круглий пін з логотипом
 function makeBmbIcon(size = 33, logoUrl = PIN_SVG_URL) {
   const ring = 2;
   const total = size + ring * 2;
@@ -56,7 +55,7 @@ function makeBmbIcon(size = 33, logoUrl = PIN_SVG_URL) {
 
 const CenterMap: React.FC<{ center: [number, number] }> = ({ center }) => {
   const map = useMap();
-  useEffect(() => { map.setView(center); }, [center, map]);
+  useEffect(() => { map.setView(center, map.getZoom(), { animate: false }); }, [center, map]);
   return null;
 };
 
@@ -65,85 +64,41 @@ function ClickToPlace({ onPick }: { onPick: (latlng: L.LatLng) => void }) {
   return null;
 }
 
-// кнопка в порталі, щоб мапа не з’їдала кліки
-function ConfirmButtonPortal({ onClick }: { onClick: () => void }) {
-  return createPortal(
-    <button
-      type="button"
-      onClick={onClick}
-      onPointerDown={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClickCapture={(e) => e.stopPropagation()}
-      aria-label="Підтвердити це місце"
-      style={{
-        position: "fixed",
-        left: "50%",
-        transform: "translateX(-50%)",
-        bottom: "calc(env(safe-area-inset-bottom, 0px) + 72px)",
-        height: "36px",
-        lineHeight: "36px",
-        padding: "0 18px",
-        fontSize: "14px",
-        borderRadius: 999,
-        background: "#000",
-        color: "#fff",
-        fontWeight: 800,
-        border: 0,
-        boxShadow: "0 12px 28px rgba(0,0,0,.28)",
-        zIndex: 2147483647,
-        cursor: "pointer",
-        WebkitTapHighlightColor: "transparent",
-        pointerEvents: "auto",
-        touchAction: "manipulation",
-      }}
-    >
-      ✅ Підтвердити це місце
-    </button>,
-    document.body
-  );
-}
-
 export default function ScenarioLocation() {
   const q = useQuery();
   const location = useLocation();
   const navigate = useNavigate();
   const mapRef = useRef<L.Map | null>(null);
 
-  // 1) Маркер сторінки + інжекція CSS, щоб приховати будь-який StoryBar на цій сторінці.
+  // 🔒 сховати будь-який StoryBar саме на цій сторінці
   useEffect(() => {
     const r = document.documentElement;
     const prev = r.getAttribute("data-page");
     r.setAttribute("data-page", "scenario-location");
-
     const style = document.createElement("style");
     style.setAttribute("data-bmb", "hide-storybar-on-location");
     style.innerHTML = `
-      :root[data-page="scenario-location"] .StoryBarRoot,
-      :root[data-page="scenario-location"] .FixedStoryBar,
-      :root[data-page="scenario-location"] #StoryBarRoot,
       :root[data-page="scenario-location"] .storybar-overlay,
-      :root[data-page="scenario-location"] .story-bar {
+      :root[data-page="scenario-location"] .story-bar,
+      :root[data-page="scenario-location"] .StoryBarRoot,
+      :root[data-page="scenario-location"] #StoryBarRoot,
+      :root[data-page="scenario-location"] .FixedStoryBar,
+      :root[data-page="scenario-location"] [class*="StoryBar"],
+      :root[data-page="scenario-location"] [class*="storybar"]{
         display: none !important;
         pointer-events: none !important;
-      }
-    `;
+      }`;
     document.head.appendChild(style);
-
-    return () => {
-      if (prev) r.setAttribute("data-page", prev);
-      else r.removeAttribute("data-page");
-      style.remove();
-    };
+    return () => { if (prev) r.setAttribute("data-page", prev); else r.removeAttribute("data-page"); style.remove(); };
   }, []);
 
-  const mode = (q.get("mode") || "").toLowerCase(); // "view" → тільки перегляд
+  const mode = (q.get("mode") || "").toLowerCase();            // "view" → режим перегляду
   const latQ = Number(q.get("lat"));
   const lngQ = Number(q.get("lng"));
   const querySane = isSane(latQ, lngQ);
-
   const executorId = q.get("executor_id") || localStorage.getItem("scenario_receiverId") || "";
 
-  // центр карти
+  // стартовий центр
   const [center, setCenter] = useState<[number, number]>(() => {
     if (querySane) return [latQ, lngQ];
     const lsLat = Number(localStorage.getItem("latitude"));
@@ -152,7 +107,7 @@ export default function ScenarioLocation() {
     return KYIV;
   });
 
-  // вибраний маркер
+  // вибраний пін
   const [picked, setPicked] = useState<L.LatLng | null>(() => {
     if (querySane) return new L.LatLng(latQ, lngQ);
     const lsLat = Number(localStorage.getItem("latitude"));
@@ -161,21 +116,22 @@ export default function ScenarioLocation() {
     return new L.LatLng(KYIV[0], KYIV[1]);
   });
 
-  // fallback на OSM
+  // ✅ стабільний fallback: вмикаємо OSM лише якщо Mapbox не встиг завантажитись
   const [useOsm, setUseOsm] = useState(false);
+  const mapboxLoaded = useRef(false);
   useEffect(() => {
-    const t = setTimeout(() => setUseOsm(true), 1500);
+    const t = setTimeout(() => { if (!mapboxLoaded.current) setUseOsm(true); }, 1600);
     return () => clearTimeout(t);
   }, []);
-  const onMapboxTileLoad = () => setUseOsm(false);
-  const onMapboxTileError = () => setUseOsm(true);
+  const onMapboxTileLoad = () => { mapboxLoaded.current = true; setUseOsm(false); };
+  const onMapboxTileError = () => { if (!mapboxLoaded.current) setUseOsm(true); };
 
   useEffect(() => { if (querySane) setCenter([latQ, lngQ]); }, [querySane, latQ, lngQ]);
 
   const iconMedium = useMemo(() => makeBmbIcon(33), []);
   const isSelectMode = mode !== "view";
 
-  // авто-початок: LS → GPS → профіль → Київ
+  // авто-пік: LS → GPS → профіль → Київ
   const [triedAutoPick, setTriedAutoPick] = useState(false);
   useEffect(() => {
     if (!isSelectMode || triedAutoPick) return;
@@ -186,8 +142,8 @@ export default function ScenarioLocation() {
         const { data: auth } = await supabase.auth.getUser();
         const uid = auth?.user?.id;
         if (!uid) { setPicked(new L.LatLng(KYIV[0], KYIV[1])); setCenter(KYIV); return; }
-        const { data } = await supabase
-          .from("profiles").select("latitude, longitude").eq("user_id", uid).single();
+        const { data } = await supabase.from("profiles")
+          .select("latitude, longitude").eq("user_id", uid).single();
         if (data && isSane(data.latitude, data.longitude)) {
           const ll = new L.LatLng(data.latitude, data.longitude);
           setPicked(ll); setCenter([data.latitude, data.longitude]);
@@ -204,35 +160,32 @@ export default function ScenarioLocation() {
           if (isSane(latitude, longitude)) {
             const ll = new L.LatLng(latitude, longitude);
             setPicked(ll); setCenter([latitude, longitude]);
-          } else {
-            fallbackToProfile();
-          }
+          } else { fallbackToProfile(); }
           setTriedAutoPick(true);
         },
         () => fallbackToProfile(),
         { enableHighAccuracy: true, maximumAge: 15000, timeout: 6000 }
       );
-    } else {
-      fallbackToProfile();
-    }
+    } else fallbackToProfile();
   }, [isSelectMode, picked, triedAutoPick]);
 
-  // гарантія відмалювання: після mount/resize
+  // 🧯 відмалювання після mount та на resize
   useEffect(() => {
-    const id = setTimeout(() => { mapRef.current?.invalidateSize(false); }, 50);
+    const id = setTimeout(() => { mapRef.current?.invalidateSize(false); }, 60);
     const onResize = () => mapRef.current?.invalidateSize(false);
     window.addEventListener("resize", onResize);
     return () => { clearTimeout(id); window.removeEventListener("resize", onResize); };
   }, []);
 
-  // підтвердити → зберегти координати та перейти на форму сценарію
+  // підтвердження → зберегти координати → назад у форму
   const confirmSelection = () => {
     const point = picked ?? mapRef.current?.getCenter();
     if (!point) return;
-    localStorage.setItem("latitude", String(point.lat));
-    localStorage.setItem("longitude", String(point.lng));
-    sessionStorage.setItem(VISITED_MAP_KEY, "1");
-
+    try {
+      localStorage.setItem("latitude", String(point.lat));
+      localStorage.setItem("longitude", String(point.lng));
+      sessionStorage.setItem(VISITED_MAP_KEY, "1");
+    } catch {}
     const qs = executorId ? `?executor_id=${encodeURIComponent(executorId)}` : "";
     navigate(`/scenario/new${qs}`, { state: { from: location.pathname } });
   };
@@ -244,16 +197,20 @@ export default function ScenarioLocation() {
         minHeight: "100dvh",
         width: "100%",
         position: "relative",
+        overflow: "hidden",
       }}
     >
       <MapContainer
         center={center}
         zoom={16}
         style={{ height: "100%", width: "100%" }}
-        whenCreated={(m) => {
-          mapRef.current = m;
-          setTimeout(() => m.invalidateSize(false), 0);
-        }}
+        whenCreated={(m) => { mapRef.current = m; setTimeout(() => m.invalidateSize(false), 0); }}
+        updateWhenIdle={true}
+        preferCanvas={false}
+        inertia={false}
+        zoomAnimation={false}
+        fadeAnimation={false}
+        markerZoomAnimation={false}
         scrollWheelZoom
       >
         <CenterMap center={center} />
@@ -282,12 +239,7 @@ export default function ScenarioLocation() {
                 position={picked}
                 icon={iconMedium}
                 draggable
-                eventHandlers={{
-                  dragend: (e) => {
-                    const m = e.target as L.Marker;
-                    setPicked(m.getLatLng());
-                  },
-                }}
+                eventHandlers={{ dragend: (e) => setPicked((e.target as L.Marker).getLatLng()) }}
               />
             )}
           </>
@@ -300,7 +252,30 @@ export default function ScenarioLocation() {
         )}
       </MapContainer>
 
-      {isSelectMode && <ConfirmButtonPortal onClick={confirmSelection} />}
+      {/* ✅ КНОПКА БЕЗ ПОРТАЛУ — У ВЛАСНОМУ ШАРІ ПОНАД УСІМ */}
+      {isSelectMode && (
+        <button
+          type="button"
+          onClick={confirmSelection}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            left: "50%", bottom: 18, transform: "translateX(-50%)",
+            padding: "10px 16px",
+            height: 40, lineHeight: "20px",
+            borderRadius: 999,
+            background: "#000", color: "#fff", fontWeight: 800,
+            border: 0, cursor: "pointer",
+            boxShadow: "0 12px 28px rgba(0,0,0,.28)",
+            zIndex: 5000, // вище leaflet-контролів
+            WebkitTapHighlightColor: "transparent",
+          }}
+          aria-label="Підтвердити це місце"
+        >
+          ✅ Підтвердити це місце
+        </button>
+      )}
     </div>
   );
 }
