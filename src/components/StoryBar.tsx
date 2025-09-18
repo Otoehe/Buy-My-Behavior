@@ -1,7 +1,7 @@
 // src/components/StoryBar.tsx
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import UploadBehavior from './UploadBehavior'; // ⟵ ДОДАНО
+import UploadBehavior from './UploadBehavior';
 import './StoryBar.css';
 
 type Behavior = {
@@ -14,6 +14,8 @@ type Behavior = {
   created_at: string;
 };
 
+const CACHE_KEY = 'bmb:storybar:v1';
+
 const isVideo = (url?: string | null) => {
   if (!url) return false;
   const u = url.split('?')[0].toLowerCase();
@@ -23,40 +25,74 @@ const isVideo = (url?: string | null) => {
 const buildSrc = (b: Behavior) =>
   b.file_url || (b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : null);
 
+// helpers: cache
+const readCache = (): Behavior[] => {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+};
+const writeCache = (items: Behavior[]) => {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(items)); } catch {}
+};
+
 export default function StoryBar() {
-  const [items, setItems] = useState<Behavior[]>([]);
+  const [items, setItems] = useState<Behavior[]>(readCache());
   const [broken, setBroken] = useState<Set<number>>(new Set());
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+
+  // refresh from DB
+  const refresh = async () => {
+    const { data, error } = await supabase
+      .from('behaviors')
+      .select('id,user_id,title,description,ipfs_cid,file_url,created_at')
+      .order('created_at', { ascending: false })
+      .limit(24);
+
+    if (!error && Array.isArray(data)) {
+      setItems(data as Behavior[]);
+      writeCache(data as Behavior[]);
+    } else {
+      // залишаємо кеш, щоб не мигало
+      console.warn('[StoryBar] fetch error:', error?.message);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
 
-    (async () => {
-      const { data, error } = await supabase
-        .from('behaviors')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(24);
+    // 1) миттєво показали кеш (він уже у useState)
+    // 2) довантажуємо свіжі дані
+    refresh();
 
-      if (!error && mounted && Array.isArray(data)) {
-        setItems(data as Behavior[]);
-      }
-    })();
+    // 3) realtime INSERT
+    const ch = supabase
+      .channel('sb_behaviors')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'behaviors' },
+        (payload: any) => {
+          const row = payload.new as Behavior;
+          if (!mounted) return;
+          setItems(prev => {
+            const next = prev.some(x => x.id === row.id) ? prev : [row, ...prev].slice(0, 24);
+            writeCache(next);
+            return next;
+          });
+        }
+      )
+      .subscribe();
 
-    // Realtime INSERT
-    const ch = supabase.channel('realtime:behaviors');
-    ch.on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'behaviors' },
-      (payload: any) => {
-        const row = payload.new as Behavior;
-        setItems(prev => (prev.some(x => x.id === row.id) ? prev : [row, ...prev].slice(0, 24)));
-      }
-    ).subscribe();
+    // 4) локальна подія від UploadBehavior (дублюємо на всяк випадок)
+    const onUploaded = () => refresh();
+    window.addEventListener('behaviorUploaded', onUploaded as any);
 
     return () => {
       mounted = false;
-      ch.unsubscribe();
+      try { ch.unsubscribe(); } catch {}
+      window.removeEventListener('behaviorUploaded', onUploaded as any);
     };
   }, []);
 
@@ -76,11 +112,10 @@ export default function StoryBar() {
           <span className="sb-plus">+</span>
         </button>
 
-        {/* Список сторіс/біхейворсів */}
+        {/* Історії */}
         {items.map((b) => {
           const src = buildSrc(b);
           const isBroken = broken.has(b.id);
-
           return (
             <button
               key={b.id}
@@ -118,7 +153,7 @@ export default function StoryBar() {
         })}
       </div>
 
-      {/* РЕАЛЬНА модалка аплоаду */}
+      {/* Жива модалка аплоаду */}
       {isUploadOpen && (
         <UploadBehavior onClose={() => setIsUploadOpen(false)} />
       )}
