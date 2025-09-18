@@ -1,4 +1,3 @@
-// 📁 src/components/ScenarioLocation.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -22,14 +21,14 @@ const MAPBOX_ACCESS_TOKEN =
   "pk.eyJ1IjoiYnV5bXliaWhhdmlvciIsImEiOiJjbWM4MzU3cDQxZGJ0MnFzM3NnOHhnaWM4In0.wShhGG9EvmIVxcHjBHImXw";
 const MAPBOX_STYLE = `https://api.mapbox.com/styles/v1/mapbox/light-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_ACCESS_TOKEN}`;
 
-function useQuery() {
-  return new URLSearchParams(useLocation().search);
-}
-
 const isFiniteLatLng = (lat: number, lng: number) =>
   Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
 const isNullIsland = (lat: number, lng: number) => Math.abs(lat) < 0.001 && Math.abs(lng) < 0.001;
 const isSane = (lat: number, lng: number) => isFiniteLatLng(lat, lng) && !isNullIsland(lat, lng);
+
+function useQuery() {
+  return new URLSearchParams(window.location.search);
+}
 
 // ── наш білий круглий пін з логотипом
 function makeBmbIcon(size = 33, logoUrl = PIN_SVG_URL) {
@@ -110,6 +109,33 @@ export default function ScenarioLocation() {
   const navigate = useNavigate();
   const mapRef = useRef<L.Map | null>(null);
 
+  // 1) Маркер сторінки + інжекція CSS, щоб приховати будь-який StoryBar на цій сторінці.
+  useEffect(() => {
+    const r = document.documentElement;
+    const prev = r.getAttribute("data-page");
+    r.setAttribute("data-page", "scenario-location");
+
+    const style = document.createElement("style");
+    style.setAttribute("data-bmb", "hide-storybar-on-location");
+    style.innerHTML = `
+      :root[data-page="scenario-location"] .StoryBarRoot,
+      :root[data-page="scenario-location"] .FixedStoryBar,
+      :root[data-page="scenario-location"] #StoryBarRoot,
+      :root[data-page="scenario-location"] .storybar-overlay,
+      :root[data-page="scenario-location"] .story-bar {
+        display: none !important;
+        pointer-events: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+
+    return () => {
+      if (prev) r.setAttribute("data-page", prev);
+      else r.removeAttribute("data-page");
+      style.remove();
+    };
+  }, []);
+
   const mode = (q.get("mode") || "").toLowerCase(); // "view" → тільки перегляд
   const latQ = Number(q.get("lat"));
   const lngQ = Number(q.get("lng"));
@@ -138,7 +164,7 @@ export default function ScenarioLocation() {
   // fallback на OSM
   const [useOsm, setUseOsm] = useState(false);
   useEffect(() => {
-    const t = setTimeout(() => setUseOsm((prev) => prev || true), 1500);
+    const t = setTimeout(() => setUseOsm(true), 1500);
     return () => clearTimeout(t);
   }, []);
   const onMapboxTileLoad = () => setUseOsm(false);
@@ -191,6 +217,14 @@ export default function ScenarioLocation() {
     }
   }, [isSelectMode, picked, triedAutoPick]);
 
+  // гарантія відмалювання: після mount/resize
+  useEffect(() => {
+    const id = setTimeout(() => { mapRef.current?.invalidateSize(false); }, 50);
+    const onResize = () => mapRef.current?.invalidateSize(false);
+    window.addEventListener("resize", onResize);
+    return () => { clearTimeout(id); window.removeEventListener("resize", onResize); };
+  }, []);
+
   // підтвердити → зберегти координати та перейти на форму сценарію
   const confirmSelection = () => {
     const point = picked ?? mapRef.current?.getCenter();
@@ -200,16 +234,13 @@ export default function ScenarioLocation() {
     sessionStorage.setItem(VISITED_MAP_KEY, "1");
 
     const qs = executorId ? `?executor_id=${encodeURIComponent(executorId)}` : "";
-    // важливо: НЕ replace, щоб гарантовано відбулося перемикання роуту
     navigate(`/scenario/new${qs}`, { state: { from: location.pathname } });
   };
 
   return (
     <div
       style={{
-        // повна висота екрана і без нижніх відступів — карта “до самого низу”
-        height: "calc(var(--vh, 1vh) * 100)",
-        // як запасний варіант для деяких мобільних браузерів:
+        height: "calc(var(--app-vh, 1vh) * 100)",
         minHeight: "100dvh",
         width: "100%",
         position: "relative",
@@ -219,7 +250,10 @@ export default function ScenarioLocation() {
         center={center}
         zoom={16}
         style={{ height: "100%", width: "100%" }}
-        whenCreated={(m) => { mapRef.current = m; }}
+        whenCreated={(m) => {
+          mapRef.current = m;
+          setTimeout(() => m.invalidateSize(false), 0);
+        }}
         scrollWheelZoom
       >
         <CenterMap center={center} />
