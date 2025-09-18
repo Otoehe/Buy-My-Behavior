@@ -1,3 +1,4 @@
+// src/pages/MyOrders.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { lockFunds, confirmCompletionOnChain, getDealOnChain } from '../lib/escrowContract';
@@ -28,11 +29,49 @@ async function waitForChainRelease(scenarioId: string, tries = 6, delayMs = 1200
   return 0;
 }
 
-/** ───────────────────────────────────────────────────────────────────────
- * Допоміжні правила етапів (єдине джерело істини для кнопок/редагування)
- * ─────────────────────────────────────────────────────────────────────── */
+/* ─────────── Єдині правила станів/кнопок ─────────── */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
+
+const getStage = (s: Scenario) => {
+  // 0: чернетка/очікування погоджень
+  // 1: погоджено обома
+  // 2: кошти заблоковані
+  // 3: виконано/підтверджено
+  if (s.status === 'confirmed') return 3;
+  if (s.escrow_tx_hash) return 2;
+  if (isBothAgreed(s)) return 1;
+  return 0;
+};
+
+/* Простий статус-стріп, щоб у замовника був той самий індикатор етапів */
+function StatusStrip({ s }: { s: Scenario }) {
+  const stage = getStage(s);
+  const dot = (active: boolean) => (
+    <span
+      style={{
+        width: 10, height: 10, borderRadius: 9999,
+        display: 'inline-block', margin: '0 6px',
+        background: active ? '#111' : '#e5e7eb',
+      }}
+    />
+  );
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '6px 10px', borderRadius: 10,
+      background: 'rgba(0,0,0,0.035)', margin: '6px 0 10px',
+    }}>
+      {dot(stage >= 0)} {dot(stage >= 1)} {dot(stage >= 2)} {dot(stage >= 3)}
+      <div style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>
+        {stage === 0 && '• Угоду погоджено → далі кошти в Escrow'}
+        {stage === 1 && '• Погоджено → кошти ще не заблоковані'}
+        {stage === 2 && '• Кошти заблоковано → очікуємо виконання'}
+        {stage === 3 && '• Виконання підтверджено'}
+      </div>
+    </div>
+  );
+}
 
 export default function MyOrders() {
   const [userId, setUserId] = useState('');
@@ -60,7 +99,7 @@ export default function MyOrders() {
     typeof s.latitude === 'number' && Number.isFinite(s.latitude) &&
     typeof s.longitude === 'number' && Number.isFinite(s.longitude);
 
-  // Кнопка “Погодити”: дозволена до ескроу і поки клієнт іще не погодив
+  // “Погодити” дозволена поки немає escrow і сustomer ще не погодив
   const canAgree = (s: Scenario) =>
     !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
 
@@ -70,6 +109,10 @@ export default function MyOrders() {
     const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
     return !Number.isNaN(dt.getTime()) && new Date() >= dt;
   };
+
+  // Показувати кнопку “Оцінити” у замовника після підтвердження виконавцем
+  const canCustomerRate = (s: Scenario, rated: boolean) =>
+    !!(s as any).is_completed_by_executor && !rated;
 
   const loadOpenDispute = useCallback(async (scenarioId: string) => {
     const d = await getLatestDisputeByScenario(scenarioId);
@@ -100,6 +143,7 @@ export default function MyOrders() {
       setUserId(uid);
       await load(uid);
 
+      // 🔁 realtime — обидві сторони одразу бачать зміни
       const ch = supabase
         .channel('realtime:myorders')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'scenarios' }, async p => {
@@ -291,75 +335,93 @@ export default function MyOrders() {
       {list.map(s => {
         const bothAgreed = isBothAgreed(s);
         const fieldsEditable = canEditFields(s);
+        const rated = ratedOrders.has(s.id);
+        const showBigRate = canCustomerRate(s, rated);
 
         return (
-          <ScenarioCard
-            key={s.id}
-            role="customer"
-            s={s}
+          <div key={s.id} style={{ marginBottom: 18 }}>
+            {/* ⬇️ смужка-статус для замовника */}
+            <StatusStrip s={s} />
 
-            /* ── Редагування опису ───────────────────────────────────── */
-            onChangeDesc={(v) => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
-            onCommitDesc={async (v) => {
-              if (!fieldsEditable) return;
-              await supabase.from('scenarios').update({
-                description: v,
-                status: 'pending',
-                is_agreed_by_customer: false,
-                is_agreed_by_executor: false
-              }).eq('id', s.id);
-            }}
+            <ScenarioCard
+              role="customer"
+              s={s}
 
-            /* ── Редагування суми ────────────────────────────────────── */
-            onChangeAmount={(v) => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
-            onCommitAmount={async (v) => {
-              if (!fieldsEditable) return;
-              if (v !== null && (!Number.isFinite(v) || v <= 0)) {
-                alert('Сума має бути > 0');
-                setLocal(s.id, { donation_amount_usdt: null });
-                return;
-              }
-              await supabase.from('scenarios').update({
-                donation_amount_usdt: v,
-                status: 'pending',
-                is_agreed_by_customer: false,
-                is_agreed_by_executor: false
-              }).eq('id', s.id);
-            }}
+              /* ── Редагування опису ─────────────────────────── */
+              onChangeDesc={(v) => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
+              onCommitDesc={async (v) => {
+                if (!fieldsEditable) return;
+                await supabase.from('scenarios').update({
+                  description: v,
+                  status: 'pending',
+                  is_agreed_by_customer: false,
+                  is_agreed_by_executor: false
+                }).eq('id', s.id);
+              }}
 
-            /* ── Дії ────────────────────────────────────────────────── */
-            onAgree={() => handleAgree(s)}
-            onLock={() => handleLock(s)}
-            onConfirm={() => handleConfirm(s)}
-            onDispute={() => handleDispute(s)}
+              /* ── Редагування суми ──────────────────────────── */
+              onChangeAmount={(v) => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
+              onCommitAmount={async (v) => {
+                if (!fieldsEditable) return;
+                if (v !== null && (!Number.isFinite(v) || v <= 0)) {
+                  alert('Сума має бути > 0'); setLocal(s.id, { donation_amount_usdt: null }); return;
+                }
+                await supabase.from('scenarios').update({
+                  donation_amount_usdt: v,
+                  status: 'pending',
+                  is_agreed_by_customer: false,
+                  is_agreed_by_executor: false
+                }).eq('id', s.id);
+              }}
 
-            /* “Показати локацію” — завжди активна */
-            onOpenLocation={() => {
-              if (hasCoords(s)) {
-                window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank');
-              } else {
-                alert('Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію.');
-              }
-            }}
+              /* ── Дії ───────────────────────────────────────── */
+              onAgree={() => handleAgree(s)}
+              onLock={() => handleLock(s)}
+              onConfirm={() => handleConfirm(s)}
+              onDispute={() => handleDispute(s)}
 
-            /* ── Гатінг кнопок ──────────────────────────────────────── */
-            canAgree={canAgree(s)}
-            canLock={bothAgreed && !s.escrow_tx_hash}
-            canConfirm={canConfirm(s)}
-            canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
+              /* “Показати локацію” — завжди активна */
+              onOpenLocation={() => {
+                if (hasCoords(s)) {
+                  window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank');
+                } else {
+                  alert('Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію.');
+                }
+              }}
 
-            /* “Показати локацію” — завжди true (кнопка видима/активна) */
-            hasCoords={true}
+              /* ── Гатінг кнопок ─────────────────────────────── */
+              canAgree={canAgree(s)}
+              canLock={bothAgreed && !s.escrow_tx_hash}
+              canConfirm={canConfirm(s)}
+              canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
 
-            /* Статуси завантаження */
-            busyAgree={!!agreeBusy[s.id]}
-            busyLock={!!lockBusy[s.id]}
-            busyConfirm={!!confirmBusy[s.id]}
+              /* “Показати локацію” — завжди true (кнопка видима/активна) */
+              hasCoords={true}
 
-            /* Рейтинг — лише після confirmed */
-            isRated={ratedOrders.has(s.id)}
-            onOpenRate={() => openRateFor(s)}
-          />
+              /* Спадщина: якщо ScenarioCard показує власну кнопку оцінки */
+              isRated={rated}
+              onOpenRate={() => openRateFor(s)}
+            />
+
+            {/* ⬇️ Велика кнопка “Оцінити” для замовника (після підтвердження виконавцем) */}
+            {showBigRate && (
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => openRateFor(s)}
+                  style={{
+                    width: '100%', maxWidth: 520, marginTop: 10,
+                    padding: '12px 18px', borderRadius: 999,
+                    background: '#ffd7e0', color: '#111', fontWeight: 800,
+                    border: '1px solid #f3c0ca', cursor: 'pointer',
+                    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.7)',
+                  }}
+                >
+                  ⭐ Оцінити виконавця
+                </button>
+              </div>
+            )}
+          </div>
         );
       })}
 
