@@ -13,6 +13,7 @@ import { initiateDispute, getLatestDisputeByScenario } from '../lib/disputeApi';
 import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
+import { StatusStripClassic } from './StatusStripClassic'; // ⬅️ додано: той самий стріп, що у виконавця
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
@@ -33,45 +34,9 @@ async function waitForChainRelease(scenarioId: string, tries = 6, delayMs = 1200
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
-const getStage = (s: Scenario) => {
-  // 0: чернетка/очікування погоджень
-  // 1: погоджено обома
-  // 2: кошти заблоковані
-  // 3: виконано/підтверджено
-  if (s.status === 'confirmed') return 3;
-  if (s.escrow_tx_hash) return 2;
-  if (isBothAgreed(s)) return 1;
-  return 0;
-};
-
-/* Простий статус-стріп, щоб у замовника був той самий індикатор етапів */
-function StatusStrip({ s }: { s: Scenario }) {
-  const stage = getStage(s);
-  const dot = (active: boolean) => (
-    <span
-      style={{
-        width: 10, height: 10, borderRadius: 9999,
-        display: 'inline-block', margin: '0 6px',
-        background: active ? '#111' : '#e5e7eb',
-      }}
-    />
-  );
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 10,
-      padding: '6px 10px', borderRadius: 10,
-      background: 'rgba(0,0,0,0.035)', margin: '6px 0 10px',
-    }}>
-      {dot(stage >= 0)} {dot(stage >= 1)} {dot(stage >= 2)} {dot(stage >= 3)}
-      <div style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>
-        {stage === 0 && '• Угоду погоджено → далі кошти в Escrow'}
-        {stage === 1 && '• Погоджено → кошти ще не заблоковані'}
-        {stage === 2 && '• Кошти заблоковано → очікуємо виконання'}
-        {stage === 3 && '• Виконання підтверджено'}
-      </div>
-    </div>
-  );
-}
+// “Погодити” дозволена поки немає escrow і customer ще не погодив
+const canAgreeCustomer = (s: Scenario) =>
+  !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
 
 export default function MyOrders() {
   const [userId, setUserId] = useState('');
@@ -98,10 +63,6 @@ export default function MyOrders() {
   const hasCoords = (s: Scenario) =>
     typeof s.latitude === 'number' && Number.isFinite(s.latitude) &&
     typeof s.longitude === 'number' && Number.isFinite(s.longitude);
-
-  // “Погодити” дозволена поки немає escrow і сustomer ще не погодив
-  const canAgree = (s: Scenario) =>
-    !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
 
   const canConfirm = (s: Scenario) => {
     if (!s.escrow_tx_hash) return false;
@@ -208,7 +169,7 @@ export default function MyOrders() {
   }, [userId, list, loadOpenDispute, refreshRated]);
 
   const handleAgree = async (s: Scenario) => {
-    if (agreeBusy[s.id] || !canAgree(s)) return;
+    if (agreeBusy[s.id] || !canAgreeCustomer(s)) return;
     setAgreeBusy(p => ({ ...p, [s.id]: true }));
     try {
       const { data: rec, error } = await supabase
@@ -340,8 +301,10 @@ export default function MyOrders() {
 
         return (
           <div key={s.id} style={{ marginBottom: 18 }}>
-            {/* ⬇️ смужка-статус для замовника */}
-            <StatusStrip s={s} />
+            {/* ⬇️ статус як у виконавця */}
+            <div style={{ marginBottom: 10 }}>
+              <StatusStripClassic state={s} />
+            </div>
 
             <ScenarioCard
               role="customer"
@@ -390,15 +353,15 @@ export default function MyOrders() {
               }}
 
               /* ── Гатінг кнопок ─────────────────────────────── */
-              canAgree={canAgree(s)}
+              canAgree={canAgreeCustomer(s)}
               canLock={bothAgreed && !s.escrow_tx_hash}
               canConfirm={canConfirm(s)}
               canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
 
-              /* “Показати локацію” — завжди true (кнопка видима/активна) */
-              hasCoords={true}
+              /* “Показати локацію” — кнопка буде видима/активна при наявних координатах */
+              hasCoords={hasCoords(s)}
 
-              /* Спадщина: якщо ScenarioCard показує власну кнопку оцінки */
+              /* Якщо ScenarioCard має власну кнопку оцінки — підтримуємо API */
               isRated={rated}
               onOpenRate={() => openRateFor(s)}
             />
@@ -409,13 +372,8 @@ export default function MyOrders() {
                 <button
                   type="button"
                   onClick={() => openRateFor(s)}
-                  style={{
-                    width: '100%', maxWidth: 520, marginTop: 10,
-                    padding: '12px 18px', borderRadius: 999,
-                    background: '#ffd7e0', color: '#111', fontWeight: 800,
-                    border: '1px solid #f3c0ca', cursor: 'pointer',
-                    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.7)',
-                  }}
+                  className="btn rate"
+                  style={{ maxWidth: 520, width: '100%', marginTop: 10 }}
                 >
                   ⭐ Оцінити виконавця
                 </button>
