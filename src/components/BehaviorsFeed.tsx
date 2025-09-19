@@ -1,4 +1,3 @@
-// src/components/BehaviorsFeed.tsx
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -17,8 +16,8 @@ interface Behavior {
   created_at?: string | null;
   author_id?: string | null;
   author_avatar_url?: string | null;
-  likes_count: number;       // лишаю для сумісності з БД (UI не показуємо)
-  dislikes_count: number;    // лишаю для сумісності з БД (UI не показуємо)
+  likes_count: number;
+  dislikes_count: number;
   is_dispute_evidence?: boolean;
   dispute_id?: string | null;
 }
@@ -79,7 +78,7 @@ const BehaviorsFeed: React.FC = () => {
       if (b.dispute_id && !disputeIdByBehavior[b.id]) disputeIdByBehavior[b.id] = b.dispute_id!;
     });
 
-    // ---- B) scenario_id
+    // ---- B) scenario_id (зі спорів)
     const disputeIds = Array.from(new Set(Object.values(disputeIdByBehavior)));
     let disputesRows: any[] = [];
     if (disputeIds.length) {
@@ -94,6 +93,7 @@ const BehaviorsFeed: React.FC = () => {
       if (d?.id && d?.scenario_id) scenarioIdByDispute[d.id] = d.scenario_id as string;
     });
 
+    // ---- C) scenario_id для звичайних proof-зв'язків
     const normalBehaviors = processed.filter((b) => !disputeIdByBehavior[b.id]);
     const { data: proofs } = await supabase
       .from('scenario_proofs')
@@ -106,7 +106,7 @@ const BehaviorsFeed: React.FC = () => {
         scenarioIdByBehavior[p.behavior_id as number] = p.scenario_id as string;
     });
 
-    // ---- C) підтягнути самі сценарії
+    // ---- D) підтягнути самі сценарії
     const scenarioIds = new Set<string>();
     Object.values(scenarioIdByDispute).forEach((id) => id && scenarioIds.add(id));
     Object.values(scenarioIdByBehavior).forEach((id) => id && scenarioIds.add(id));
@@ -127,7 +127,7 @@ const BehaviorsFeed: React.FC = () => {
       };
     });
 
-    // ---- D) скласти мапи для рендера
+    // ---- E) скласти мапи для рендера
     setScenarioTextByBehavior((prev) => {
       const next: Record<number, ScenarioText> = { ...prev };
       for (const b of processed) {
@@ -167,7 +167,7 @@ const BehaviorsFeed: React.FC = () => {
           [b.id]: { ...prev[b.id], counts, myVote: mine },
         }));
       } catch {
-        // ignore
+        // ignore помилки запитів лічильників
       }
     }
   }, []);
@@ -217,17 +217,16 @@ const BehaviorsFeed: React.FC = () => {
       if (!v) return;
 
       if (activeVideoId === id) {
-        v.muted = false; // звук одразу для активного
+        v.muted = false;
         const playPromise = v.play();
         if (playPromise && typeof playPromise.then === 'function') {
           playPromise.catch(() => {
-            // браузер блокує автоплей зі звуком → просимо жест
             setNeedsUserGestureFor(id);
           });
         }
       } else {
         v.pause();
-        v.muted = true; // інші ролики — без звуку
+        v.muted = true;
       }
     });
   }, [activeVideoId]);
@@ -284,7 +283,11 @@ const BehaviorsFeed: React.FC = () => {
 
         return (
           <div className="shorts-scroll-item" key={b.id}>
-            <div className="shorts-feed-layout">
+            <div
+              className="shorts-feed-layout"
+              // знизу даємо запас під fixed-кнопки, щоб контент не перекривався
+              style={{ paddingBottom: dm ? 'calc(env(safe-area-inset-bottom, 0px) + 88px)' : undefined }}
+            >
               <div className="shorts-video-wrapper">
                 {/* Відео */}
                 <video
@@ -298,7 +301,7 @@ const BehaviorsFeed: React.FC = () => {
                   ref={(el) => (videoRefs.current[b.id] = el)}
                 />
 
-                {/* Підказка, якщо автоплей зі звуком заблокований (натисни будь-де) */}
+                {/* Підказка про жест */}
                 {showTapOverlay && (
                   <div className="tap-to-play">Торкнись, щоб відтворити зі звуком</div>
                 )}
@@ -325,7 +328,7 @@ const BehaviorsFeed: React.FC = () => {
                   </div>
                 )}
 
-                {/* Заголовок/опис сценарію */}
+                {/* Заголовок/опис сценарію (підтягується з таблиці scenarios) */}
                 {(st.title || st.description) && (
                   <div className="sr-title-box">
                     {st.title && <div style={{ fontWeight: 700, marginBottom: 4 }}>{st.title}</div>}
@@ -333,7 +336,7 @@ const BehaviorsFeed: React.FC = () => {
                   </div>
                 )}
 
-                {/* Аватар автора — кружечок знизу ліворуч (бренд-обводка) */}
+                {/* Аватар автора */}
                 {!!b.author_avatar_url && (
                   <img
                     className="shorts-author-avatar"
@@ -344,7 +347,7 @@ const BehaviorsFeed: React.FC = () => {
                   />
                 )}
 
-                {/* Кнопка Share у правому верхньому куті */}
+                {/* Кнопка Share */}
                 <button
                   className="share-button"
                   style={{ position: 'absolute', top: 10, right: 10, zIndex: 10000 }}
@@ -353,58 +356,59 @@ const BehaviorsFeed: React.FC = () => {
                 >
                   <i className="fa-solid fa-share-nodes"></i>
                 </button>
-
-                {/* Кнопки голосування при спорі */}
-                {dm && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      bottom: 8,
-                      left: 8,
-                      right: 8,
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr',
-                      gap: 8,
-                    }}
-                  >
-                    <button
-                      onClick={() => handleVote(b.id, 'customer')}
-                      disabled={dm.myVote === 'customer'}
-                      style={{
-                        border: 'none',
-                        borderRadius: 999,
-                        padding: '10px 12px',
-                        background: '#ffffffd0',
-                        backdropFilter: 'blur(4px)',
-                        boxShadow: '0 2px 8px rgba(0,0,0,.15)',
-                        fontWeight: 600,
-                        cursor: dm.myVote === 'customer' ? 'not-allowed' : 'pointer',
-                      }}
-                      title="Підтримати замовника"
-                    >
-                      ↩️ Замовник ({dm.counts.customer})
-                    </button>
-                    <button
-                      onClick={() => handleVote(b.id, 'executor')}
-                      disabled={dm.myVote === 'executor'}
-                      style={{
-                        border: 'none',
-                        borderRadius: 999,
-                        padding: '10px 12px',
-                        background: '#ffffffd0',
-                        backdropFilter: 'blur(4px)',
-                        boxShadow: '0 2px 8px rgba(0,0,0,.15)',
-                        fontWeight: 600,
-                        cursor: dm.myVote === 'executor' ? 'not-allowed' : 'pointer',
-                      }}
-                      title="Підтримати виконавця"
-                    >
-                      ✅ Виконавець ({dm.counts.executor})
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
+
+            {/* Кнопки голосування: FIXED (завжди видимі) */}
+            {dm && (
+              <div
+                style={{
+                  position: 'fixed',
+                  left: 8,
+                  right: 8,
+                  bottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)',
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: 8,
+                  zIndex: 10050,
+                }}
+              >
+                <button
+                  onClick={() => handleVote(b.id, 'customer')}
+                  disabled={dm.myVote === 'customer'}
+                  style={{
+                    border: 'none',
+                    borderRadius: 999,
+                    padding: '12px 14px',
+                    background: '#ffffffd0',
+                    backdropFilter: 'blur(4px)',
+                    boxShadow: '0 2px 8px rgba(0,0,0,.15)',
+                    fontWeight: 700,
+                    cursor: dm.myVote === 'customer' ? 'not-allowed' : 'pointer',
+                  }}
+                  title="Підтримати замовника"
+                >
+                  ↩️ Замовник ({dm.counts.customer})
+                </button>
+                <button
+                  onClick={() => handleVote(b.id, 'executor')}
+                  disabled={dm.myVote === 'executor'}
+                  style={{
+                    border: 'none',
+                    borderRadius: 999,
+                    padding: '12px 14px',
+                    background: '#ffffffd0',
+                    backdropFilter: 'blur(4px)',
+                    boxShadow: '0 2px 8px rgba(0,0,0,.15)',
+                    fontWeight: 700,
+                    cursor: dm.myVote === 'executor' ? 'not-allowed' : 'pointer',
+                  }}
+                  title="Підтримати виконавця"
+                >
+                  ✅ Виконавець ({dm.counts.executor})
+                </button>
+              </div>
+            )}
           </div>
         );
       })}
