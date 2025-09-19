@@ -167,30 +167,22 @@ const BehaviorsFeed: React.FC = () => {
           [b.id]: { ...prev[b.id], counts, myVote: mine },
         }));
       } catch {
-        // ignore помилки запитів лічильників
+        // ignore
       }
     }
   }, []);
 
-  useEffect(() => {
-    fetchBehaviors();
-  }, [fetchBehaviors]);
+  useEffect(() => { fetchBehaviors(); }, [fetchBehaviors]);
 
   // ---------- realtime INSERT ----------
   useEffect(() => {
     const channel = supabase
       .channel('realtime:behaviors')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'behaviors' },
-        async () => {
-          await fetchBehaviors();
-        }
-      );
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'behaviors' }, async () => {
+        await fetchBehaviors();
+      });
     channel.subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [fetchBehaviors]);
 
   // ---------- auto play/pause зі звуком ----------
@@ -220,9 +212,7 @@ const BehaviorsFeed: React.FC = () => {
         v.muted = false;
         const playPromise = v.play();
         if (playPromise && typeof playPromise.then === 'function') {
-          playPromise.catch(() => {
-            setNeedsUserGestureFor(id);
-          });
+          playPromise.catch(() => setNeedsUserGestureFor(id));
         }
       } else {
         v.pause();
@@ -245,9 +235,7 @@ const BehaviorsFeed: React.FC = () => {
       window.removeEventListener('pointerdown', handler, { capture: true } as any);
     };
     window.addEventListener('pointerdown', handler, { capture: true } as any);
-    return () => {
-      window.removeEventListener('pointerdown', handler, { capture: true } as any);
-    };
+    return () => { window.removeEventListener('pointerdown', handler, { capture: true } as any); };
   }, [needsUserGestureFor]);
 
   // ---------- actions ----------
@@ -285,7 +273,6 @@ const BehaviorsFeed: React.FC = () => {
           <div className="shorts-scroll-item" key={b.id}>
             <div
               className="shorts-feed-layout"
-              // знизу даємо запас під fixed-кнопки, щоб контент не перекривався
               style={{ paddingBottom: dm ? 'calc(env(safe-area-inset-bottom, 0px) + 88px)' : undefined }}
             >
               <div className="shorts-video-wrapper">
@@ -302,9 +289,7 @@ const BehaviorsFeed: React.FC = () => {
                 />
 
                 {/* Підказка про жест */}
-                {showTapOverlay && (
-                  <div className="tap-to-play">Торкнись, щоб відтворити зі звуком</div>
-                )}
+                {showTapOverlay && <div className="tap-to-play">Торкнись, щоб відтворити зі звуком</div>}
 
                 {/* Бейдж спору */}
                 {(b.is_dispute_evidence || dm) && (
@@ -322,17 +307,43 @@ const BehaviorsFeed: React.FC = () => {
                       fontWeight: 700,
                       fontSize: 12,
                       boxShadow: '0 2px 6px rgba(0,0,0,.2)',
+                      zIndex: 2,
                     }}
                   >
                     DISPUTE
                   </div>
                 )}
 
-                {/* Заголовок/опис сценарію (підтягується з таблиці scenarios) */}
+                {/* СЦЕНАРІЙ З УГОДИ — живий текст із таблиці scenarios */}
                 {(st.title || st.description) && (
-                  <div className="sr-title-box">
-                    {st.title && <div style={{ fontWeight: 700, marginBottom: 4 }}>{st.title}</div>}
-                    {st.description && <div style={{ opacity: 0.95 }}>{st.description}</div>}
+                  <div
+                    className="sr-title-box"
+                    style={{
+                      position: 'absolute',
+                      top: 36,                 // під бейджем
+                      left: 8,
+                      right: 8,
+                      padding: '10px 12px',
+                      borderRadius: 16,
+                      background: 'linear-gradient( to bottom, rgba(0,0,0,.55), rgba(0,0,0,.35) )',
+                      color: '#fff',
+                      backdropFilter: 'blur(4px)',
+                      boxShadow: '0 2px 10px rgba(0,0,0,.25)',
+                      zIndex: 2,
+                      maxHeight: '30vh',
+                      overflow: 'auto',
+                    }}
+                  >
+                    {st.title && (
+                      <div style={{ fontWeight: 800, marginBottom: 4 }}>
+                        {st.title}
+                      </div>
+                    )}
+                    {st.description && (
+                      <div style={{ opacity: 0.95, lineHeight: 1.3 }}>
+                        {st.description}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -350,7 +361,7 @@ const BehaviorsFeed: React.FC = () => {
                 {/* Кнопка Share */}
                 <button
                   className="share-button"
-                  style={{ position: 'absolute', top: 10, right: 10, zIndex: 10000 }}
+                  style={{ position: 'absolute', top: 10, right: 10, zIndex: 3 }}
                   onClick={() => setShareUrl(src)}
                   title="Поділитись"
                 >
