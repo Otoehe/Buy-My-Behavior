@@ -41,35 +41,20 @@ const hasInjectedEthereum = () => {
 };
 
 /**
- * Ледача ініціалізація MetaMask SDK тільки коли потрібно:
- * - мобільний браузер
- * - немає інжектованого провайдера
- * SDK відкриє застосунок MetaMask для підтвердження транзакції і поверне користувача в наш браузер.
+ * Ледача ініціалізація MetaMask SDK (тільки якщо мобільний і немає провайдера).
+ * SDK відкриє застосунок MetaMask для підтвердження й поверне користувача назад у браузер.
  */
 async function ensureMetaMaskSDKInjected() {
-  if (!isMobileUA()) return;            // десктоп не чіпаємо
-  if (hasInjectedEthereum()) return;    // уже є провайдер
+  if (!isMobileUA()) return;
+  if (hasInjectedEthereum()) return;
 
-  // Динамічний імпорт, щоб не тягнути SDK на десктопі
   const { default: MetaMaskSDK } = await import('@metamask/sdk');
-
-  // ВАЖЛИВО: injectProvider=true — щоб ваш існуючий код (quickOneClickSetup, lockFunds)
-  // бачив window.ethereum так само, як на десктопі.
   const sdk = new MetaMaskSDK({
     injectProvider: true,
-    // disableModal: false, // можна ввімкнути/вимкнути внутрішні модалки SDK
-    dappMetadata: {
-      name: 'Buy My Behavior',
-      url: window.location.origin,
-    },
-    // Налаштування повернення: SDK сам використовує universal link і вертає у браузер
-    // preferDesktop: false — для мобільних критично, щоб відкрив саме застосунок.
     preferDesktop: false,
+    dappMetadata: { name: 'Buy My Behavior', url: window.location.origin },
   });
-
-  // Ініціалізуємо провайдера (буде доступний як window.ethereum)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const provider = sdk.getProvider();
+  sdk.getProvider(); // робить window.ethereum доступним
 }
 
 /* ─────────── Логіка етапів ─────────── */
@@ -271,18 +256,20 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // === КЛЮЧОВЕ: якщо мобільний і немає інжектованого провайдера — піднімаємо MetaMask SDK
+      // === КЛЮЧ: якщо мобільний і немає провайдера — піднімаємо MetaMask SDK
       if (isMobileUA() && !hasInjectedEthereum()) {
-        await ensureMetaMaskSDKInjected(); // це відкриє MetaMask під час connect/tx і поверне назад у браузер
+        await ensureMetaMaskSDKInjected();
+        // ВАЖЛИВО (жест кліку): попросити акаунти тут же, у кліковому контексті
+        await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
       }
 
-      // 1) “розігрів” MetaMask (конект + BSC + approve USDT за потреби)
+      // 1) “розігрів” (конект + ensure BSC + approve USDT за потреби)
       const setup = await quickOneClickSetup();
       if (setup?.approveTxHash) {
-        // опційно можна показати тихий тост
+        // тихий тост за бажанням
       }
 
-      // 2) Відправляємо транзакцію блокування коштів
+      // 2) Транзакція блокування
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
 
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
@@ -298,9 +285,10 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // на випадок мобільного без інжекту — теж підстрахуємося
+      // підстраховка для мобільного
       if (isMobileUA() && !hasInjectedEthereum()) {
         await ensureMetaMaskSDKInjected();
+        await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
       }
 
       await confirmCompletionOnChain({ scenarioId: s.id });
@@ -400,7 +388,6 @@ export default function MyOrders() {
             <ScenarioCard
               role="customer"
               s={s}
-
               onChangeDesc={(v) => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async (v) => {
                 if (!fieldsEditable) return;
@@ -411,7 +398,6 @@ export default function MyOrders() {
                   is_agreed_by_executor: false
                 }).eq('id', s.id);
               }}
-
               onChangeAmount={(v) => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
               onCommitAmount={async (v) => {
                 if (!fieldsEditable) return;
@@ -425,12 +411,10 @@ export default function MyOrders() {
                   is_agreed_by_executor: false
                 }).eq('id', s.id);
               }}
-
               onAgree={() => handleAgree(s)}
               onLock={() => handleLock(s)}
               onConfirm={() => handleConfirm(s)}
               onDispute={() => handleDispute(s)}
-
               onOpenLocation={() => {
                 if (hasCoords(s)) {
                   window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank');
@@ -438,12 +422,10 @@ export default function MyOrders() {
                   alert('Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію.');
                 }
               }}
-
               canAgree={canAgree(s)}
               canLock={bothAgreed && !s.escrow_tx_hash}
               canConfirm={canConfirm(s)}
               canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
-
               hasCoords={true}
               isRated={rated}
               onOpenRate={() => openRateFor(s)}
