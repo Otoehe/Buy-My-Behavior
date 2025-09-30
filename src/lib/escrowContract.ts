@@ -1,4 +1,5 @@
-// ✅ Працює з мобільним MetaMask, one-click approve; не ламає існуючі імпорти
+// src/lib/escrowContract.ts
+// SDK-only сумісність: беремо provider саме з connectWallet()
 
 import { ethers } from 'ethers';
 import { supabase } from './supabase';
@@ -46,30 +47,34 @@ type DealTuple = {
 // ───────── Provider / Signer (ethers v5) ─────────
 export function getProvider(): ethers.providers.Web3Provider {
   if ((window as any).ethereum) {
-    return new ethers.providers.Web3Provider((window as any).ethereum);
+    return new ethers.providers.Web3Provider((window as any).ethereum, 'any');
   }
   throw new Error('No EVM provider (window.ethereum)');
 }
 
 async function getWeb3Provider(): Promise<ethers.providers.Web3Provider> {
+  // injected (desktop або MetaMask Browser)
   if ((window as any).ethereum) {
     return new ethers.providers.Web3Provider((window as any).ethereum, 'any');
   }
-  const { provider: eip } = await connectWallet();   // ⬅️ беремо тільки .provider
-  await ensureBSC(eip);
-  return new ethers.providers.Web3Provider(eip as any, 'any');
+  // mobile external browser → MetaMask SDK
+  const { provider } = await connectWallet();
+  await ensureBSC(provider);
+  return new ethers.providers.Web3Provider(provider as any, 'any');
 }
 
-async function getSigner() {
+async function getSigner(): Promise<ethers.Signer> {
+  // injected
   if ((window as any).ethereum) {
     const provider = new ethers.providers.Web3Provider((window as any).ethereum, 'any');
     await provider.send('eth_requestAccounts', []);
     return provider.getSigner();
   }
-  const { provider: eip } = await connectWallet();   // ⬅️ беремо тільки .provider
-  await ensureBSC(eip);
-  const provider = new ethers.providers.Web3Provider(eip as any, 'any');
-  return provider.getSigner();
+  // SDK provider
+  const { provider } = await connectWallet();
+  await ensureBSC(provider);
+  const p = new ethers.providers.Web3Provider(provider as any, 'any');
+  return p.getSigner();
 }
 
 function escrow(signerOrProvider: ethers.Signer | ethers.providers.Provider) {
@@ -86,8 +91,11 @@ async function assertNetworkAndCode() {
   const net = await provider.getNetwork();
   if (Number(net.chainId) !== CHAIN_ID_DEC) {
     try {
-      const eip = (provider.provider as any);
-      await eip.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] });
+      const eip = (provider.provider as Eip1193Provider);
+      await eip.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: CHAIN_ID_HEX }],
+      });
     } catch {
       throw new Error(`Неправильна мережа. Очікується chainId=${CHAIN_ID_DEC}`);
     }
@@ -119,6 +127,7 @@ async function ensureAllowance(
   await tx.wait();
 }
 
+// опційна «unlimited approve»
 export async function approveUsdtUnlimited(): Promise<{ txHash: string } | null> {
   const signer = await getSigner();
   const owner  = await signer.getAddress();
@@ -164,10 +173,10 @@ function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, executi
 // ───────── Public API ─────────
 
 export async function quickOneClickSetup(): Promise<{ address: string; approveTxHash?: string }> {
-  const { provider: eip } = await connectWallet();
-  await ensureBSC(eip);
-  const provider = new ethers.providers.Web3Provider(eip as any, 'any');
-  const signer = provider.getSigner();
+  const { provider } = await connectWallet();
+  await ensureBSC(provider);
+  const p = new ethers.providers.Web3Provider(provider as any, 'any');
+  const signer = p.getSigner();
   const address = await signer.getAddress();
   const res = await approveUsdtUnlimited();
   return { address, approveTxHash: res?.txHash };
@@ -241,7 +250,7 @@ export async function lockFunds(
   const c = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
 
-  // preflight
+  // simulate
   try {
     await (c as any).callStatic.lockFunds(
       b32,
