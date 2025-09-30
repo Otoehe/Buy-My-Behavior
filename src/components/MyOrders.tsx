@@ -48,23 +48,58 @@ async function withTimeout<T>(p: Promise<T>, ms = 8000, label = 'op'): Promise<T
   ]);
 }
 
+/** чекаємо, поки вкладка знову стане видимою після повернення з MetaMask app */
+function waitUntilVisible(timeoutMs = 15000): Promise<void> {
+  if (document.visibilityState === 'visible') return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        document.removeEventListener('visibilitychange', onVis);
+        resolve();
+      }
+    };
+    const t = setTimeout(() => {
+      document.removeEventListener('visibilitychange', onVis);
+      reject(new Error('Timeout:visible'));
+    }, timeoutMs);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        clearTimeout(t);
+        onVis();
+      }
+    });
+  });
+}
+
 /**
  * 1) Піднімає MetaMask SDK (тільки мобільний, якщо немає провайдера)
  * 2) Явно робить connect та перемикання мережі на BSC (56)
  * 3) Якщо мережі немає — додає її
  */
 async function ensureMobileWalletReady() {
+  // якщо вже є провайдер або не мобільний — нічого не робимо тут
   if (!(isMobileUA() && !hasInjectedEthereum())) return;
 
   const { default: MetaMaskSDK } = await import('@metamask/sdk');
   const sdk = new MetaMaskSDK({
     injectProvider: true,
-    preferDesktop: false,
+    preferDesktop: false,                     // критично для мобіли
+    useDeeplink: true,                        // відкриває MetaMask і повертає назад у браузер
     communicationLayerPreference: 'webrtc',
-    storage: localStorage, // стабільніша сесія
+    storage: localStorage,                    // стабільніша сесія
+    checkInstallationImmediately: false,
     dappMetadata: { name: 'Buy My Behavior', url: window.location.origin },
+    modals: { install: false },
   });
-  sdk.getProvider(); // робить window.ethereum доступним
+
+  // зробити window.ethereum
+  sdk.getProvider();
+
+  // інколи SDK ставить провайдера не миттєво — короткий полл
+  for (let i = 0; i < 10; i++) {
+    if (hasInjectedEthereum()) break;
+    await new Promise(r => setTimeout(r, 150));
+  }
 
   const eth = (window as any).ethereum;
 
@@ -75,6 +110,9 @@ async function ensureMobileWalletReady() {
     // якщо MetaMask показав “Return to app” і нічого не сталося — підштовхнемо
     try { await eth.request({ method: 'eth_accounts' }); } catch {}
   }
+
+  // чекаємо повернення у браузер (iOS особливо)
+  try { await waitUntilVisible(15000); } catch {}
 
   // 2) Перемикання на BSC (56)
   try {
@@ -105,6 +143,14 @@ async function ensureMobileWalletReady() {
       throw err;
     }
   }
+
+  // перевіримо, що ми точно на 0x38
+  try {
+    const cid = await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'checkChain');
+    if ((cid as string)?.toLowerCase() !== '0x38') {
+      throw new Error('Failed to switch to BSC');
+    }
+  } catch {}
 }
 
 /* ─────────── Логіка етапів ─────────── */
@@ -308,9 +354,14 @@ export default function MyOrders() {
       await ensureMobileWalletReady();
 
       const eth = (window as any).ethereum;
+
       // watchdog: якщо MetaMask показує "Return to app" і не тригериться нічого —
-      // зробимо легкий "poke", який рушить сесію і відкриє гаманець
+      // зробимо легкі "poke", які рушать сесію і відкривають гаманець
       try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1'); } catch {}
+      try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2'); } catch {}
+
+      // переконаємось, що повернулися у браузер перед транзакціями (особливо iOS)
+      try { await waitUntilVisible(15000); } catch {}
 
       // === 2) “розігрів” (approve за потреби)
       const setup = await quickOneClickSetup();
@@ -319,7 +370,7 @@ export default function MyOrders() {
       }
 
       // ще один "poke" перед головною транзакцією — корисно на деяких прошивках Android
-      try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2'); } catch {}
+      try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke3'); } catch {}
 
       // === 3) Транзакція блокування
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
@@ -339,7 +390,10 @@ export default function MyOrders() {
     try {
       await ensureMobileWalletReady();
       const eth = (window as any).ethereum;
-      try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke3'); } catch {}
+
+      try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke4'); } catch {}
+      try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke5'); } catch {}
+      try { await waitUntilVisible(15000); } catch {}
 
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
