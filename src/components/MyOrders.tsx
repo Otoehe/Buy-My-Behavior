@@ -13,6 +13,8 @@ import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 
+import { connectWallet, ensureBSC } from '../lib/wallet';
+
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
@@ -28,7 +30,7 @@ async function waitForChainRelease(scenarioId: string, tries = 6, delayMs = 1200
   return 0;
 }
 
-/* ─────────── Єдині правила станів/кнопок ─────────── */
+/* ─────────── Логіка етапів ─────────── */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
@@ -218,7 +220,6 @@ export default function MyOrders() {
   };
 
   const handleLock = async (s: Scenario) => {
-    // діагностика кліку
     alert('Стартуємо резерв…');
 
     if (lockBusy[s.id]) { alert('Виконується попередня операція, зачекай кілька секунд.'); return; }
@@ -228,12 +229,21 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
+      // 1) Гаманець + мережа
+      const { provider, accounts, chainId } = await connectWallet();
+      alert(`Гаманець підключено:\n${accounts?.[0] || '(нема)'}\nchainId=${chainId}`);
+      await ensureBSC(provider);
+      alert('BSC підтверджено, викликаємо lockFunds…');
+
+      // 2) Власне транзакція
+      const tx: any = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
+      alert('Відправлено транзакцію: ' + (tx?.hash || JSON.stringify(tx) || 'без хеша'));
+
+      // 3) Локально оновлюємо
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
       setLocal(s.id, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
-      alert('Підпис транзакції успішний, чекаємо підтвердження…');
     } catch (e:any) {
-      alert(e?.message || 'Не вдалося заблокувати кошти.');
+      alert('Помилка lockFunds: ' + (e?.message || String(e)));
     } finally {
       setLockBusy(p => ({ ...p, [s.id]: false }));
     }
@@ -243,6 +253,9 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
+      const { provider } = await connectWallet();
+      await ensureBSC(provider);
+
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
 
@@ -364,7 +377,6 @@ export default function MyOrders() {
                 }).eq('id', s.id);
               }}
 
-              /* ── Дії ───────────────────────────────────────── */
               onAgree={() => handleAgree(s)}
               onLock={() => handleLock(s)}
               onConfirm={() => handleConfirm(s)}
