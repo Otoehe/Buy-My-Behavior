@@ -1,7 +1,10 @@
 // src/lib/escrowContract.ts
-// ✅ ДОДАВАЛЬНЕ ОНОВЛЕННЯ: підтримка WalletConnect + one-click approve
-// Не ламає існуючі API. Залишено всі твої функції.
-// Потрібен новий файл src/lib/wallet.ts з connectWallet/ensureBSC (як я дав раніше).
+// ✅ ADD-ONLY оновлення для стабільної роботи на мобільному (MetaMask Mobile / WalletConnect)
+// - Очікування chainChanged після switchEthereumChain (race fix)
+// - Повторне отримання signer після перемикання мережі
+// - Безпечний callStatic + estimateGas fallback
+// - Нормалізація адреси реферала до ZeroAddress, якщо вона не валідна
+// - API збережено (lockFunds, confirmCompletionOnChain, getDealOnChain, тощо)
 
 import { ethers } from 'ethers';
 import { supabase } from './supabase';
@@ -23,6 +26,7 @@ const erc20Abi = [
   'function decimals() view returns (uint8)',
   'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount) returns (bool)',
+  'function balanceOf(address) view returns (uint256)',
 ];
 
 const escrowAbi = [
@@ -49,38 +53,78 @@ type DealTuple = {
   votesCustomer: number;
 };
 
+// ───────── helpers: очікування подій мережі ─────────
+function waitForChain(ethereum: any, expectedHex: `0x${string}` = CHAIN_ID_HEX) {
+  return new Promise<void>((resolve) => {
+    if (!ethereum?.on) return resolve(); // немає підписки — нічого не чекаємо
+    if (ethereum.chainId === expectedHex) return resolve();
+    const handler = (hex: string) => {
+      if (hex === expectedHex) {
+        ethereum.removeListener?.('chainChanged', handler);
+        resolve();
+      }
+    };
+    ethereum.on('chainChanged', handler);
+    // fail-open через 2.5с, якщо подія не прийшла (WalletConnect іноді не емітить)
+    setTimeout(() => {
+      ethereum.removeListener?.('chainChanged', handler);
+      resolve();
+    }, 2500);
+  });
+}
+
 // ───────── Provider / Signer (ethers v5) ─────────
-// Зберігаю старий getProvider() для сумісності з кодом, що вже імпортує його.
 export function getProvider(): ethers.providers.Web3Provider {
   if ((window as any).ethereum) {
     return new ethers.providers.Web3Provider((window as any).ethereum);
   }
-  // якщо коду потрібно саме синхронний provider, але ми на мобільному браузері без ethereum —
-  // краще кинути помилку (як було), а весь новий код використовує getWeb3Provider().
   throw new Error('No EVM provider (window.ethereum)');
 }
 
-// Новий розумний провайдер: працює і з injected, і з WalletConnect.
 async function getWeb3Provider(): Promise<ethers.providers.Web3Provider> {
+  // injected (MetaMask in-app browser)
   if ((window as any).ethereum) {
-    return new ethers.providers.Web3Provider((window as any).ethereum, 'any');
+    const p = new ethers.providers.Web3Provider((window as any).ethereum, 'any');
+    // попросимо акаунт щоб провайдер увімкнувся
+    try { await p.send('eth_requestAccounts', []); } catch {}
+    // якщо не на BSC — перемикаємо і чекаємо подію
+    const net = await p.getNetwork();
+    if (Number(net.chainId) !== CHAIN_ID_DEC) {
+      try {
+        await (p.provider as any).request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: CHAIN_ID_HEX }],
+        });
+        await waitForChain((p.provider as any), CHAIN_ID_HEX);
+      } catch {}
+    }
+    return p;
   }
-  const eip: Eip1193Provider = await connectWallet(); // відкриє MetaMask Mobile через deeplink
+
+  // WalletConnect / deeplink → MetaMask Mobile
+  const eip: Eip1193Provider = await connectWallet();
   await ensureBSC(eip);
   return new ethers.providers.Web3Provider(eip, 'any');
 }
 
 async function getSigner() {
-  if ((window as any).ethereum) {
-    const provider = new ethers.providers.Web3Provider((window as any).ethereum, 'any');
-    await provider.send('eth_requestAccounts', []);
-    return provider.getSigner();
+  const p = await getWeb3Provider();
+  // ще раз запитаємо доступ до акаунтів (деякі мобільні гаманці цього вимагають перед кожним send)
+  try { await p.send('eth_requestAccounts', []); } catch {}
+  // гарантовано на правильній мережі
+  const net = await p.getNetwork();
+  if (Number(net.chainId) !== CHAIN_ID_DEC) {
+    try {
+      await (p.provider as any).request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: CHAIN_ID_HEX }],
+      });
+      await waitForChain((p.provider as any), CHAIN_ID_HEX);
+    } catch (e) {
+      throw new Error(`Неправильна мережа. Очікується chainId=${CHAIN_ID_DEC}`);
+    }
   }
-  // мобільний/без розширення → WalletConnect
-  const eip: Eip1193Provider = await connectWallet();
-  await ensureBSC(eip);
-  const provider = new ethers.providers.Web3Provider(eip, 'any');
-  return provider.getSigner();
+  return p.getSigner();
 }
 
 function escrow(signerOrProvider: ethers.Signer | ethers.providers.Provider) {
@@ -89,23 +133,14 @@ function escrow(signerOrProvider: ethers.Signer | ethers.providers.Provider) {
 
 // ───────── helpers ─────────
 export function generateScenarioIdBytes32(id: string): string {
+  // стабільна канонізація bytes32
   return ethers.utils.keccak256(ethers.utils.toUtf8Bytes(id));
 }
 
 async function assertNetworkAndCode() {
   const provider = await getWeb3Provider();
-  const net = await provider.getNetwork();
-  if (Number(net.chainId) !== CHAIN_ID_DEC) {
-    try {
-      const eip = (provider.provider as any);
-      await eip.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: CHAIN_ID_HEX }],
-      });
-    } catch {
-      throw new Error(`Неправильна мережа. Очікується chainId=${CHAIN_ID_DEC}`);
-    }
-  }
+
+  // контрактні адреси реально існують у мережі
   const [codeEscrow, codeUsdt] = await Promise.all([
     provider.getCode(ESCROW_ADDRESS),
     provider.getCode(USDT_ADDRESS),
@@ -125,7 +160,7 @@ async function ensureAllowance(
   const have   = await token.allowance(owner, spender);
   if (have.gte(needAmtWei)) return;
 
-  // USDT-стиль: approve(0) → approve(new)
+  // USDT-стиль: спершу approve(0), потім нове значення
   if (!have.isZero()) {
     const tx0 = await token.approve(spender, 0);
     await tx0.wait();
@@ -134,7 +169,7 @@ async function ensureAllowance(
   await tx.wait();
 }
 
-// ✅ NEW: unlimited approve для one-click сетапу
+// one-click сетап: без змін
 export async function approveUsdtUnlimited(): Promise<{ txHash: string } | null> {
   const signer = await getSigner();
   const owner  = await signer.getAddress();
@@ -142,7 +177,7 @@ export async function approveUsdtUnlimited(): Promise<{ txHash: string } | null>
   const current: ethers.BigNumber = await token.allowance(owner, ESCROW_ADDRESS);
   const MAX = ethers.constants.MaxUint256;
 
-  if (current.gte(MAX.div(2))) return null; // уже достатній allowance
+  if (current.gte(MAX.div(2))) return null;
   const tx = await token.approve(ESCROW_ADDRESS, MAX);
   const rc = await tx.wait();
   return { txHash: rc.transactionHash };
@@ -177,9 +212,12 @@ function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, executi
   return unix > 0 ? unix : Math.floor(Date.now() / 1000);
 }
 
+function safeAddress(addr?: string | null) {
+  return (addr && ethers.utils.isAddress(addr)) ? addr : ethers.constants.AddressZero;
+}
+
 // ───────── Public API ─────────
 
-// ⚡️ NEW: швидкий “1 клік” сетап під час реєстрації
 export async function quickOneClickSetup(): Promise<{ address: string; approveTxHash?: string }> {
   const eip = await connectWallet();
   await ensureBSC(eip);
@@ -187,7 +225,7 @@ export async function quickOneClickSetup(): Promise<{ address: string; approveTx
   const signer = provider.getSigner();
   const address = await signer.getAddress();
 
-  const res = await approveUsdtUnlimited(); // може повернути null, якщо allowance вже великий
+  const res = await approveUsdtUnlimited();
   return { address, approveTxHash: res?.txHash };
 }
 
@@ -205,7 +243,8 @@ export async function lockFunds(
 ) {
   await assertNetworkAndCode();
 
-  const signer = await getSigner();
+  // важливо: беремо signer ПІСЛЯ можливого переключення мережі і чекаємо chainChanged
+  let signer = await getSigner();
   const from   = await signer.getAddress();
 
   let amountHuman: string;
@@ -230,6 +269,7 @@ export async function lockFunds(
   }
   if (!scenarioId) throw new Error('ScenarioId is required for the new escrow. Pass { amount, scenarioId }.');
 
+  // витягаємо потрібні поля з БД
   const { data: sc, error: se } = await supabase
     .from('scenarios')
     .select('executor_id, creator_id, date, time, execution_time')
@@ -246,38 +286,46 @@ export async function lockFunds(
   const executorWallet = exId ? await getWalletByUserId(exId) : null;
   if (!executorWallet) throw new Error('Не знайдено гаманець виконавця');
 
-  const refWallet = (referrerWallet !== undefined)
+  const refWalletRaw = (referrerWallet !== undefined)
     ? (referrerWallet || null)
     : (custId ? await getReferrerWalletOfUser(custId) : null);
 
+  const refWallet = safeAddress(refWalletRaw);
+
+  // готуємо суми з урахуванням фактичних decimals
   const token     = new ethers.Contract(USDT_ADDRESS, erc20Abi, signer);
   const decimals  = await token.decimals();
   const amountWei = ethers.utils.parseUnits(String(amountHuman), decimals);
 
+  // перевірка allowance + approve (з очікуванням майнінгу)
   await ensureAllowance(from, USDT_ADDRESS, ESCROW_ADDRESS, amountWei);
+
+  // після approve деякі мобільні гаманці знов перемикають контекст → беремо signer ще раз
+  signer = await getSigner();
 
   const c = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
 
-  // preflight
+  // preflight: callStatic
   try {
     await (c as any).callStatic.lockFunds(
       b32,
       executorWallet,
-      refWallet ?? ethers.constants.AddressZero,
+      refWallet,
       amountWei,
       execUnix
     );
   } catch (e:any) {
-    throw new Error(`lockFunds (simulate) reverted: ${e?.message || e}`);
+    throw new Error(`lockFunds (simulate) reverted: ${e?.reason || e?.message || e}`);
   }
 
+  // оцінка газу з запасом (деякі мобільні клієнти переоцінюють)
   let gas: ethers.BigNumber;
   try {
     gas = await (c as any).estimateGas.lockFunds(
       b32,
       executorWallet,
-      refWallet ?? ethers.constants.AddressZero,
+      refWallet,
       amountWei,
       execUnix
     );
@@ -288,7 +336,7 @@ export async function lockFunds(
   const tx = await (c as any).lockFunds(
     b32,
     executorWallet,
-    refWallet ?? ethers.constants.AddressZero,
+    refWallet,
     amountWei,
     execUnix,
     { gasLimit: gas.mul(12).div(10) }
