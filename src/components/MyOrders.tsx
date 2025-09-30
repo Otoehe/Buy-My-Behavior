@@ -33,17 +33,12 @@ const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
 const getStage = (s: Scenario) => {
-  // 0: чернетка/очікування погоджень
-  // 1: погоджено обома
-  // 2: кошти заблоковані
-  // 3: виконано/підтверджено
   if (s.status === 'confirmed') return 3;
   if (s.escrow_tx_hash) return 2;
   if (isBothAgreed(s)) return 1;
   return 0;
 };
 
-/* Простий статус-стріп, щоб у замовника був той самий індикатор етапів */
 function StatusStrip({ s }: { s: Scenario }) {
   const stage = getStage(s);
   const dot = (active: boolean) => (
@@ -98,7 +93,6 @@ export default function MyOrders() {
     typeof s.latitude === 'number' && Number.isFinite(s.latitude) &&
     typeof s.longitude === 'number' && Number.isFinite(s.longitude);
 
-  // “Погодити” дозволена поки немає escrow і сustomer ще не погодив
   const canAgree = (s: Scenario) =>
     !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
 
@@ -109,7 +103,6 @@ export default function MyOrders() {
     return !Number.isNaN(dt.getTime()) && new Date() >= dt;
   };
 
-  // Показувати кнопку “Оцінити” у замовника після підтвердження виконавцем
   const canCustomerRate = (s: Scenario, rated: boolean) =>
     !!(s as any).is_completed_by_executor && !rated;
 
@@ -142,7 +135,6 @@ export default function MyOrders() {
       setUserId(uid);
       await load(uid);
 
-      // 🔁 realtime — обидві сторони одразу бачать зміни
       const ch = supabase
         .channel('realtime:myorders')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'scenarios' }, async p => {
@@ -226,16 +218,20 @@ export default function MyOrders() {
   };
 
   const handleLock = async (s: Scenario) => {
-    if (lockBusy[s.id]) return;
+    // діагностика кліку
+    alert('Стартуємо резерв…');
+
+    if (lockBusy[s.id]) { alert('Виконується попередня операція, зачекай кілька секунд.'); return; }
     if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) { alert('Сума має бути > 0'); return; }
-    if (!isBothAgreed(s)) { alert('Спершу потрібні дві згоди.'); return; }
-    if (s.escrow_tx_hash) return;
+    if (!isBothAgreed(s)) { alert('Спершу потрібні дві згоди (замовник і виконавець).'); return; }
+    if (s.escrow_tx_hash) { alert('Кошти вже заблоковані для цього замовлення.'); return; }
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
       setLocal(s.id, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
+      alert('Підпис транзакції успішний, чекаємо підтвердження…');
     } catch (e:any) {
       alert(e?.message || 'Не вдалося заблокувати кошти.');
     } finally {
@@ -339,14 +335,11 @@ export default function MyOrders() {
 
         return (
           <div key={s.id} style={{ marginBottom: 18 }}>
-            {/* ⬇️ смужка-статус для замовника */}
             <StatusStrip s={s} />
 
             <ScenarioCard
               role="customer"
               s={s}
-
-              /* ── Редагування опису ─────────────────────────── */
               onChangeDesc={(v) => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async (v) => {
                 if (!fieldsEditable) return;
@@ -357,8 +350,6 @@ export default function MyOrders() {
                   is_agreed_by_executor: false
                 }).eq('id', s.id);
               }}
-
-              /* ── Редагування суми ──────────────────────────── */
               onChangeAmount={(v) => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
               onCommitAmount={async (v) => {
                 if (!fieldsEditable) return;
@@ -379,7 +370,6 @@ export default function MyOrders() {
               onConfirm={() => handleConfirm(s)}
               onDispute={() => handleDispute(s)}
 
-              /* “Показати локацію” — завжди активна */
               onOpenLocation={() => {
                 if (hasCoords(s)) {
                   window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank');
@@ -388,21 +378,15 @@ export default function MyOrders() {
                 }
               }}
 
-              /* ── Гатінг кнопок ─────────────────────────────── */
               canAgree={canAgree(s)}
               canLock={bothAgreed && !s.escrow_tx_hash}
               canConfirm={canConfirm(s)}
               canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
-
-              /* “Показати локацію” — завжди true (кнопка видима/активна) */
               hasCoords={true}
-
-              /* Спадщина: якщо ScenarioCard показує власну кнопку оцінки */
               isRated={rated}
               onOpenRate={() => openRateFor(s)}
             />
 
-            {/* ⬇️ Велика кнопка “Оцінити” для замовника (після підтвердження виконавцем) */}
             {showBigRate && (
               <div style={{ display: 'flex', justifyContent: 'center' }}>
                 <button
