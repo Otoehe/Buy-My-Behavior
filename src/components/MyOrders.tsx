@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   quickOneClickSetup,
@@ -33,28 +33,44 @@ async function waitForChainRelease(scenarioId: string, tries = 6, delayMs = 1200
   return 0;
 }
 
-/* ─────────── Mobile MetaMask helpers (додано) ─────────── */
-const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
-
-const isMetaMaskInApp = () => {
+/* ─────────── Mobile detection ─────────── */
+const isMobileUA = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+const hasInjectedEthereum = () => {
   const eth = (window as any).ethereum;
-  const injected = !!eth && !!eth.isMetaMask;
-  const mmUA = /MetaMask/i.test(navigator.userAgent || '');
-  return injected || mmUA;
+  return !!eth && (!!eth.isMetaMask || !!eth.request);
 };
 
-const buildMetaMaskDeeplink = (pathWithQuery: string) => {
-  const origin = `${window.location.protocol}//${window.location.host}`;
-  const full = `${origin}${pathWithQuery.startsWith('/') ? '' : '/'}${pathWithQuery}`;
-  const hostAndPath = full.replace(/^https?:\/\//, '');
-  return `https://metamask.app.link/dapp/${hostAndPath}`;
-};
+/**
+ * Ледача ініціалізація MetaMask SDK тільки коли потрібно:
+ * - мобільний браузер
+ * - немає інжектованого провайдера
+ * SDK відкриє застосунок MetaMask для підтвердження транзакції і поверне користувача в наш браузер.
+ */
+async function ensureMetaMaskSDKInjected() {
+  if (!isMobileUA()) return;            // десктоп не чіпаємо
+  if (hasInjectedEthereum()) return;    // уже є провайдер
 
-const stripQueryParams = (keys: string[]) => {
-  const url = new URL(window.location.href);
-  keys.forEach(k => url.searchParams.delete(k));
-  history.replaceState(null, '', url.toString());
-};
+  // Динамічний імпорт, щоб не тягнути SDK на десктопі
+  const { default: MetaMaskSDK } = await import('@metamask/sdk');
+
+  // ВАЖЛИВО: injectProvider=true — щоб ваш існуючий код (quickOneClickSetup, lockFunds)
+  // бачив window.ethereum так само, як на десктопі.
+  const sdk = new MetaMaskSDK({
+    injectProvider: true,
+    // disableModal: false, // можна ввімкнути/вимкнути внутрішні модалки SDK
+    dappMetadata: {
+      name: 'Buy My Behavior',
+      url: window.location.origin,
+    },
+    // Налаштування повернення: SDK сам використовує universal link і вертає у браузер
+    // preferDesktop: false — для мобільних критично, щоб відкрив саме застосунок.
+    preferDesktop: false,
+  });
+
+  // Ініціалізуємо провайдера (буде доступний як window.ethereum)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const provider = sdk.getProvider();
+}
 
 /* ─────────── Логіка етапів ─────────── */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
@@ -114,7 +130,8 @@ export default function MyOrders() {
   const { permissionStatus, requestPermission } = useNotifications();
   const rt = useRealtimeNotifications(userId);
 
-  // локальний патч
+  const sdkInitOnce = useRef(false);
+
   const setLocal = (id: string, patch: Partial<Scenario>) =>
     setList(prev => prev.map(x => x.id === id ? { ...x, ...patch } : x));
 
@@ -155,48 +172,6 @@ export default function MyOrders() {
     const ids = items.map(s => s.id);
     const { data } = await supabase.from('ratings').select('order_id').eq('rater_id', uid).in('order_id', ids);
     setRatedOrders(new Set((data || []).map((r: any) => r.order_id)));
-  }, []);
-
-  // ── AUTO-LOCK при відкритті в MetaMask Mobile через deeplink (додано)
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    const shouldAuto = url.searchParams.get('mm_lock') === '1';
-    const sid = url.searchParams.get('sid');
-    const amt = url.searchParams.get('amt');
-    if (!shouldAuto || !sid || !amt) return;
-    if (!isMetaMaskInApp()) return; // тільки всередині MetaMask in-app
-
-    (async () => {
-      try {
-        // 1) розігрів: конект, мережа, approve за потреби
-        await quickOneClickSetup();
-
-        // 2) lockFunds (зберігаємо той самий підпис, що і в handleLock)
-        const tx = await lockFunds({ amount: Number(amt), scenarioId: sid });
-
-        // 3) оновлюємо БД/локальний стан
-        await supabase.from('scenarios').update({
-          escrow_tx_hash: tx?.hash || 'locked',
-          status: 'agreed'
-        }).eq('id', sid);
-
-        setLocal(sid, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
-
-        try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
-        await pushNotificationManager.showNotification({
-          title: 'Ескроу заблоковано',
-          body: 'Кошти успішно заблоковані у смартконтракті.',
-          tag: `lock-${sid}`,
-          requireSound: true
-        });
-      } catch (e: any) {
-        // М’яко: без alert, щоб не ламати UX в in-app
-        console.error('MetaMask auto-lock failed:', e?.message || e);
-      } finally {
-        // приберемо службові параметри, щоби авто-запуск не повторювався
-        stripQueryParams(['mm_lock', 'sid', 'amt']);
-      }
-    })();
   }, []);
 
   useEffect(() => {
@@ -294,25 +269,20 @@ export default function MyOrders() {
     if (!isBothAgreed(s)) { alert('Спершу потрібні дві згоди.'); return; }
     if (s.escrow_tx_hash) return;
 
-    // ── Мобільний міст: якщо мобільний і не в MetaMask in-app — перекидаємо через deeplink (додано)
-    if (isMobile() && !isMetaMaskInApp()) {
-      const path = `/my-orders?mm_lock=1&sid=${encodeURIComponent(s.id)}&amt=${encodeURIComponent(String(s.donation_amount_usdt))}`;
-      const deeplink = buildMetaMaskDeeplink(path);
-      // без alert — просто м’яко перенаправляємо
-      window.location.href = deeplink;
-      return;
-    }
-
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // 1) “розігрів” MetaMask Mobile/десктоп + approve (за потреби)
-      const setup = await quickOneClickSetup();
-      if (setup?.approveTxHash) {
-        // опційний лог/тост
-        // console.log('USDT approved:', setup.approveTxHash);
+      // === КЛЮЧОВЕ: якщо мобільний і немає інжектованого провайдера — піднімаємо MetaMask SDK
+      if (isMobileUA() && !hasInjectedEthereum()) {
+        await ensureMetaMaskSDKInjected(); // це відкриє MetaMask під час connect/tx і поверне назад у браузер
       }
 
-      // 2) відправляємо транзакцію блокування коштів
+      // 1) “розігрів” MetaMask (конект + BSC + approve USDT за потреби)
+      const setup = await quickOneClickSetup();
+      if (setup?.approveTxHash) {
+        // опційно можна показати тихий тост
+      }
+
+      // 2) Відправляємо транзакцію блокування коштів
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
 
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
@@ -328,6 +298,11 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
+      // на випадок мобільного без інжекту — теж підстрахуємося
+      if (isMobileUA() && !hasInjectedEthereum()) {
+        await ensureMetaMaskSDKInjected();
+      }
+
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
 
