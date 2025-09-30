@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 // ───────────────────────────────────────────────────────────────────────────────
-// BMB wallet helper (MetaMask desktop/mobile + опційно WalletConnect v2)
-// Виправляє: "Please call connect() before request()" і -32002 "already pending"
-// Має захист від мультикліків та дає deeplink у MetaMask Browser
+// BMB wallet helper — SDK-only
+// Desktop/MetaMask Browser → injected
+// Mobile Chrome/Safari → MetaMask SDK (app-switch) → назад у твій браузер
+// НІЯКИХ metamask.app.link/dapp/... і НІЯКОГО WalletConnect тут.
 // ───────────────────────────────────────────────────────────────────────────────
 
 export type Eip1193Request = (args: {
@@ -17,7 +18,6 @@ export interface Eip1193Provider {
   removeListener?: (event: string, handler: (...args: any[]) => void) => void;
   isMetaMask?: boolean;
   providers?: Eip1193Provider[];
-  // опційні методи/поля деяких провайдерів:
   isConnected?: () => boolean;
   connect?: () => Promise<void>;
   session?: unknown;
@@ -26,29 +26,20 @@ export interface Eip1193Provider {
 
 type ConnectResult = { provider: Eip1193Provider; accounts: string[]; chainId: string };
 
-const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38'; // 56
+const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38';
 const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
-
-const WC_PROJECT_ID = (import.meta.env.VITE_WALLETCONNECT_PROJECT_ID ||
-  import.meta.env.VITE_WC_PROJECT_ID) as string | undefined;
-
-// головний прапорець — залишай false, щоб не було "All Wallets"
-const ENABLE_WC = (import.meta.env.VITE_ENABLE_WALLETCONNECT === 'true');
-
-const BSC_RPC = (import.meta.env.VITE_BSC_RPC as string) || 'https://bsc-dataseed.binance.org';
+const BSC_RPC  = (import.meta.env.VITE_BSC_RPC as string) || 'https://bsc-dataseed.binance.org';
 const APP_NAME = (import.meta.env.VITE_APP_NAME as string) || 'Buy My Behavior';
-const APP_URL =
-  (import.meta.env.VITE_PUBLIC_APP_URL as string) ||
-  (typeof window !== 'undefined' ? window.location.origin : 'https://buymybehavior.com');
+const APP_URL  = (import.meta.env.VITE_PUBLIC_APP_URL as string) || (typeof window !== 'undefined' ? window.location.origin : 'https://buymybehavior.com');
 
 let connectInFlight: Promise<ConnectResult> | null = null;
 const inflightByKey = new Map<string, Promise<any>>();
+let globalMMSDK: any | null = null;
 
 function isMobileUA(): boolean {
   if (typeof navigator === 'undefined') return false;
   return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
 }
-
 function getInjected(): Eip1193Provider | null {
   const eth = (globalThis as any).ethereum as Eip1193Provider | undefined;
   if (!eth) return null;
@@ -58,14 +49,8 @@ function getInjected(): Eip1193Provider | null {
   }
   return eth as Eip1193Provider;
 }
-
-function delay(ms: number) { return new Promise((res) => setTimeout(res, ms)); }
-
-async function pollAccounts(
-  provider: Eip1193Provider,
-  timeoutMs = 30000,
-  stepMs = 500
-): Promise<string[]> {
+function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+async function pollAccounts(provider: Eip1193Provider, timeoutMs = 30000, stepMs = 500): Promise<string[]> {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     try {
@@ -77,30 +62,6 @@ async function pollAccounts(
   return [];
 }
 
-// ── anti-spam deeplink + можливість одразу відкрити потрібний шлях/квері
-export function openMetaMaskDeeplink(
-  opts?: { path?: string; query?: Record<string, string>; force?: boolean }
-): void {
-  if (typeof window === 'undefined') return;
-
-  try {
-    const key = 'bmb:mm-dapp-last-open';
-    const now = Date.now();
-    const last = Number(localStorage.getItem(key) || '0');
-    if (!(opts?.force) && last && now - last < 7000) return; // не частіше ніж раз на 7 сек
-    localStorage.setItem(key, String(now));
-  } catch {}
-
-  const base = new URL(APP_URL); // напр., https://www.buymybehavior.com
-  const path = opts?.path ?? '/my-orders';
-  const qp = new URLSearchParams(opts?.query ?? {});
-  const hostAndPath = `${base.host}${path}${qp.toString() ? `?${qp}` : ''}`;
-
-  // формат: https://metamask.app.link/dapp/<host>/<path>?query
-  window.location.href = `https://metamask.app.link/dapp/${hostAndPath}`;
-}
-
-// — універсальний request() з автоконектом і ретраями
 async function requestWithConnect<T = any>(
   provider: Eip1193Provider,
   args: { method: string; params?: any[] | Record<string, any> },
@@ -138,31 +99,34 @@ async function requestWithConnect<T = any>(
       })()
     );
   }
-
   return inflightByKey.get(key)!;
 }
 
-async function getWalletConnectProvider(): Promise<Eip1193Provider> {
-  if (!WC_PROJECT_ID) throw new Error('WalletConnect project id not set (VITE_WALLETCONNECT_PROJECT_ID).');
-  const { default: EthereumProvider }: any = await import('@walletconnect/ethereum-provider');
-  const provider: Eip1193Provider = (await EthereumProvider.init({
-    projectId: WC_PROJECT_ID,
-    showQrModal: true,
-    metadata: {
-      name: APP_NAME,
-      description: 'BMB Web3 dapp',
-      url: APP_URL,
-      icons: [`${APP_URL}/icons/bmb-192.png`],
-    },
-    chains: [parseInt(CHAIN_ID_HEX, 16)],
-    optionalChains: [56],
-    rpcMap: { [parseInt(CHAIN_ID_HEX, 16)]: BSC_RPC, 56: BSC_RPC },
-  })) as unknown as Eip1193Provider;
+// ── MetaMask SDK (app-switch)
+async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
+  const { default: MetaMaskSDK } = await import('@metamask/sdk');
 
-  try { await provider.connect?.(); } catch {}
-  return provider;
+  if (!globalMMSDK) {
+    globalMMSDK = new MetaMaskSDK({
+      dappMetadata: { name: APP_NAME, url: APP_URL },
+      useDeeplink: true,             // ← ключ до app-switch
+      shouldShimWeb3: false,
+      checkInstallationImmediately: false,
+      logging: { developerMode: false },
+      enableAnalytics: false,
+    });
+  }
+
+  const provider = globalMMSDK.getProvider() as Eip1193Provider;
+
+  const accounts: string[] = await requestWithConnect(provider, { method: 'eth_requestAccounts' }, 'sdk_eth_requestAccounts');
+  let chainId: any = await requestWithConnect(provider, { method: 'eth_chainId' }, 'sdk_eth_chainId');
+  if (typeof chainId === 'number') chainId = '0x' + chainId.toString(16);
+
+  return { provider, accounts, chainId: String(chainId) };
 }
 
+// ── injected (desktop / MetaMask Browser)
 async function connectInjectedOnce(): Promise<ConnectResult> {
   const provider = getInjected();
   if (!provider) throw new Error('NO_INJECTED_PROVIDER');
@@ -178,38 +142,29 @@ async function connectInjectedOnce(): Promise<ConnectResult> {
   return { provider, accounts, chainId };
 }
 
-export async function connectWallet(opts?: {
-  prefer?: 'metamask' | 'walletconnect';
-  allowDeepLinkMobile?: boolean;
-}): Promise<ConnectResult> {
+// ── Публічний конектор
+export async function connectWallet(): Promise<ConnectResult> {
   if (!connectInFlight) {
     connectInFlight = (async () => {
       const injected = getInjected();
 
-      // 1) injected (MetaMask in-app / desktop) — головний шлях
-      if (injected && opts?.prefer !== 'walletconnect') {
+      // Desktop / MetaMask Browser → injected
+      if (injected && !isMobileUA()) {
         return await connectInjectedOnce();
       }
-
-      // 2) WalletConnect (опційно, лише якщо увімкнено прапорцем)
-      if (ENABLE_WC && (opts?.prefer === 'walletconnect' || (!injected && WC_PROJECT_ID))) {
-        const wc = await getWalletConnectProvider();
-        const accounts: string[] = await requestWithConnect(wc, { method: 'eth_requestAccounts' });
-        let cid = await requestWithConnect<any>(wc, { method: 'eth_chainId' });
-        if (typeof cid === 'number') cid = '0x' + cid.toString(16);
-        return { provider: wc, accounts, chainId: String(cid) };
+      if (injected && isMobileUA()) {
+        // Якщо користувач ВЖЕ у MetaMask Browser — теж injected
+        const ua = navigator.userAgent || '';
+        if (/MetaMaskMobile/i.test(ua)) return await connectInjectedOnce();
       }
 
-      // 3) Нема injected і WC вимкнено → відкриваємо dapp у MetaMask Browser
-      if (!injected && isMobileUA() && (opts?.allowDeepLinkMobile ?? true)) {
-        openMetaMaskDeeplink();
-        throw new Error('REDIRECTED_TO_METAMASK_APP');
+      // Mobile external browser → SDK app-switch
+      if (isMobileUA()) {
+        return await connectViaMetaMaskSDK();
       }
 
       throw new Error('NO_WALLET_AVAILABLE');
-    })().finally(() => {
-      setTimeout(() => { connectInFlight = null; }, 450);
-    });
+    })().finally(() => setTimeout(() => { connectInFlight = null; }, 450));
   }
   return connectInFlight;
 }
@@ -252,11 +207,9 @@ export async function getChainId(provider: Eip1193Provider): Promise<string> {
   const id = await requestWithConnect<any>(provider, { method: 'eth_chainId' });
   return typeof id === 'number' ? '0x' + id.toString(16) : String(id);
 }
-
 export async function getAccounts(provider: Eip1193Provider): Promise<string[]> {
   return requestWithConnect(provider, { method: 'eth_accounts' });
 }
-
 export function hasInjectedMetaMask(): boolean {
   const p = getInjected();
   return Boolean(p && (p as any).isMetaMask);
