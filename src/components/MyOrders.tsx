@@ -1,7 +1,7 @@
-// src/pages/MyOrders.tsx
+// src/components/MyOrders.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { lockFunds, confirmCompletionOnChain, getDealOnChain, USDT_ADDRESS, ESCROW_ADDRESS } from '../lib/escrowContract';
+import { lockFunds, confirmCompletionOnChain, getDealOnChain } from '../lib/escrowContract';
 import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
 import { useRealtimeNotifications } from '../lib/realtimeNotifications';
 import CelebrationToast from './CelebrationToast';
@@ -14,15 +14,8 @@ import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 
-// ====== ⬇️ ADD-ONLY: імпорти для дебагу (ethers) ======
-import { ethers } from 'ethers';
-const erc20Abi = [
-  'function decimals() view returns (uint8)',
-  'function balanceOf(address) view returns (uint256)',
-  'function allowance(address owner, address spender) view returns (uint256)',
-  'function approve(address spender, uint256 amount) returns (bool)',
-];
-// ======================================================
+// 👇 NEW: гарантуємо сесію гаманця перед будь-яким request()
+import { connectWallet, ensureBSC } from '../lib/wallet';
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
@@ -217,6 +210,19 @@ export default function MyOrders() {
     list.forEach(s => { if (s?.id) loadOpenDispute(s.id); });
   }, [userId, list, loadOpenDispute, refreshRated]);
 
+  // 👇 NEW: гарантований препідключення сесії гаманця перед транзакціями
+  const ensureWalletReadyForTx = useCallback(async () => {
+    const eip = await connectWallet();
+    // якщо провайдер вимагає connect() — зробимо це один раз
+    if (eip && typeof (eip as any).connect === 'function') {
+      try { await (eip as any).connect(); } catch {}
+    }
+    // попросимо акаунт (для injected це і є “конект”)
+    try { await (eip as any).request?.({ method: 'eth_requestAccounts' }); } catch {}
+    // перемикаємо/перевіряємо мережу вже після встановлення сесії
+    await ensureBSC(eip);
+  }, []);
+
   const handleAgree = async (s: Scenario) => {
     if (agreeBusy[s.id] || !canAgree(s)) return;
     setAgreeBusy(p => ({ ...p, [s.id]: true }));
@@ -236,22 +242,6 @@ export default function MyOrders() {
     }
   };
 
-  // ====== ⬇️ ADD-ONLY: локальний стан для дебагу ======
-  const DEBUG = typeof window !== 'undefined' && (
-    new URLSearchParams(window.location.search).get('debug') === '1' ||
-    localStorage.getItem('BMB_DEBUG') === '1'
-  );
-
-  const [dbg, setDbg] = useState<{
-    chainId?: string;
-    account?: string;
-    usdtBalance?: string;
-    allowance?: string;
-    decimals?: number;
-    lastError?: string;
-  }>({});
-  // ====================================================
-
   const handleLock = async (s: Scenario) => {
     if (lockBusy[s.id]) return;
     if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) { alert('Сума має бути > 0'); return; }
@@ -260,22 +250,14 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
+      // 👇 NEW: попередній конект (фікс "Please call connect() before request()")
+      await ensureWalletReadyForTx();
+
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
       setLocal(s.id, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
-      if (DEBUG) setDbg(prev => ({ ...prev, lastError: '' }));
     } catch (e:any) {
-      // ====== ⬇️ ADD-ONLY: детальна помилка для мобільного ======
-      const detail = JSON.stringify({
-        message: e?.message,
-        code: e?.code,
-        reason: e?.reason,
-        dataMessage: e?.data?.message,
-        data: e?.data,
-      }, null, 2);
-      if (DEBUG) setDbg(prev => ({ ...prev, lastError: detail }));
       alert(e?.message || 'Не вдалося заблокувати кошти.');
-      // ===========================================================
     } finally {
       setLockBusy(p => ({ ...p, [s.id]: false }));
     }
@@ -285,6 +267,9 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
+      // 👇 NEW: попередній конект перед підтвердженням
+      await ensureWalletReadyForTx();
+
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
 
@@ -316,8 +301,7 @@ export default function MyOrders() {
 
   const handleDispute = async (s: Scenario) => {
     try {
-      // 🔧 ВАЖЛИВО: передаємо правильний аргумент
-      const d = await initiateDispute(s.id); // або: await initiateDispute({ scenarioId: s.id })
+      const d = await initiateDispute(s.id);
       setLocal(s.id, { status: 'disputed' } as any);
       setOpenDisputes(prev => ({ ...prev, [s.id]: d }));
     } catch (e:any) {
@@ -361,65 +345,12 @@ export default function MyOrders() {
     </div>
   ), [permissionStatus, requestPermission, rt.isListening, rt.method]);
 
-  // ====== ⬇️ ADD-ONLY: Escrow Debug Panel (показується лише при DEBUG) ======
-  useEffect(() => {
-    if (!DEBUG) return;
-    (async () => {
-      try {
-        const eth: any = (window as any).ethereum;
-        const chainId = eth ? await eth.request({ method: 'eth_chainId' }) : 'no-ethereum';
-        let account = '';
-        if (eth) {
-          const accs = await eth.request({ method: 'eth_requestAccounts' });
-          account = (accs && accs[0]) || '';
-        }
-        let usdtBalance = '';
-        let allowance = '';
-        let decimals = 6;
-        if (eth && account && USDT_ADDRESS && ESCROW_ADDRESS) {
-          const provider = new ethers.providers.Web3Provider(eth, 'any');
-          const signer = provider.getSigner();
-          const token = new ethers.Contract(USDT_ADDRESS, erc20Abi, signer);
-          decimals = await token.decimals();
-          const bal = await token.balanceOf(account);
-          const all = await token.allowance(account, ESCROW_ADDRESS);
-          usdtBalance = ethers.utils.formatUnits(bal, decimals);
-          allowance = ethers.utils.formatUnits(all, decimals);
-        }
-        setDbg({ chainId, account, usdtBalance, allowance, decimals });
-      } catch (e:any) {
-        setDbg(prev => ({ ...prev, lastError: e?.message || String(e) }));
-      }
-    })();
-  }, [DEBUG]);
-  // ========================================================================
-
   return (
     <div className="scenario-list">
       <div className="scenario-header">
         <h2>Мої замовлення</h2>
         {headerRight}
       </div>
-
-      {/* ====== ⬇️ ADD-ONLY: видима лише у режимі DEBUG ====== */}
-      {DEBUG && (
-        <div style={{background:'#fff5f8', border:'1px solid #ffd3de', borderRadius:12, padding:12, marginBottom:12}}>
-          <div style={{display:'flex', gap:16, flexWrap:'wrap', fontSize:13}}>
-            <div>🧩 chainId: <b>{dbg.chainId || '—'}</b></div>
-            <div>👛 account: <b>{dbg.account || '—'}</b></div>
-            <div>💰 USDT balance: <b>{dbg.usdtBalance ?? '—'}</b></div>
-            <div>✅ allowance→Escrow: <b>{dbg.allowance ?? '—'}</b></div>
-            <div>⋯ decimals: <b>{dbg.decimals ?? 6}</b></div>
-          </div>
-          {dbg.lastError && (
-            <pre style={{whiteSpace:'pre-wrap', fontSize:12, background:'#fff', border:'1px dashed #f3b3c2', borderRadius:8, padding:8, marginTop:8, maxHeight:200, overflow:'auto'}}>
-{dbg.lastError}
-            </pre>
-          )}
-          <div style={{fontSize:12, color:'#6b7280', marginTop:6}}>Режим діагностики увімкнено параметром <code>?debug=1</code> або <code>localStorage.BMB_DEBUG=1</code>.</div>
-        </div>
-      )}
-      {/* ===================================================== */}
 
       {list.length === 0 && <div className="empty-hint">Немає активних замовлень.</div>}
 
@@ -433,14 +364,6 @@ export default function MyOrders() {
           <div key={s.id} style={{ marginBottom: 18 }}>
             {/* ⬇️ смужка-статус для замовника */}
             <StatusStrip s={s} />
-
-            {/* ====== ⬇️ ADD-ONLY: у DEBUG по кожному сценарію показуємо потрібний amountWei (6) і порівнюємо з allowance ====== */}
-            {DEBUG && (
-              <div style={{fontSize:12, color:'#374151', margin:'6px 0 8px'}}>
-                <b>DEBUG:</b> amount(USDT): <code>{s.donation_amount_usdt ?? '—'}</code> → amountWei(6): <code>{(s.donation_amount_usdt ?? 0).toString()}</code> • escrow_tx_hash: <code>{s.escrow_tx_hash ?? '—'}</code>
-              </div>
-            )}
-            {/* ============================================================================================================== */}
 
             <ScenarioCard
               role="customer"
