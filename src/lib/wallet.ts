@@ -1,12 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 // ───────────────────────────────────────────────────────────────────────────────
-// BMB wallet helper (MetaMask desktop/mobile + optional WalletConnect v2)
+// BMB wallet helper (MetaMask desktop/mobile + WalletConnect v2)
+// Fix: "Please call connect() before request()" — гарантуємо connect() перед request()
 // Reentrancy-safe: усуває -32002 'already pending'
-// Публічний API зберігаємо:
-//   - export type Eip1193Provider
+// Публічний API збережено:
+//   - export type Eip1193Provider / Eip1193Request
 //   - export async function connectWallet(opts?)
 //   - export async function ensureBSC(provider)
+//   - export getChainId / getAccounts / hasInjectedMetaMask
 // ───────────────────────────────────────────────────────────────────────────────
 
 export type Eip1193Request = (args: { method: string; params?: any[] | Record<string, any> }) => Promise<any>;
@@ -16,6 +18,11 @@ export interface Eip1193Provider {
   removeListener?: (event: string, handler: (...args: any[]) => void) => void;
   isMetaMask?: boolean;
   providers?: Eip1193Provider[];
+  // WalletConnect/ін. SDK інколи мають ці поля:
+  isConnected?: () => boolean;
+  connect?: () => Promise<void>;
+  session?: unknown;
+  chainId?: string | number;
 }
 
 type ConnectResult = { provider: Eip1193Provider; accounts: string[]; chainId: string };
@@ -30,7 +37,7 @@ const APP_NAME = (import.meta.env.VITE_APP_NAME as string) || 'Buy My Behavior';
 const APP_URL = (import.meta.env.VITE_PUBLIC_APP_URL as string) || (typeof window !== 'undefined' ? window.location.origin : 'https://buymybehavior.com');
 
 let connectInFlight: Promise<ConnectResult> | null = null;
-const inflightByMethod = new Map<string, Promise<any>>();
+const inflightByKey = new Map<string, Promise<any>>();
 
 function isMobileUA(): boolean {
   if (typeof navigator === 'undefined') return false;
@@ -58,6 +65,47 @@ async function pollAccounts(provider: Eip1193Provider, timeoutMs = 30000, stepMs
   return [];
 }
 
+// ── Глобальний захист: будь-який request ретраїмо після connect() при потребі
+async function requestWithConnect<T = any>(
+  provider: Eip1193Provider,
+  args: { method: string; params?: any[] | Record<string, any> },
+  keyHint?: string
+): Promise<T> {
+  const key = keyHint ?? args.method;
+  if (!inflightByKey.has(key)) {
+    inflightByKey.set(
+      key,
+      (async () => {
+        try {
+          // не викликаємо connect рекурсивно для eth_requestAccounts
+          if (args.method !== 'eth_requestAccounts' && typeof provider.connect === 'function') {
+            const isConn = typeof provider.isConnected === 'function' ? provider.isConnected() : Boolean((provider as any).session);
+            if (!isConn) { try { await provider.connect!(); } catch {} }
+          }
+          return await provider.request(args);
+        } catch (err: any) {
+          const msg = String(err?.message || '');
+          if (/connect\(\)\s*before\s*request\(\)/i.test(msg)) {
+            // прямий кейс WalletConnect: робимо connect та повторюємо запит
+            try { await provider.connect?.(); } catch {}
+            // ще раз спробуємо
+            return await provider.request(args);
+          }
+          if (err?.code === -32002 || /already pending/i.test(msg)) {
+            // дочекаймося розблокування (MetaMask UX)
+            const res = await pollAccounts(provider, 30000, 500);
+            if (args.method === 'eth_requestAccounts' && res.length) return res as any;
+          }
+          throw err;
+        } finally {
+          setTimeout(() => inflightByKey.delete(key), 400);
+        }
+      })()
+    );
+  }
+  return inflightByKey.get(key)!;
+}
+
 export function openMetaMaskDeeplink(): void {
   if (typeof window === 'undefined') return;
   const host = window.location.host || new URL(APP_URL).host;
@@ -76,47 +124,35 @@ async function getWalletConnectProvider(): Promise<Eip1193Provider> {
       url: APP_URL,
       icons: [`${APP_URL}/icons/bmb-192.png`],
     },
-    chains: [Number(CHAIN_ID_HEX)],
+    chains: [parseInt(CHAIN_ID_HEX, 16)],
     optionalChains: [56],
-    rpcMap: { [Number(CHAIN_ID_HEX)]: BSC_RPC, 56: BSC_RPC },
+    rpcMap: { [parseInt(CHAIN_ID_HEX, 16)]: BSC_RPC, 56: BSC_RPC },
   })) as unknown as Eip1193Provider;
+
+  // 🔑 головне: встановити сесію ДО перших request()
+  try { await provider.connect?.(); } catch {}
   return provider;
 }
 
-async function connectInjectedOnce(): Promise<ConnectResult> {
+async function connectInjectedOnce(): Promise{ provider: Eip1193Provider; accounts: string[]; chainId: string } {
   const provider = getInjected();
   if (!provider) throw new Error('NO_INJECTED_PROVIDER');
 
   try {
-    const accs: string[] = await provider.request({ method: 'eth_accounts' });
-    const chainId: string = await provider.request({ method: 'eth_chainId' });
+    const accs: string[] = await requestWithConnect(provider, { method: 'eth_accounts' });
+    const chainId: string = await requestWithConnect(provider, { method: 'eth_chainId' });
     if (accs?.length) return { provider, accounts: accs, chainId };
   } catch {}
 
-  const key = 'eth_requestAccounts';
-  if (!inflightByMethod.has(key)) {
-    inflightByMethod.set(
-      key,
-      provider
-        .request({ method: 'eth_requestAccounts' })
-        .catch(async (err: any) => {
-          if (err && (err.code === -32002 || String(err.message || '').includes('already pending'))) {
-            const accs = await pollAccounts(provider, 30000, 500);
-            if (accs.length) return accs;
-          }
-          throw err;
-        })
-        .finally(() => setTimeout(() => inflightByMethod.delete(key), 400)),
-    );
-  }
-  const accounts: string[] = await inflightByMethod.get(key)!;
-  const chainId: string = await provider.request({ method: 'eth_chainId' });
+  const accounts: string[] = await requestWithConnect(provider, { method: 'eth_requestAccounts' });
+  const chainId: string = await requestWithConnect(provider, { method: 'eth_chainId' });
   return { provider, accounts, chainId };
 }
 
 export async function connectWallet(opts?: { prefer?: 'metamask' | 'walletconnect'; allowDeepLinkMobile?: boolean }): Promise<ConnectResult> {
   if (!connectInFlight) {
     connectInFlight = (async () => {
+      // 1) injected (MetaMask in-app / desktop)
       if (opts?.prefer !== 'walletconnect') {
         const injected = getInjected();
         if (injected) {
@@ -124,19 +160,22 @@ export async function connectWallet(opts?: { prefer?: 'metamask' | 'walletconnec
           catch (err: any) { if (opts?.prefer === 'metamask') throw err; }
         }
       }
+
+      // 2) WalletConnect v2
       if (opts?.prefer === 'walletconnect' || (!getInjected() && WC_PROJECT_ID)) {
-        const wc = await getWalletConnectProvider();
-        const accounts: string[] = await wc.request({ method: 'eth_requestAccounts' });
-        const cid = await wc.request({ method: 'eth_chainId' }).catch(async () => {
-          const id = await wc.request({ method: 'eth_chainId' });
-          return typeof id === 'number' ? '0x' + id.toString(16) : String(id);
-        });
-        return { provider: wc, accounts, chainId: cid };
+        const wc = await getWalletConnectProvider();        // ← тут уже connect()
+        const accounts: string[] = await requestWithConnect(wc, { method: 'eth_requestAccounts' });
+        let cid = await requestWithConnect<any>(wc, { method: 'eth_chainId' });
+        if (typeof cid === 'number') cid = '0x' + cid.toString(16);
+        return { provider: wc, accounts, chainId: String(cid) };
       }
+
+      // 3) Mobile без injected → deeplink у MetaMask
       if (!getInjected() && isMobileUA() && (opts?.allowDeepLinkMobile ?? true)) {
         openMetaMaskDeeplink();
         throw new Error('REDIRECTED_TO_METAMASK_APP');
       }
+
       throw new Error('NO_WALLET_AVAILABLE');
     })().finally(() => setTimeout(() => { connectInFlight = null; }, 450));
   }
@@ -144,15 +183,17 @@ export async function connectWallet(opts?: { prefer?: 'metamask' | 'walletconnec
 }
 
 export async function ensureBSC(provider: Eip1193Provider): Promise<void> {
-  let chainId: string = await provider.request({ method: 'eth_chainId' });
+  // завжди через requestWithConnect — щоб автоконектитись при потребі
+  let chainId: any = await requestWithConnect(provider, { method: 'eth_chainId' });
   if (typeof chainId === 'number') chainId = '0x' + chainId.toString(16);
-  if (chainId?.toLowerCase() === CHAIN_ID_HEX.toLowerCase()) return;
+  if (String(chainId).toLowerCase() === CHAIN_ID_HEX.toLowerCase()) return;
 
   try {
-    await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] });
+    await requestWithConnect(provider, { method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] }, 'wallet_switchEthereumChain');
   } catch (err: any) {
-    if (err && (err.code === 4902 || String(err.message || '').includes('Unrecognized chain'))) {
-      await provider.request({
+    const msg = String(err?.message || '');
+    if (err?.code === 4902 || /Unrecognized chain|not added/i.test(msg)) {
+      await requestWithConnect(provider, {
         method: 'wallet_addEthereumChain',
         params: [{
           chainId: CHAIN_ID_HEX,
@@ -161,7 +202,7 @@ export async function ensureBSC(provider: Eip1193Provider): Promise<void> {
           rpcUrls: [BSC_RPC],
           blockExplorerUrls: ['https://bscscan.com'],
         }],
-      });
+      }, 'wallet_addEthereumChain');
       return;
     }
     throw err;
@@ -169,11 +210,11 @@ export async function ensureBSC(provider: Eip1193Provider): Promise<void> {
 }
 
 export async function getChainId(provider: Eip1193Provider): Promise<string> {
-  const id = await provider.request({ method: 'eth_chainId' });
+  const id = await requestWithConnect<any>(provider, { method: 'eth_chainId' });
   return typeof id === 'number' ? '0x' + id.toString(16) : String(id);
 }
 export async function getAccounts(provider: Eip1193Provider): Promise<string[]> {
-  return provider.request({ method: 'eth_accounts' });
+  return requestWithConnect(provider, { method: 'eth_accounts' });
 }
 export function hasInjectedMetaMask(): boolean {
   const p = getInjected();
