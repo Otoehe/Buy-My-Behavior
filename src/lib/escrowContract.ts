@@ -1,4 +1,3 @@
-// src/lib/escrowContract.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ethers } from 'ethers';
 import { supabase } from './supabase';
@@ -11,7 +10,6 @@ const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38';
 const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
 const CHAIN_ID_DEC = parseInt(CHAIN_ID_HEX, 16);
 
-// ── ABI (ваші сигнатури збережені)
 const ERC20_ABI = [
   'function decimals() view returns (uint8)',
   'function allowance(address owner, address spender) view returns (uint256)',
@@ -42,13 +40,10 @@ type DealTuple = {
   votesCustomer: number;
 };
 
-// ──────────────────────────────────────────────────────────────────────────────
-// ЄДИНЕ ДЖЕРЕЛО ПРАВДИ: беремо EIP-1193 провайдер з connectWallet() і
-// ВСЕ робимо лише через нього (жодних прямих звернень до window.ethereum)
-// ──────────────────────────────────────────────────────────────────────────────
+// ── Беремо провайдер лише з connectWallet() і користуємось ним скрізь
 async function getWeb3Bundle() {
-  const { provider } = await connectWallet();      // EIP-1193
-  await ensureBSC(provider);                       // переключить на BSC за потреби
+  const { provider } = await connectWallet();
+  await ensureBSC(provider);
   const web3   = new ethers.providers.Web3Provider(provider as any, 'any');
   const signer = web3.getSigner();
   const addr   = await signer.getAddress();
@@ -66,10 +61,7 @@ export function generateScenarioIdBytes32(id: string): string {
 async function assertNetworkAndCode(eip1193: Eip1193Provider, web3: ethers.providers.Web3Provider) {
   const net = await web3.getNetwork();
   if (Number(net.chainId) !== CHAIN_ID_DEC) {
-    await eip1193.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: CHAIN_ID_HEX }],
-    });
+    await eip1193.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] });
   }
   const [codeEscrow, codeUsdt] = await Promise.all([
     web3.getCode(ESCROW_ADDRESS),
@@ -90,7 +82,6 @@ async function ensureAllowance(
   const have  = await token.allowance(owner, spender);
   if (have.gte(needAmtWei)) return;
 
-  // Деякі токени люблять спочатку approve(0)
   if (!have.isZero()) {
     const tx0 = await token.approve(spender, 0);
     await tx0.wait(1);
@@ -113,21 +104,13 @@ export async function approveUsdtUnlimited(): Promise<{ txHash: string } | null>
 
 async function getWalletByUserId(userId: string): Promise<string | null> {
   if (!userId) return null;
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('wallet')
-    .eq('user_id', userId)
-    .maybeSingle();
+  const { data, error } = await supabase.from('profiles').select('wallet').eq('user_id', userId).maybeSingle();
   if (error) throw error;
   return (data as any)?.wallet ?? null;
 }
 async function getReferrerWalletOfUser(userId: string): Promise<string | null> {
   if (!userId) return null;
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('referrer_wallet')
-    .eq('user_id', userId)
-    .maybeSingle();
+  const { data, error } = await supabase.from('profiles').select('referrer_wallet').eq('user_id', userId).maybeSingle();
   if (error) throw error;
   return (data as any)?.referrer_wallet ?? null;
 }
@@ -139,9 +122,11 @@ function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, executi
   return unix > 0 ? unix : Math.floor(Date.now() / 1000);
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// ПУБЛІЧНІ МЕТОДИ
-// ─────────────────────────────────────────────────────────────────────────────-
+// 👇 “розбудити” MetaMask Mobile (безкоштовний signMessage)
+async function warmupSignature(signer: ethers.Signer) {
+  try { await signer.signMessage('BMB warmup ' + Date.now()); } catch { /* ігноруємо відмову */ }
+}
+
 export async function quickOneClickSetup(): Promise<{ address: string; approveTxHash?: string }> {
   const { signer, addr } = await getWeb3Bundle();
   const token  = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
@@ -170,7 +155,9 @@ export async function lockFunds(
   const { eip1193, web3, signer, addr: from } = await getWeb3Bundle();
   await assertNetworkAndCode(eip1193, web3);
 
-  // нормалізуємо аргументи
+  // 👉 обов’язковий warm-up для MetaMask Mobile
+  await warmupSignature(signer);
+
   let amountHuman: string;
   let scenarioId: string | undefined;
   let executorId: string | undefined;
@@ -191,7 +178,6 @@ export async function lockFunds(
   if (!amountHuman) throw new Error('Amount is required for lockFunds');
   if (!scenarioId)  throw new Error('ScenarioId is required for the new escrow. Pass { amount, scenarioId }.');
 
-  // стягуємо дані сценарію
   const { data: sc, error: se } = await supabase
     .from('scenarios')
     .select('executor_id, creator_id, date, time, execution_time')
@@ -212,52 +198,32 @@ export async function lockFunds(
     ? (referrerWallet || null)
     : (custId ? await getReferrerWalletOfUser(custId) : null);
 
-  // підготовка суми
-  const usdt     = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
-  const decimals = await usdt.decimals();
+  const usdt      = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
+  const decimals  = await usdt.decimals();
   const amountWei = ethers.utils.parseUnits(String(amountHuman), decimals);
 
-  // approve якщо треба
   await ensureAllowance(signer, from, USDT_ADDRESS, ESCROW_ADDRESS, amountWei);
 
-  // контракт
   const c   = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
 
-  // симуляція (ловить реваерти ще до підпису)
   try {
     await (c as any).callStatic.lockFunds(
-      b32,
-      executorWallet,
-      refWallet ?? ethers.constants.AddressZero,
-      amountWei,
-      execUnix
+      b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix
     );
   } catch (e: any) {
     throw new Error(`lockFunds (simulate) reverted: ${e?.message || e}`);
   }
 
-  // gas estimate (із запасом)
   let gas: ethers.BigNumber;
   try {
     gas = await (c as any).estimateGas.lockFunds(
-      b32,
-      executorWallet,
-      refWallet ?? ethers.constants.AddressZero,
-      amountWei,
-      execUnix
+      b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix
     );
-  } catch {
-    gas = ethers.BigNumber.from(300_000);
-  }
+  } catch { gas = ethers.BigNumber.from(300_000); }
 
-  // надсилаємо транзакцію — MetaMask відкриє підтвердження
   const tx = await (c as any).lockFunds(
-    b32,
-    executorWallet,
-    refWallet ?? ethers.constants.AddressZero,
-    amountWei,
-    execUnix,
+    b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix,
     { gasLimit: gas.mul(12).div(10) }
   );
   await tx.wait(1);
@@ -267,7 +233,6 @@ export async function lockFunds(
 export async function confirmCompletion(args: { scenarioId: string }) {
   const { eip1193, web3, signer } = await getWeb3Bundle();
   await assertNetworkAndCode(eip1193, web3);
-
   const c = escrow(signer);
   const b32 = generateScenarioIdBytes32(args.scenarioId);
   const tx = await (c as any).confirmCompletion(b32);
@@ -279,7 +244,6 @@ export const confirmCompletionOnChain = confirmCompletion;
 export async function openDisputeOnChain(scenarioId: string) {
   const { eip1193, web3, signer } = await getWeb3Bundle();
   await assertNetworkAndCode(eip1193, web3);
-
   const c = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
   const tx = await (c as any).openDispute(b32);
@@ -290,7 +254,6 @@ export async function openDisputeOnChain(scenarioId: string) {
 export async function voteOnChain(scenarioId: string, forExecutor: boolean) {
   const { eip1193, web3, signer } = await getWeb3Bundle();
   await assertNetworkAndCode(eip1193, web3);
-
   const c = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
   const tx = await (c as any).vote(b32, forExecutor);
@@ -301,7 +264,6 @@ export async function voteOnChain(scenarioId: string, forExecutor: boolean) {
 export async function finalizeDisputeOnChain(scenarioId: string) {
   const { eip1193, web3, signer } = await getWeb3Bundle();
   await assertNetworkAndCode(eip1193, web3);
-
   const c = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
   const tx = await (c as any).finalizeDispute(b32);

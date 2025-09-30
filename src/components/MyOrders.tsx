@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { lockFunds, confirmCompletionOnChain, getDealOnChain } from '../lib/escrowContract';
+import {
+  quickOneClickSetup,
+  lockFunds,
+  confirmCompletionOnChain,
+  getDealOnChain,
+} from '../lib/escrowContract';
 import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
 import { useRealtimeNotifications } from '../lib/realtimeNotifications';
 import CelebrationToast from './CelebrationToast';
@@ -12,8 +17,6 @@ import { initiateDispute, getLatestDisputeByScenario } from '../lib/disputeApi';
 import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
-
-import { connectWallet, ensureBSC } from '../lib/wallet';
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
@@ -220,30 +223,27 @@ export default function MyOrders() {
   };
 
   const handleLock = async (s: Scenario) => {
-    alert('Стартуємо резерв…');
-
-    if (lockBusy[s.id]) { alert('Виконується попередня операція, зачекай кілька секунд.'); return; }
+    if (lockBusy[s.id]) return;
     if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) { alert('Сума має бути > 0'); return; }
-    if (!isBothAgreed(s)) { alert('Спершу потрібні дві згоди (замовник і виконавець).'); return; }
-    if (s.escrow_tx_hash) { alert('Кошти вже заблоковані для цього замовлення.'); return; }
+    if (!isBothAgreed(s)) { alert('Спершу потрібні дві згоди.'); return; }
+    if (s.escrow_tx_hash) return;
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // 1) Гаманець + мережа
-      const { provider, accounts, chainId } = await connectWallet();
-      alert(`Гаманець підключено:\n${accounts?.[0] || '(нема)'}\nchainId=${chainId}`);
-      await ensureBSC(provider);
-      alert('BSC підтверджено, викликаємо lockFunds…');
+      // 1) “розігрів” MetaMask Mobile + approve (за потреби)
+      const setup = await quickOneClickSetup();
+      if (setup.approveTxHash) {
+        // опціонально можна показати тост, але без alert — щоб не дратувати
+        // console.log('USDT approved:', setup.approveTxHash);
+      }
 
-      // 2) Власне транзакція
-      const tx: any = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
-      alert('Відправлено транзакцію: ' + (tx?.hash || JSON.stringify(tx) || 'без хеша'));
+      // 2) відправляємо транзакцію блокування коштів
+      const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
 
-      // 3) Локально оновлюємо
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
       setLocal(s.id, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
     } catch (e:any) {
-      alert('Помилка lockFunds: ' + (e?.message || String(e)));
+      alert(e?.message || 'Не вдалося заблокувати кошти.');
     } finally {
       setLockBusy(p => ({ ...p, [s.id]: false }));
     }
@@ -253,9 +253,6 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
-      const { provider } = await connectWallet();
-      await ensureBSC(provider);
-
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
 
@@ -353,6 +350,7 @@ export default function MyOrders() {
             <ScenarioCard
               role="customer"
               s={s}
+
               onChangeDesc={(v) => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async (v) => {
                 if (!fieldsEditable) return;
@@ -363,6 +361,7 @@ export default function MyOrders() {
                   is_agreed_by_executor: false
                 }).eq('id', s.id);
               }}
+
               onChangeAmount={(v) => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
               onCommitAmount={async (v) => {
                 if (!fieldsEditable) return;
@@ -394,6 +393,7 @@ export default function MyOrders() {
               canLock={bothAgreed && !s.escrow_tx_hash}
               canConfirm={canConfirm(s)}
               canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
+
               hasCoords={true}
               isRated={rated}
               onOpenRate={() => openRateFor(s)}
