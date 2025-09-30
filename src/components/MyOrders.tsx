@@ -13,9 +13,6 @@ import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 
-// ⬇️ (ми НЕ імпортуємо openMetaMaskDeeplink/hasInjectedMetaMask)
-import { connectWallet, ensureBSC } from '../lib/wallet';
-
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
@@ -236,8 +233,6 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // ⬇️ гарантуємо під’єднання гаманця і правильну мережу
-      await connectWallet();
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
       setLocal(s.id, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
@@ -252,7 +247,6 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
-      await connectWallet();
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
 

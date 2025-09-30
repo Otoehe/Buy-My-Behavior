@@ -111,7 +111,7 @@ async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
   if (!globalMMSDK) {
     globalMMSDK = new MetaMaskSDK({
       dappMetadata: { name: APP_NAME, url: APP_URL },
-      useDeeplink: true,             // ← ключ до app-switch
+      useDeeplink: true,             // ← app-switch
       shouldShimWeb3: false,
       checkInstallationImmediately: false,
       logging: { developerMode: false },
@@ -121,7 +121,13 @@ async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
 
   const provider = globalMMSDK.getProvider() as Eip1193Provider;
 
-  const accounts: string[] = await requestWithConnect(provider, { method: 'eth_requestAccounts' }, 'sdk_eth_requestAccounts');
+  // ⬇️ ФІКС: спочатку пробуємо eth_accounts (не відкриває модалку),
+  // якщо порожньо — тільки тоді eth_requestAccounts
+  let accounts: string[] = await requestWithConnect(provider, { method: 'eth_accounts' }, 'sdk_eth_accounts');
+  if (!accounts || accounts.length === 0) {
+    accounts = await requestWithConnect(provider, { method: 'eth_requestAccounts' }, 'sdk_eth_requestAccounts');
+  }
+
   let chainId: any = await requestWithConnect(provider, { method: 'eth_chainId' }, 'sdk_eth_chainId');
   if (typeof chainId === 'number') chainId = '0x' + chainId.toString(16);
 

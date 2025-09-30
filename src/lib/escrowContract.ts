@@ -1,11 +1,8 @@
 // src/lib/escrowContract.ts
-// SDK-only сумісність: беремо provider саме з connectWallet()
-
 import { ethers } from 'ethers';
 import { supabase } from './supabase';
 import { connectWallet, ensureBSC, type Eip1193Provider } from './wallet';
 
-// ───────── Env ─────────
 export const USDT_ADDRESS   = import.meta.env.VITE_USDT_ADDRESS as string;
 export const ESCROW_ADDRESS = import.meta.env.VITE_ESCROW_ADDRESS as string;
 
@@ -13,7 +10,6 @@ const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38';
 const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
 const CHAIN_ID_DEC = parseInt(CHAIN_ID_HEX, 16);
 
-// ───────── ABIs ─────────
 const erc20Abi = [
   'function decimals() view returns (uint8)',
   'function allowance(address owner, address spender) view returns (uint256)',
@@ -44,7 +40,7 @@ type DealTuple = {
   votesCustomer: number;
 };
 
-// ───────── Provider / Signer (ethers v5) ─────────
+// Сумісність з desktop injected
 export function getProvider(): ethers.providers.Web3Provider {
   if ((window as any).ethereum) {
     return new ethers.providers.Web3Provider((window as any).ethereum, 'any');
@@ -53,35 +49,30 @@ export function getProvider(): ethers.providers.Web3Provider {
 }
 
 async function getWeb3Provider(): Promise<ethers.providers.Web3Provider> {
-  // injected (desktop або MetaMask Browser)
   if ((window as any).ethereum) {
     return new ethers.providers.Web3Provider((window as any).ethereum, 'any');
   }
-  // mobile external browser → MetaMask SDK
   const { provider } = await connectWallet();
   await ensureBSC(provider);
   return new ethers.providers.Web3Provider(provider as any, 'any');
 }
 
 async function getSigner(): Promise<ethers.Signer> {
-  // injected
   if ((window as any).ethereum) {
     const provider = new ethers.providers.Web3Provider((window as any).ethereum, 'any');
     await provider.send('eth_requestAccounts', []);
     return provider.getSigner();
   }
-  // SDK provider
   const { provider } = await connectWallet();
   await ensureBSC(provider);
   const p = new ethers.providers.Web3Provider(provider as any, 'any');
   return p.getSigner();
 }
 
-function escrow(signerOrProvider: ethers.Signer | ethers.providers.Provider) {
-  return new ethers.Contract(ESCROW_ADDRESS, escrowAbi, signerOrProvider);
+function escrow(c: ethers.Signer | ethers.providers.Provider) {
+  return new ethers.Contract(ESCROW_ADDRESS, escrowAbi, c);
 }
 
-// ───────── helpers ─────────
 export function generateScenarioIdBytes32(id: string): string {
   return ethers.utils.keccak256(ethers.utils.toUtf8Bytes(id));
 }
@@ -127,14 +118,12 @@ async function ensureAllowance(
   await tx.wait();
 }
 
-// опційна «unlimited approve»
 export async function approveUsdtUnlimited(): Promise<{ txHash: string } | null> {
   const signer = await getSigner();
   const owner  = await signer.getAddress();
   const token  = new ethers.Contract(USDT_ADDRESS, erc20Abi, signer);
   const current: ethers.BigNumber = await token.allowance(owner, ESCROW_ADDRESS);
   const MAX = ethers.constants.MaxUint256;
-
   if (current.gte(MAX.div(2))) return null;
   const tx = await token.approve(ESCROW_ADDRESS, MAX);
   const rc = await tx.wait();
@@ -169,8 +158,6 @@ function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, executi
   const unix = Math.floor(dt.getTime() / 1000);
   return unix > 0 ? unix : Math.floor(Date.now() / 1000);
 }
-
-// ───────── Public API ─────────
 
 export async function quickOneClickSetup(): Promise<{ address: string; approveTxHash?: string }> {
   const { provider } = await connectWallet();
@@ -250,7 +237,6 @@ export async function lockFunds(
   const c = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
 
-  // simulate
   try {
     await (c as any).callStatic.lockFunds(
       b32,
