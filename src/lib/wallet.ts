@@ -4,7 +4,6 @@
 // BMB wallet helper — SDK-only
 // Desktop/MetaMask Browser → injected
 // Mobile Chrome/Safari → MetaMask SDK (app-switch) → назад у ваш браузер
-// НІЯКИХ metamask.app.link/dapp/... і НІЯКОГО WalletConnect тут.
 // ───────────────────────────────────────────────────────────────────────────────
 
 export type Eip1193Request = (args: {
@@ -111,8 +110,9 @@ async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
   if (!globalMMSDK) {
     globalMMSDK = new MetaMaskSDK({
       dappMetadata: { name: APP_NAME, url: APP_URL },
-      useDeeplink: true,             // ← app-switch
-      shouldShimWeb3: false,
+      useDeeplink: true,
+      // ⬇⬇⬇ ГОЛОВНЕ: увімкнути shim, щоб ethers бачив window.ethereum
+      shouldShimWeb3: true,
       checkInstallationImmediately: false,
       logging: { developerMode: false },
       enableAnalytics: false,
@@ -121,13 +121,10 @@ async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
 
   const provider = globalMMSDK.getProvider() as Eip1193Provider;
 
-  // ⬇️ ФІКС: спочатку пробуємо eth_accounts (не відкриває модалку),
-  // якщо порожньо — тільки тоді eth_requestAccounts
-  let accounts: string[] = await requestWithConnect(provider, { method: 'eth_accounts' }, 'sdk_eth_accounts');
-  if (!accounts || accounts.length === 0) {
-    accounts = await requestWithConnect(provider, { method: 'eth_requestAccounts' }, 'sdk_eth_requestAccounts');
-  }
+  // Додатково підстрахуємось і вручну проставимо:
+  (globalThis as any).ethereum = provider;
 
+  const accounts: string[] = await requestWithConnect(provider, { method: 'eth_requestAccounts' }, 'sdk_eth_requestAccounts');
   let chainId: any = await requestWithConnect(provider, { method: 'eth_chainId' }, 'sdk_eth_chainId');
   if (typeof chainId === 'number') chainId = '0x' + chainId.toString(16);
 
