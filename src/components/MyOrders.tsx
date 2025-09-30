@@ -13,13 +13,11 @@ import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 
-// ⬇️ NEW
-import { connectWallet, ensureBSC, hasInjectedMetaMask, openMetaMaskDeeplink } from '../lib/wallet';
+// ⬇️ (ми НЕ імпортуємо openMetaMaskDeeplink/hasInjectedMetaMask)
+import { connectWallet, ensureBSC } from '../lib/wallet';
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
-
-const PENDING_LOCK_KEY = 'bmb:pendingLockScenarioId';
 
 async function waitForChainRelease(scenarioId: string, tries = 6, delayMs = 1200): Promise<number> {
   for (let i = 0; i < tries; i++) {
@@ -38,12 +36,17 @@ const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
 const getStage = (s: Scenario) => {
+  // 0: чернетка/очікування погоджень
+  // 1: погоджено обома
+  // 2: кошти заблоковані
+  // 3: виконано/підтверджено
   if (s.status === 'confirmed') return 3;
   if (s.escrow_tx_hash) return 2;
   if (isBothAgreed(s)) return 1;
   return 0;
 };
 
+/* Простий статус-стріп, щоб у замовника був той самий індикатор етапів */
 function StatusStrip({ s }: { s: Scenario }) {
   const stage = getStage(s);
   const dot = (active: boolean) => (
@@ -98,6 +101,7 @@ export default function MyOrders() {
     typeof s.latitude === 'number' && Number.isFinite(s.latitude) &&
     typeof s.longitude === 'number' && Number.isFinite(s.longitude);
 
+  // “Погодити” дозволена поки немає escrow і сustomer ще не погодив
   const canAgree = (s: Scenario) =>
     !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
 
@@ -108,6 +112,7 @@ export default function MyOrders() {
     return !Number.isNaN(dt.getTime()) && new Date() >= dt;
   };
 
+  // Показувати кнопку “Оцінити” у замовника після підтвердження виконавцем
   const canCustomerRate = (s: Scenario, rated: boolean) =>
     !!(s as any).is_completed_by_executor && !rated;
 
@@ -140,7 +145,7 @@ export default function MyOrders() {
       setUserId(uid);
       await load(uid);
 
-      // realtime сценарії
+      // 🔁 realtime — обидві сторони одразу бачать зміни
       const ch = supabase
         .channel('realtime:myorders')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'scenarios' }, async p => {
@@ -204,30 +209,6 @@ export default function MyOrders() {
     list.forEach(s => { if (s?.id) loadOpenDispute(s.id); });
   }, [userId, list, loadOpenDispute, refreshRated]);
 
-  // ⬇️ NEW: автозапуск lockFunds — читаємо і з URL (?lock=) і з localStorage
-  useEffect(() => {
-    (async () => {
-      try {
-        if (!hasInjectedMetaMask()) return;
-
-        const sp = new URLSearchParams(window.location.search);
-        const urlId = sp.get('lock');
-        let pendId = urlId || localStorage.getItem(PENDING_LOCK_KEY) || '';
-
-        if (urlId) {
-          sp.delete('lock');
-          const url = `${window.location.pathname}${sp.toString() ? `?${sp}` : ''}${window.location.hash || ''}`;
-          window.history.replaceState({}, '', url);
-        }
-
-        if (!pendId) return;
-        const s = list.find(x => x.id === pendId);
-        try { localStorage.removeItem(PENDING_LOCK_KEY); } catch {}
-        if (s) setTimeout(() => handleLock(s), 250);
-      } catch {}
-    })();
-  }, [list]);
-
   const handleAgree = async (s: Scenario) => {
     if (agreeBusy[s.id] || !canAgree(s)) return;
     setAgreeBusy(p => ({ ...p, [s.id]: true }));
@@ -253,25 +234,14 @@ export default function MyOrders() {
     if (!isBothAgreed(s)) { alert('Спершу потрібні дві згоди.'); return; }
     if (s.escrow_tx_hash) return;
 
-    // не в MetaMask Browser → відкриваємо dapp у MetaMask на /my-orders?lock=<id>
-    if (!hasInjectedMetaMask()) {
-      try { localStorage.setItem(PENDING_LOCK_KEY, s.id); } catch {}
-      setLockBusy(p => ({ ...p, [s.id]: true }));
-      openMetaMaskDeeplink({ path: '/my-orders', query: { lock: s.id } });
-      return;
-    }
-
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      const { provider: eip } = await connectWallet();
-      await ensureBSC(eip);
-
+      // ⬇️ гарантуємо під’єднання гаманця і правильну мережу
+      await connectWallet();
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
       setLocal(s.id, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
     } catch (e:any) {
-      const msg = String(e?.message || e || '');
-      if (msg.includes('REDIRECTED_TO_METAMASK_APP')) return;
       alert(e?.message || 'Не вдалося заблокувати кошти.');
     } finally {
       setLockBusy(p => ({ ...p, [s.id]: false }));
@@ -280,14 +250,9 @@ export default function MyOrders() {
 
   const handleConfirm = async (s: Scenario) => {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
-
-    if (!hasInjectedMetaMask()) { openMetaMaskDeeplink({ path: '/my-orders' }); return; }
-
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
-      const { provider: eip } = await connectWallet();
-      await ensureBSC(eip);
-
+      await connectWallet();
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
 
@@ -308,8 +273,6 @@ export default function MyOrders() {
         }
       }
     } catch (e:any) {
-      const msg = String(e?.message || e || '');
-      if (msg.includes('REDIRECTED_TO_METAMASK_APP')) return;
       alert(e?.message || 'Помилка підтвердження.');
     } finally {
       setConfirmBusy(p => ({ ...p, [s.id]: false }));
@@ -382,12 +345,14 @@ export default function MyOrders() {
 
         return (
           <div key={s.id} style={{ marginBottom: 18 }}>
+            {/* ⬇️ смужка-статус для замовника */}
             <StatusStrip s={s} />
 
             <ScenarioCard
               role="customer"
               s={s}
 
+              /* ── Редагування опису ─────────────────────────── */
               onChangeDesc={(v) => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async (v) => {
                 if (!fieldsEditable) return;
@@ -399,6 +364,7 @@ export default function MyOrders() {
                 }).eq('id', s.id);
               }}
 
+              /* ── Редагування суми ──────────────────────────── */
               onChangeAmount={(v) => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
               onCommitAmount={async (v) => {
                 if (!fieldsEditable) return;
@@ -413,11 +379,13 @@ export default function MyOrders() {
                 }).eq('id', s.id);
               }}
 
+              /* ── Дії ───────────────────────────────────────── */
               onAgree={() => handleAgree(s)}
               onLock={() => handleLock(s)}
               onConfirm={() => handleConfirm(s)}
               onDispute={() => handleDispute(s)}
 
+              /* “Показати локацію” — завжди активна */
               onOpenLocation={() => {
                 if (hasCoords(s)) {
                   window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank');
@@ -426,17 +394,21 @@ export default function MyOrders() {
                 }
               }}
 
+              /* ── Гатінг кнопок ─────────────────────────────── */
               canAgree={canAgree(s)}
               canLock={bothAgreed && !s.escrow_tx_hash}
               canConfirm={canConfirm(s)}
               canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
 
+              /* “Показати локацію” — завжди true (кнопка видима/активна) */
               hasCoords={true}
 
+              /* Спадщина: якщо ScenarioCard показує власну кнопку оцінки */
               isRated={rated}
               onOpenRate={() => openRateFor(s)}
             />
 
+            {/* ⬇️ Велика кнопка “Оцінити” для замовника (після підтвердження виконавцем) */}
             {showBigRate && (
               <div style={{ display: 'flex', justifyContent: 'center' }}>
                 <button

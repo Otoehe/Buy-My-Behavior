@@ -3,7 +3,7 @@
 // ───────────────────────────────────────────────────────────────────────────────
 // BMB wallet helper — SDK-only
 // Desktop/MetaMask Browser → injected
-// Mobile Chrome/Safari → MetaMask SDK (app-switch) → назад у твій браузер
+// Mobile Chrome/Safari → MetaMask SDK (app-switch) → назад у ваш браузер
 // НІЯКИХ metamask.app.link/dapp/... і НІЯКОГО WalletConnect тут.
 // ───────────────────────────────────────────────────────────────────────────────
 
@@ -26,6 +26,7 @@ export interface Eip1193Provider {
 
 type ConnectResult = { provider: Eip1193Provider; accounts: string[]; chainId: string };
 
+// ── ENV
 const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38';
 const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
 const BSC_RPC  = (import.meta.env.VITE_BSC_RPC as string) || 'https://bsc-dataseed.binance.org';
@@ -36,6 +37,7 @@ let connectInFlight: Promise<ConnectResult> | null = null;
 const inflightByKey = new Map<string, Promise<any>>();
 let globalMMSDK: any | null = null;
 
+// ── helpers
 function isMobileUA(): boolean {
   if (typeof navigator === 'undefined') return false;
   return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
@@ -169,6 +171,7 @@ export async function connectWallet(): Promise<ConnectResult> {
   return connectInFlight;
 }
 
+// ── мережа
 export async function ensureBSC(provider: Eip1193Provider): Promise<void> {
   let chainId: any = await requestWithConnect(provider, { method: 'eth_chainId' });
   if (typeof chainId === 'number') chainId = '0x' + chainId.toString(16);
