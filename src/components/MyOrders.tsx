@@ -71,86 +71,94 @@ function waitUntilVisible(timeoutMs = 15000): Promise<void> {
   });
 }
 
+// збережемо інстанс SDK, щоби не створювати щоразу
+let __sdk: any | null = null;
+
 /**
- * 1) Піднімає MetaMask SDK (тільки мобільний, якщо немає провайдера)
- * 2) Явно робить connect та перемикання мережі на BSC (56)
- * 3) Якщо мережі немає — додає її
+ * Гарантовано піднімає **MetaMask SDK** на мобільному, робить **sdk.connect()**,
+ * потім **eth_requestAccounts**, **switch/add chain**, і повертає стабільний провайдер.
+ * ВАЖЛИВО: викликається у **жесті кліку** перед транзакцією.
  */
 async function ensureMobileWalletReady() {
-  // якщо вже є провайдер або не мобільний — нічого не робимо тут
-  if (!(isMobileUA() && !hasInjectedEthereum())) return;
+  if (!isMobileUA()) return;
 
+  // 1) ініціалізуємо SDK (навіть якщо інжект вже є — буває “битий” стан без сесії)
   const { default: MetaMaskSDK } = await import('@metamask/sdk');
-  const sdk = new MetaMaskSDK({
-    injectProvider: true,
-    preferDesktop: false,                     // критично для мобіли
-    useDeeplink: true,                        // відкриває MetaMask і повертає назад у браузер
-    communicationLayerPreference: 'webrtc',
-    storage: localStorage,                    // стабільніша сесія
-    checkInstallationImmediately: false,
-    dappMetadata: { name: 'Buy My Behavior', url: window.location.origin },
-    modals: { install: false },
-  });
-
-  // зробити window.ethereum
-  sdk.getProvider();
-
-  // інколи SDK ставить провайдера не миттєво — короткий полл
-  for (let i = 0; i < 10; i++) {
-    if (hasInjectedEthereum()) break;
-    await new Promise(r => setTimeout(r, 150));
+  if (!__sdk) {
+    __sdk = new MetaMaskSDK({
+      injectProvider: true,
+      preferDesktop: false,                     // критично для мобіли
+      useDeeplink: true,                        // відкриває MetaMask і повертає назад у браузер
+      communicationLayerPreference: 'webrtc',
+      storage: localStorage,                    // стабільніша сесія
+      checkInstallationImmediately: false,
+      dappMetadata: { name: 'Buy My Behavior', url: window.location.origin },
+      modals: { install: false },
+    });
+    __sdk.getProvider();
   }
 
   const eth = (window as any).ethereum;
 
-  // 1) Явний connect у жесті кліку
+  // 2) явний connect через SDK (це створює сесію “браузер ↔ MetaMask app”)
+  try {
+    await withTimeout(__sdk.connect(), 15000, 'sdk.connect');
+  } catch (_) {
+    // навіть якщо connect впав — провайдер може бути ок; підемо далі
+  }
+
+  // 3) конект акаунту (у жесті кліку)
   try {
     await withTimeout(eth.request({ method: 'eth_requestAccounts' }), 15000, 'connect');
   } catch (e) {
-    // якщо MetaMask показав “Return to app” і нічого не сталося — підштовхнемо
+    // fallback — іноді допомагає на iOS
+    try {
+      await eth.request({
+        method: 'wallet_requestPermissions',
+        params: [{ eth_accounts: {} }],
+      });
+    } catch {}
+    // і ще раз легкий ping
     try { await eth.request({ method: 'eth_accounts' }); } catch {}
   }
 
-  // чекаємо повернення у браузер (iOS особливо)
+  // чекаємо видимість вкладки у браузері
   try { await waitUntilVisible(15000); } catch {}
 
-  // 2) Перемикання на BSC (56)
+  // 4) Перемикання на BSC (56)
   try {
     await withTimeout(
       eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] }),
-      12000,
+      15000,
       'switchChain'
     );
   } catch (err: any) {
-    // 4902 — мережа не додана → додаємо і ще раз перемикаємося
     if (err?.code === 4902) {
-      try {
-        await eth.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: '0x38',
-            chainName: 'Binance Smart Chain',
-            nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
-            rpcUrls: ['https://bsc-dataseed.binance.org/'],
-            blockExplorerUrls: ['https://bscscan.com'],
-          }],
-        });
-        await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] });
-      } catch (e2) {
-        throw e2;
-      }
+      await eth.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: '0x38',
+          chainName: 'Binance Smart Chain',
+          nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+          rpcUrls: ['https://bsc-dataseed.binance.org/'],
+          blockExplorerUrls: ['https://bscscan.com'],
+        }],
+      });
+      await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] });
     } else {
       throw err;
     }
   }
 
-  // перевіримо, що ми точно на 0x38
-  try {
-    const cid = await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'checkChain');
-    if ((cid as string)?.toLowerCase() !== '0x38') {
-      throw new Error('Failed to switch to BSC');
-    }
-  } catch {}
+  // 5) перевіримо ланцюг і “розбудимо” провайдера після повернень
+  try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke:chain'); } catch {}
+  try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke:acc'); } catch {}
+
+  // контрольна перевірка
+  const cid = await eth.request({ method: 'eth_chainId' }).catch(() => null);
+  if ((cid as string)?.toLowerCase() !== '0x38') {
+    throw new Error('Не вдалося перемкнутися на Binance Smart Chain (0x38).');
+  }
 }
 
 /* ─────────── Логіка етапів ─────────── */
@@ -350,17 +358,14 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // === 1) готуємо мобільний гаманець (SDK + connect + chain 56)
+      // === 1) готуємо мобільний гаманець (SDK + sdk.connect + connect + chain 56)
       await ensureMobileWalletReady();
 
       const eth = (window as any).ethereum;
 
-      // watchdog: якщо MetaMask показує "Return to app" і не тригериться нічого —
-      // зробимо легкі "poke", які рушать сесію і відкривають гаманець
+      // watchdog/poke, аби “розбудити” провайдера після повернення
       try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1'); } catch {}
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2'); } catch {}
-
-      // переконаємось, що повернулися у браузер перед транзакціями (особливо iOS)
       try { await waitUntilVisible(15000); } catch {}
 
       // === 2) “розігрів” (approve за потреби)
@@ -369,7 +374,7 @@ export default function MyOrders() {
         // optional toast
       }
 
-      // ще один "poke" перед головною транзакцією — корисно на деяких прошивках Android
+      // ще один poke — деякі прошивки Android цього вимагають
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke3'); } catch {}
 
       // === 3) Транзакція блокування
