@@ -2,8 +2,8 @@
 
 // ───────────────────────────────────────────────────────────────────────────────
 // BMB wallet helper (MetaMask desktop/mobile + опційно WalletConnect v2)
-// Виправляє: "Please call connect() before request()"
-// Захист від -32002 "already pending"
+// Виправляє: "Please call connect() before request()" і -32002 "already pending"
+// Має захист від мультикліків та дає deeplink у MetaMask Browser
 // ───────────────────────────────────────────────────────────────────────────────
 
 export type Eip1193Request = (args: {
@@ -17,8 +17,7 @@ export interface Eip1193Provider {
   removeListener?: (event: string, handler: (...args: any[]) => void) => void;
   isMetaMask?: boolean;
   providers?: Eip1193Provider[];
-
-  // інколи присутні у WalletConnect/інших SDK:
+  // опційні методи/поля деяких провайдерів:
   isConnected?: () => boolean;
   connect?: () => Promise<void>;
   session?: unknown;
@@ -28,14 +27,14 @@ export interface Eip1193Provider {
 type ConnectResult = { provider: Eip1193Provider; accounts: string[]; chainId: string };
 
 const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38'; // 56
-const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x')
-  ? RAW_CHAIN_ID
-  : ('0x' + Number(RAW_CHAIN_ID).toString(16));
+const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
 
 const WC_PROJECT_ID = (import.meta.env.VITE_WALLETCONNECT_PROJECT_ID ||
   import.meta.env.VITE_WC_PROJECT_ID) as string | undefined;
 
-const ENABLE_WC = (import.meta.env.VITE_ENABLE_WALLETCONNECT === 'true'); // ← вимкнено за замовчуванням
+// головний прапорець — залишай false, щоб не було "All Wallets"
+const ENABLE_WC = (import.meta.env.VITE_ENABLE_WALLETCONNECT === 'true');
+
 const BSC_RPC = (import.meta.env.VITE_BSC_RPC as string) || 'https://bsc-dataseed.binance.org';
 const APP_NAME = (import.meta.env.VITE_APP_NAME as string) || 'Buy My Behavior';
 const APP_URL =
@@ -60,9 +59,7 @@ function getInjected(): Eip1193Provider | null {
   return eth as Eip1193Provider;
 }
 
-function delay(ms: number) {
-  return new Promise((res) => setTimeout(res, ms));
-}
+function delay(ms: number) { return new Promise((res) => setTimeout(res, ms)); }
 
 async function pollAccounts(
   provider: Eip1193Provider,
@@ -80,21 +77,30 @@ async function pollAccounts(
   return [];
 }
 
-// ── anti-spam deeplink
-export function openMetaMaskDeeplink(force = false): void {
+// ── anti-spam deeplink + можливість одразу відкрити потрібний шлях/квері
+export function openMetaMaskDeeplink(
+  opts?: { path?: string; query?: Record<string, string>; force?: boolean }
+): void {
   if (typeof window === 'undefined') return;
+
   try {
     const key = 'bmb:mm-dapp-last-open';
     const now = Date.now();
     const last = Number(localStorage.getItem(key) || '0');
-    if (!force && last && now - last < 7000) return; // не частіше ніж раз на 7с
+    if (!(opts?.force) && last && now - last < 7000) return; // не частіше ніж раз на 7 сек
     localStorage.setItem(key, String(now));
   } catch {}
-  const host = window.location.host || new URL(APP_URL).host;
-  window.location.href = `https://metamask.app.link/dapp/${host}`;
+
+  const base = new URL(APP_URL); // напр., https://www.buymybehavior.com
+  const path = opts?.path ?? '/my-orders';
+  const qp = new URLSearchParams(opts?.query ?? {});
+  const hostAndPath = `${base.host}${path}${qp.toString() ? `?${qp}` : ''}`;
+
+  // формат: https://metamask.app.link/dapp/<host>/<path>?query
+  window.location.href = `https://metamask.app.link/dapp/${hostAndPath}`;
 }
 
-// ── будь-який request() з автоконектом і ретраями
+// — універсальний request() з автоконектом і ретраями
 async function requestWithConnect<T = any>(
   provider: Eip1193Provider,
   args: { method: string; params?: any[] | Record<string, any> },

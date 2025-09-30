@@ -1,5 +1,4 @@
-// ✅ Додаткові можливості: робота на мобільному MetaMask, one-click approve
-// НЕ ламає існуючі імпорти в інших місцях.
+// ✅ Працює з мобільним MetaMask, one-click approve; не ламає існуючі імпорти
 
 import { ethers } from 'ethers';
 import { supabase } from './supabase';
@@ -88,10 +87,7 @@ async function assertNetworkAndCode() {
   if (Number(net.chainId) !== CHAIN_ID_DEC) {
     try {
       const eip = (provider.provider as any);
-      await eip.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: CHAIN_ID_HEX }],
-      });
+      await eip.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] });
     } catch {
       throw new Error(`Неправильна мережа. Очікується chainId=${CHAIN_ID_DEC}`);
     }
@@ -168,12 +164,11 @@ function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, executi
 // ───────── Public API ─────────
 
 export async function quickOneClickSetup(): Promise<{ address: string; approveTxHash?: string }> {
-  const { provider: eip } = await connectWallet();    // ⬅️ тільки .provider
+  const { provider: eip } = await connectWallet();
   await ensureBSC(eip);
   const provider = new ethers.providers.Web3Provider(eip as any, 'any');
   const signer = provider.getSigner();
   const address = await signer.getAddress();
-
   const res = await approveUsdtUnlimited();
   return { address, approveTxHash: res?.txHash };
 }

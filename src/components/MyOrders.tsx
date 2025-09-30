@@ -140,7 +140,7 @@ export default function MyOrders() {
       setUserId(uid);
       await load(uid);
 
-      // 🔁 realtime
+      // realtime сценарії
       const ch = supabase
         .channel('realtime:myorders')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'scenarios' }, async p => {
@@ -204,15 +204,25 @@ export default function MyOrders() {
     list.forEach(s => { if (s?.id) loadOpenDispute(s.id); });
   }, [userId, list, loadOpenDispute, refreshRated]);
 
-  // ⬇️ NEW: автозапуск lockFunds, якщо прийшли з deeplink у MetaMask Browser
+  // ⬇️ NEW: автозапуск lockFunds — читаємо і з URL (?lock=) і з localStorage
   useEffect(() => {
     (async () => {
       try {
         if (!hasInjectedMetaMask()) return;
-        const pendId = localStorage.getItem(PENDING_LOCK_KEY);
+
+        const sp = new URLSearchParams(window.location.search);
+        const urlId = sp.get('lock');
+        let pendId = urlId || localStorage.getItem(PENDING_LOCK_KEY) || '';
+
+        if (urlId) {
+          sp.delete('lock');
+          const url = `${window.location.pathname}${sp.toString() ? `?${sp}` : ''}${window.location.hash || ''}`;
+          window.history.replaceState({}, '', url);
+        }
+
         if (!pendId) return;
         const s = list.find(x => x.id === pendId);
-        localStorage.removeItem(PENDING_LOCK_KEY);
+        try { localStorage.removeItem(PENDING_LOCK_KEY); } catch {}
         if (s) setTimeout(() => handleLock(s), 250);
       } catch {}
     })();
@@ -243,11 +253,11 @@ export default function MyOrders() {
     if (!isBothAgreed(s)) { alert('Спершу потрібні дві згоди.'); return; }
     if (s.escrow_tx_hash) return;
 
-    // ⬇️ NEW: якщо не в MetaMask Browser — відкриваємо dapp у MetaMask і відкладаємо дію
+    // не в MetaMask Browser → відкриваємо dapp у MetaMask на /my-orders?lock=<id>
     if (!hasInjectedMetaMask()) {
       try { localStorage.setItem(PENDING_LOCK_KEY, s.id); } catch {}
       setLockBusy(p => ({ ...p, [s.id]: true }));
-      openMetaMaskDeeplink();
+      openMetaMaskDeeplink({ path: '/my-orders', query: { lock: s.id } });
       return;
     }
 
@@ -271,7 +281,7 @@ export default function MyOrders() {
   const handleConfirm = async (s: Scenario) => {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
 
-    if (!hasInjectedMetaMask()) { openMetaMaskDeeplink(); return; }
+    if (!hasInjectedMetaMask()) { openMetaMaskDeeplink({ path: '/my-orders' }); return; }
 
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
