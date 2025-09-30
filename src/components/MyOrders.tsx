@@ -33,28 +33,78 @@ async function waitForChainRelease(scenarioId: string, tries = 6, delayMs = 1200
   return 0;
 }
 
-/* ─────────── Mobile detection ─────────── */
+/* ─────────── Mobile helpers ─────────── */
 const isMobileUA = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
 const hasInjectedEthereum = () => {
   const eth = (window as any).ethereum;
   return !!eth && (!!eth.isMetaMask || !!eth.request);
 };
 
+// маленький utility з таймаутом — якщо провайдер завис у “Return to app”
+async function withTimeout<T>(p: Promise<T>, ms = 8000, label = 'op'): Promise<T> {
+  return await Promise.race([
+    p,
+    new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Timeout:${label}`)), ms)) as any,
+  ]);
+}
+
 /**
- * Ледача ініціалізація MetaMask SDK (тільки якщо мобільний і немає провайдера).
- * SDK відкриє застосунок MetaMask для підтвердження й поверне користувача назад у браузер.
+ * 1) Піднімає MetaMask SDK (тільки мобільний, якщо немає провайдера)
+ * 2) Явно робить connect та перемикання мережі на BSC (56)
+ * 3) Якщо мережі немає — додає її
  */
-async function ensureMetaMaskSDKInjected() {
-  if (!isMobileUA()) return;
-  if (hasInjectedEthereum()) return;
+async function ensureMobileWalletReady() {
+  if (!(isMobileUA() && !hasInjectedEthereum())) return;
 
   const { default: MetaMaskSDK } = await import('@metamask/sdk');
   const sdk = new MetaMaskSDK({
     injectProvider: true,
     preferDesktop: false,
+    communicationLayerPreference: 'webrtc',
+    storage: localStorage, // стабільніша сесія
     dappMetadata: { name: 'Buy My Behavior', url: window.location.origin },
   });
   sdk.getProvider(); // робить window.ethereum доступним
+
+  const eth = (window as any).ethereum;
+
+  // 1) Явний connect у жесті кліку
+  try {
+    await withTimeout(eth.request({ method: 'eth_requestAccounts' }), 15000, 'connect');
+  } catch (e) {
+    // якщо MetaMask показав “Return to app” і нічого не сталося — підштовхнемо
+    try { await eth.request({ method: 'eth_accounts' }); } catch {}
+  }
+
+  // 2) Перемикання на BSC (56)
+  try {
+    await withTimeout(
+      eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] }),
+      12000,
+      'switchChain'
+    );
+  } catch (err: any) {
+    // 4902 — мережа не додана → додаємо і ще раз перемикаємося
+    if (err?.code === 4902) {
+      try {
+        await eth.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: '0x38',
+            chainName: 'Binance Smart Chain',
+            nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+            rpcUrls: ['https://bsc-dataseed.binance.org/'],
+            blockExplorerUrls: ['https://bscscan.com'],
+          }],
+        });
+        await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] });
+      } catch (e2) {
+        throw e2;
+      }
+    } else {
+      throw err;
+    }
+  }
 }
 
 /* ─────────── Логіка етапів ─────────── */
@@ -114,8 +164,6 @@ export default function MyOrders() {
 
   const { permissionStatus, requestPermission } = useNotifications();
   const rt = useRealtimeNotifications(userId);
-
-  const sdkInitOnce = useRef(false);
 
   const setLocal = (id: string, patch: Partial<Scenario>) =>
     setList(prev => prev.map(x => x.id === id ? { ...x, ...patch } : x));
@@ -256,20 +304,24 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // === КЛЮЧ: якщо мобільний і немає провайдера — піднімаємо MetaMask SDK
-      if (isMobileUA() && !hasInjectedEthereum()) {
-        await ensureMetaMaskSDKInjected();
-        // ВАЖЛИВО (жест кліку): попросити акаунти тут же, у кліковому контексті
-        await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
-      }
+      // === 1) готуємо мобільний гаманець (SDK + connect + chain 56)
+      await ensureMobileWalletReady();
 
-      // 1) “розігрів” (конект + ensure BSC + approve USDT за потреби)
+      const eth = (window as any).ethereum;
+      // watchdog: якщо MetaMask показує "Return to app" і не тригериться нічого —
+      // зробимо легкий "poke", який рушить сесію і відкриє гаманець
+      try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1'); } catch {}
+
+      // === 2) “розігрів” (approve за потреби)
       const setup = await quickOneClickSetup();
       if (setup?.approveTxHash) {
-        // тихий тост за бажанням
+        // optional toast
       }
 
-      // 2) Транзакція блокування
+      // ще один "poke" перед головною транзакцією — корисно на деяких прошивках Android
+      try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2'); } catch {}
+
+      // === 3) Транзакція блокування
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
 
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
@@ -285,11 +337,9 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // підстраховка для мобільного
-      if (isMobileUA() && !hasInjectedEthereum()) {
-        await ensureMetaMaskSDKInjected();
-        await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
-      }
+      await ensureMobileWalletReady();
+      const eth = (window as any).ethereum;
+      try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke3'); } catch {}
 
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
@@ -388,6 +438,7 @@ export default function MyOrders() {
             <ScenarioCard
               role="customer"
               s={s}
+
               onChangeDesc={(v) => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async (v) => {
                 if (!fieldsEditable) return;
@@ -398,6 +449,7 @@ export default function MyOrders() {
                   is_agreed_by_executor: false
                 }).eq('id', s.id);
               }}
+
               onChangeAmount={(v) => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
               onCommitAmount={async (v) => {
                 if (!fieldsEditable) return;
@@ -411,10 +463,12 @@ export default function MyOrders() {
                   is_agreed_by_executor: false
                 }).eq('id', s.id);
               }}
+
               onAgree={() => handleAgree(s)}
               onLock={() => handleLock(s)}
               onConfirm={() => handleConfirm(s)}
               onDispute={() => handleDispute(s)}
+
               onOpenLocation={() => {
                 if (hasCoords(s)) {
                   window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank');
@@ -422,10 +476,12 @@ export default function MyOrders() {
                   alert('Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію.');
                 }
               }}
+
               canAgree={canAgree(s)}
               canLock={bothAgreed && !s.escrow_tx_hash}
               canConfirm={canConfirm(s)}
               canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
+
               hasCoords={true}
               isRated={rated}
               onOpenRate={() => openRateFor(s)}
