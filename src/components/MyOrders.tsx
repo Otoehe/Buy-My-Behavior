@@ -33,6 +33,29 @@ async function waitForChainRelease(scenarioId: string, tries = 6, delayMs = 1200
   return 0;
 }
 
+/* ─────────── Mobile MetaMask helpers (додано) ─────────── */
+const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+
+const isMetaMaskInApp = () => {
+  const eth = (window as any).ethereum;
+  const injected = !!eth && !!eth.isMetaMask;
+  const mmUA = /MetaMask/i.test(navigator.userAgent || '');
+  return injected || mmUA;
+};
+
+const buildMetaMaskDeeplink = (pathWithQuery: string) => {
+  const origin = `${window.location.protocol}//${window.location.host}`;
+  const full = `${origin}${pathWithQuery.startsWith('/') ? '' : '/'}${pathWithQuery}`;
+  const hostAndPath = full.replace(/^https?:\/\//, '');
+  return `https://metamask.app.link/dapp/${hostAndPath}`;
+};
+
+const stripQueryParams = (keys: string[]) => {
+  const url = new URL(window.location.href);
+  keys.forEach(k => url.searchParams.delete(k));
+  history.replaceState(null, '', url.toString());
+};
+
 /* ─────────── Логіка етапів ─────────── */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
@@ -91,6 +114,7 @@ export default function MyOrders() {
   const { permissionStatus, requestPermission } = useNotifications();
   const rt = useRealtimeNotifications(userId);
 
+  // локальний патч
   const setLocal = (id: string, patch: Partial<Scenario>) =>
     setList(prev => prev.map(x => x.id === id ? { ...x, ...patch } : x));
 
@@ -131,6 +155,48 @@ export default function MyOrders() {
     const ids = items.map(s => s.id);
     const { data } = await supabase.from('ratings').select('order_id').eq('rater_id', uid).in('order_id', ids);
     setRatedOrders(new Set((data || []).map((r: any) => r.order_id)));
+  }, []);
+
+  // ── AUTO-LOCK при відкритті в MetaMask Mobile через deeplink (додано)
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const shouldAuto = url.searchParams.get('mm_lock') === '1';
+    const sid = url.searchParams.get('sid');
+    const amt = url.searchParams.get('amt');
+    if (!shouldAuto || !sid || !amt) return;
+    if (!isMetaMaskInApp()) return; // тільки всередині MetaMask in-app
+
+    (async () => {
+      try {
+        // 1) розігрів: конект, мережа, approve за потреби
+        await quickOneClickSetup();
+
+        // 2) lockFunds (зберігаємо той самий підпис, що і в handleLock)
+        const tx = await lockFunds({ amount: Number(amt), scenarioId: sid });
+
+        // 3) оновлюємо БД/локальний стан
+        await supabase.from('scenarios').update({
+          escrow_tx_hash: tx?.hash || 'locked',
+          status: 'agreed'
+        }).eq('id', sid);
+
+        setLocal(sid, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
+
+        try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
+        await pushNotificationManager.showNotification({
+          title: 'Ескроу заблоковано',
+          body: 'Кошти успішно заблоковані у смартконтракті.',
+          tag: `lock-${sid}`,
+          requireSound: true
+        });
+      } catch (e: any) {
+        // М’яко: без alert, щоб не ламати UX в in-app
+        console.error('MetaMask auto-lock failed:', e?.message || e);
+      } finally {
+        // приберемо службові параметри, щоби авто-запуск не повторювався
+        stripQueryParams(['mm_lock', 'sid', 'amt']);
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -228,12 +294,21 @@ export default function MyOrders() {
     if (!isBothAgreed(s)) { alert('Спершу потрібні дві згоди.'); return; }
     if (s.escrow_tx_hash) return;
 
+    // ── Мобільний міст: якщо мобільний і не в MetaMask in-app — перекидаємо через deeplink (додано)
+    if (isMobile() && !isMetaMaskInApp()) {
+      const path = `/my-orders?mm_lock=1&sid=${encodeURIComponent(s.id)}&amt=${encodeURIComponent(String(s.donation_amount_usdt))}`;
+      const deeplink = buildMetaMaskDeeplink(path);
+      // без alert — просто м’яко перенаправляємо
+      window.location.href = deeplink;
+      return;
+    }
+
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // 1) “розігрів” MetaMask Mobile + approve (за потреби)
+      // 1) “розігрів” MetaMask Mobile/десктоп + approve (за потреби)
       const setup = await quickOneClickSetup();
-      if (setup.approveTxHash) {
-        // опціонально можна показати тост, але без alert — щоб не дратувати
+      if (setup?.approveTxHash) {
+        // опційний лог/тост
         // console.log('USDT approved:', setup.approveTxHash);
       }
 
