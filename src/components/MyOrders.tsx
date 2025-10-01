@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   quickOneClickSetup,
@@ -18,7 +18,7 @@ import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 
-// ⬇⬇⬇ WalletConnect мобільний провайдер (автовідкриває MetaMask без вибору Chrome/MM)
+// ✅ WalletConnect-провайдер, який **автоматично** відкриває MetaMask на мобільному
 import { ensureMobileWalletProvider } from '../lib/walletMobileWC';
 
 const SOUND = new Audio('/notification.wav');
@@ -38,12 +38,8 @@ async function waitForChainRelease(scenarioId: string, tries = 6, delayMs = 1200
 
 /* ─────────── Mobile helpers ─────────── */
 const isMobileUA = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
-const hasInjectedEthereum = () => {
-  const eth = (window as any).ethereum;
-  return !!eth && (!!eth.isMetaMask || !!eth.request);
-};
 
-// маленький utility з таймаутом — якщо провайдер завис у “Return to app”
+// невеликий таймаут-обгортка (на випадок “Return to app”)
 async function withTimeout<T>(p: Promise<T>, ms = 8000, label = 'op'): Promise<T> {
   return await Promise.race([
     p,
@@ -51,7 +47,7 @@ async function withTimeout<T>(p: Promise<T>, ms = 8000, label = 'op'): Promise<T
   ]);
 }
 
-/** чекаємо, поки вкладка знову стане видимою після повернення з MetaMask app */
+/** чекаємо, поки вкладка стане видимою після повернення з MetaMask app */
 function waitUntilVisible(timeoutMs = 15000): Promise<void> {
   if (document.visibilityState === 'visible') return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
@@ -74,13 +70,10 @@ function waitUntilVisible(timeoutMs = 15000): Promise<void> {
   });
 }
 
-// збережемо інстанс SDK, щоби не створювати щоразу
+// кеш SDK
 let __sdk: any | null = null;
 
-/**
- * MetaMask SDK fallback (мобільний): sdk.connect → eth_requestAccounts →
- * switch/add chain → poke. Викликається лише як запасний варіант.
- */
+/** MetaMask SDK fallback (викликається ЛИШЕ якщо WalletConnect не піднявся) */
 async function ensureMobileWalletReady() {
   if (!isMobileUA()) return;
 
@@ -101,16 +94,12 @@ async function ensureMobileWalletReady() {
 
   const eth = (window as any).ethereum;
 
-  try {
-    await withTimeout(__sdk.connect(), 15000, 'sdk.connect');
-  } catch (_) {}
+  try { await withTimeout(__sdk.connect(), 15000, 'sdk.connect'); } catch {}
 
   try {
     await withTimeout(eth.request({ method: 'eth_requestAccounts' }), 15000, 'connect');
   } catch {
-    try {
-      await eth.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
-    } catch {}
+    try { await eth.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] }); } catch {}
     try { await eth.request({ method: 'eth_accounts' }); } catch {}
   }
 
@@ -149,20 +138,17 @@ async function ensureMobileWalletReady() {
   }
 }
 
-/** Спершу WalletConnect (авто-MetaMask без вибору), далі fallback на MetaMask SDK */
+/** Спершу WalletConnect (авто-MetaMask), далі — fallback на MetaMask SDK */
 async function ensureProviderMobileFirst() {
-  if (isMobileUA()) {
-    try {
-      await ensureMobileWalletProvider(); // metamask://wc?uri=... → MM відкриється автоматично
-      return;
-    } catch {
-      await ensureMobileWalletReady();    // fallback
-      return;
-    }
+  if (!isMobileUA()) return;
+  try {
+    await ensureMobileWalletProvider(); // metamask://wc?uri=... → MM відкриється автоматично
+  } catch {
+    await ensureMobileWalletReady();
   }
 }
 
-/* ─────────── Логіка етапів ─────────── */
+/* ─────────── Етапи замовлення ─────────── */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
@@ -359,26 +345,23 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // === 1) МОБІЛЬНИЙ: WalletConnect (автовідкриє MetaMask), далі fallback на MetaMask SDK
+      // 1) Мобільний провайдер (WalletConnect → MetaMask), і fallback на MM SDK
       await ensureProviderMobileFirst();
 
       const eth = (window as any).ethereum;
-
-      // watchdog/poke після повернення з app
       try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1'); } catch {}
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2'); } catch {}
       try { await waitUntilVisible(15000); } catch {}
 
-      // === 2) approve (за потреби)
+      // 2) approve за потреби
       const setup = await quickOneClickSetup();
       if (setup?.approveTxHash) {
-        // optional toast
+        // можна показати тост, якщо хочеш
       }
 
-      // ще один poke — інколи допомагає
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke3'); } catch {}
 
-      // === 3) Транзакція блокування
+      // 3) основна транзакція
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
 
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
@@ -498,7 +481,6 @@ export default function MyOrders() {
             <ScenarioCard
               role="customer"
               s={s}
-
               onChangeDesc={(v) => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async (v) => {
                 if (!fieldsEditable) return;
@@ -509,7 +491,6 @@ export default function MyOrders() {
                   is_agreed_by_executor: false
                 }).eq('id', s.id);
               }}
-
               onChangeAmount={(v) => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
               onCommitAmount={async (v) => {
                 if (!fieldsEditable) return;
@@ -523,12 +504,10 @@ export default function MyOrders() {
                   is_agreed_by_executor: false
                 }).eq('id', s.id);
               }}
-
               onAgree={() => handleAgree(s)}
               onLock={() => handleLock(s)}
               onConfirm={() => handleConfirm(s)}
               onDispute={() => handleDispute(s)}
-
               onOpenLocation={() => {
                 if (hasCoords(s)) {
                   window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank');
@@ -536,12 +515,10 @@ export default function MyOrders() {
                   alert('Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію.');
                 }
               }}
-
               canAgree={canAgree(s)}
               canLock={bothAgreed && !s.escrow_tx_hash}
               canConfirm={canConfirm(s)}
               canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
-
               hasCoords={true}
               isRated={rated}
               onOpenRate={() => openRateFor(s)}
