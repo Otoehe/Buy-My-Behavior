@@ -1,9 +1,11 @@
-// src/lib/walletMobileWC.ts
-// WalletConnect v2 з глибоким посиланням у MetaMask Mobile + авто-перемикання на BSC
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// WalletConnect v2 з глибоким посиланням у MetaMask Mobile + авто-перемикання на BSC.
+// Головний принцип: якщо ми вже всередині MetaMask (інʼєктований провайдер) — НІЧОГО не чіпаємо.
+// Якщо ми у зовнішньому мобільному браузері — піднімаємо WalletConnect і відкриваємо MetaMask через deeplink.
 
 import EthereumProvider from '@walletconnect/ethereum-provider';
 
-const WC_PID = import.meta.env.VITE_WC_PROJECT_ID as string;   // обов'язково
+const WC_PID = import.meta.env.VITE_WC_PROJECT_ID as string; // обов'язково в env
 const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38'; // 0x38 = 56
 const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
 const CHAIN_ID_DEC = parseInt(CHAIN_ID_HEX, 16);
@@ -11,14 +13,10 @@ const CHAIN_ID_DEC = parseInt(CHAIN_ID_HEX, 16);
 let _provider: any | null = null;
 let _ready = false;
 
-function isMobileUA(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
-}
-
-function ensureWindowEthereum(p: any) {
-  if (typeof window !== 'undefined') (window as any).ethereum = p;
-}
+const UA = () => (typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '');
+const isMobileUA = () => /Android|iPhone|iPad|iPod/i.test(UA());
+const hasInjectedMM = () => typeof window !== 'undefined' && !!(window as any).ethereum?.isMetaMask;
+const isMetaMaskInApp = () => /MetaMaskMobile/i.test(UA()) || (hasInjectedMM() && /MetaMask/i.test(UA()));
 
 async function ensureSwitchToBSC(eth: any) {
   try {
@@ -40,35 +38,29 @@ async function ensureSwitchToBSC(eth: any) {
           }],
         });
         await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] });
-      } else {
-        throw e;
-      }
+      } else { throw e; }
     }
-  } catch { /* ігноруємо */ }
+  } catch {
+    // не валимо потік — користувач зможе перемкнути вручну
+  }
 }
 
-/** Основна функція: ініціалізує WalletConnect і відкриває MetaMask Mobile через deeplink */
+/** Повертає робочий провайдер для мобільного середовища. */
 export async function ensureMobileWalletProvider(): Promise<any> {
-  if (_ready && _provider) return _provider;
+  if (!isMobileUA()) return (window as any)?.ethereum;
 
-  // Якщо вже є інʼєктований провайдер (MM або WC) — використовуємо його
-  const injected = (typeof window !== 'undefined' ? (window as any).ethereum : null);
-  if (injected) {
-    try { await injected.request?.({ method: 'eth_accounts' }); } catch {}
-    ensureWindowEthereum(injected);
+  // ✅ Вже всередині MetaMask in-app → користуємось інʼєкованим
+  const injected = (window as any).ethereum;
+  if (isMetaMaskInApp() && injected?.isMetaMask) {
     await ensureSwitchToBSC(injected);
-    injected.on?.('accountsChanged', () => {});
-    injected.on?.('chainChanged', () => {});
-    injected.on?.('disconnect', () => { _ready = false; _provider = null; });
-    _provider = injected;
-    _ready = true;
     return injected;
   }
 
+  // ✅ Зовнішній мобільний браузер → WalletConnect + deeplink у MetaMask
+  if (_ready && _provider) return _provider;
   if (!WC_PID) throw new Error('VITE_WC_PROJECT_ID is missing');
 
-  // 1) WC-провайдер без QR-модалки, з підказкою "metamask"
-  const p: any = await EthereumProvider.init({
+  const p = await EthereumProvider.init({
     projectId: WC_PID,
     showQrModal: false,
     chains: [CHAIN_ID_DEC],
@@ -79,38 +71,33 @@ export async function ensureMobileWalletProvider(): Promise<any> {
       'eth_sendTransaction','eth_sign','personal_sign',
       'eth_signTypedData','eth_signTypedData_v4'
     ],
-    events: ['accountsChanged','chainChanged','disconnect'],
+    events: ['accountsChanged','chainChanged','disconnect','session_event','display_uri'],
+    rpcMap: { [CHAIN_ID_DEC]: 'https://bsc-dataseed.binance.org/' },
     metadata: {
       name: 'Buy My Behavior',
       description: 'BMB dapp',
       url: typeof window !== 'undefined' ? window.location.origin : 'https://www.buymybehavior.com',
       icons: ['https://www.buymybehavior.com/favicon.ico'],
     },
-    qrModalOptions: {
-      desktopLinks: ['metamask'],
-      mobileLinks: ['metamask'],
-      preferDesktop: false,
-    },
+    qrModalOptions: { desktopLinks: ['metamask'], mobileLinks: ['metamask'], preferDesktop: false },
+  }) as any;
+
+  // Отримуємо URI — миттєво відкриваємо MetaMask
+  p.on?.('display_uri', (uri: string) => {
+    const link = `metamask://wc?uri=${encodeURIComponent(uri)}`;
+    try { window.location.href = link; } catch {}
+    setTimeout(() => { try { window.open(link, '_blank'); } catch {} }, 300);
   });
 
-  // 2) Конект (на мобілі це тригерить metamask://wc?uri=...)
-  try { await p.connect(); } catch { /* deeplink уже міг відправитись */ }
+  try { await p.connect(); } catch { /* deeplink уже міг поїхати — ок */ }
 
-  // 3) Робимо глобальним провайдером
-  ensureWindowEthereum(p);
+  // Для твоєї існуючої логіки, якій потрібен window.ethereum: підставляємо, лише якщо його НЕМА
+  if (!(window as any).ethereum) (window as any).ethereum = p;
 
-  // 4) Попросимо акаунти (розбуджує MM)
   try { await p.request({ method: 'eth_requestAccounts' }); } catch {}
-
-  // 5) Перемикаємо мережу
   await ensureSwitchToBSC(p);
 
-  // 6) Слухачі
-  p.on?.('accountsChanged', () => {});
-  p.on?.('chainChanged', () => {});
   p.on?.('disconnect', () => { _ready = false; _provider = null; });
-
-  _provider = p;
-  _ready = true;
+  _provider = p; _ready = true;
   return p;
 }
