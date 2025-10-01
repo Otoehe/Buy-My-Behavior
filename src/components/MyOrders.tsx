@@ -18,9 +18,6 @@ import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 
-// 👇 головний мобільний провайдер (WC → deeplink у MetaMask, або інʼєктований, якщо всередині MM)
-import { ensureMobileWalletProvider } from '../lib/walletMobileWC';
-
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
@@ -34,63 +31,6 @@ async function waitForChainRelease(scenarioId: string, tries = 6, delayMs = 1200
     await new Promise(r => setTimeout(r, delayMs));
   }
   return 0;
-}
-
-/* ─────────────── Mobile helpers ─────────────── */
-const isMobileUA = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
-
-async function withTimeout<T>(p: Promise<T>, ms = 8000, label = 'op'): Promise<T> {
-  return await Promise.race([
-    p,
-    new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Timeout:${label}`)), ms)) as any,
-  ]);
-}
-
-function waitUntilVisible(timeoutMs = 15000): Promise<void> {
-  if (document.visibilityState === 'visible') return Promise.resolve();
-  return new Promise<void>((resolve, reject) => {
-    const onVis = () => {
-      if (document.visibilityState === 'visible') {
-        document.removeEventListener('visibilitychange', onVis);
-        resolve();
-      }
-    };
-    const t = setTimeout(() => {
-      document.removeEventListener('visibilitychange', onVis);
-      reject(new Error('Timeout:visible'));
-    }, timeoutMs);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        clearTimeout(t);
-        onVis();
-      }
-    });
-  });
-}
-
-async function waitForEthereumProvider(ms = 8000): Promise<void> {
-  const started = Date.now();
-  while (!(window as any).ethereum) {
-    await new Promise(r => setTimeout(r, 120));
-    if (Date.now() - started > ms) throw new Error('Timeout:ethereum');
-  }
-}
-
-// WalletConnect first (зовнішній мобільний браузер) → fallback у MetaMask in-app
-async function ensureProviderMobileFirst() {
-  if (!isMobileUA()) return;
-
-  try {
-    await ensureMobileWalletProvider();   // це або інʼєктований MM (in-app), або WC + deeplink
-    await waitForEthereumProvider(6000);
-  } catch (err) {
-    // Якщо не вдалося ініціалізувати — пробуємо відкрити dapp усередині MetaMask
-    try {
-      const href = window.location.href.replace(/^https?:\/\//i, '');
-      window.location.href = `https://metamask.app.link/dapp/${href}`;
-    } catch {}
-    throw err;
-  }
 }
 
 /* ─────────────── Стадії/перевірки ─────────────── */
@@ -326,20 +266,11 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // 1) Мобільний провайдер → відкриє MetaMask (якщо ми в зовнішньому браузері)
-      await ensureProviderMobileFirst();
-
-      // легкі «пінги», щоб MetaMask не засинала після повернення в браузер
-      const eth = (window as any).ethereum;
-      try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1'); } catch {}
-      try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2'); } catch {}
-      try { await waitUntilVisible(15000); } catch {}
-
-      // 2) approve, якщо потрібно
+      // ⬇️ ВСЕ під’єднання і відкриття MetaMask робиться всередині escrowContract через MetaMask SDK
+      // 1) approve (за потреби)
       await quickOneClickSetup();
-      try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke3'); } catch {}
 
-      // 3) lockFunds (викликає контракт)
+      // 2) lockFunds — викличе підтвердження в MetaMask
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
 
       await supabase
@@ -349,7 +280,14 @@ export default function MyOrders() {
 
       setLocal(s.id, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
     } catch (e: any) {
-      alert(e?.message || 'Не вдалося заблокувати кошти.');
+      // популярні кейси для зрозумілого UX
+      if (e?.code === 4001) {
+        alert('Відхилено у гаманці.');
+      } else if (String(e?.message || '').includes('simulate') || String(e?.message || '').includes('callStatic')) {
+        alert('Транзакція відхилена симуляцією. Перевір суму, час виконання і наявність гаманця виконавця.');
+      } else {
+        alert(e?.message || 'Не вдалося заблокувати кошти.');
+      }
     } finally {
       setLockBusy(p => ({ ...p, [s.id]: false }));
     }
@@ -359,13 +297,6 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
-      await ensureProviderMobileFirst();
-
-      const eth = (window as any).ethereum;
-      try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke4'); } catch {}
-      try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke5'); } catch {}
-      try { await waitUntilVisible(15000); } catch {}
-
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
 
