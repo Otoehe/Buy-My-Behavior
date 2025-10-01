@@ -40,8 +40,6 @@ export type DealTuple = {
   votesCustomer: number;
 };
 
-// ---- shared ethers helpers
-
 async function getWeb3Bundle() {
   const { provider } = await connectWallet();
   await ensureBSC(provider);
@@ -123,9 +121,8 @@ function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, executi
   return unix > 0 ? unix : Math.floor(Date.now() / 1000);
 }
 
-// маленький безкоштовний signMessage – розбудити MetaMask Mobile сесію
 async function warmupSignature(signer: ethers.Signer) {
-  try { await signer.signMessage('BMB warmup ' + Date.now()); } catch { /* ignore */ }
+  try { await signer.signMessage('BMB warmup ' + Date.now()); } catch {}
 }
 
 export async function quickOneClickSetup(): Promise<{ address: string; approveTxHash?: string }> {
