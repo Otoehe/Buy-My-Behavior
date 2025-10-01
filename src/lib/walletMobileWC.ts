@@ -1,5 +1,5 @@
 // src/lib/walletMobileWC.ts
-// WalletConnect v2 з глибоким посиланням у MetaMask Mobile + авто-перемикання на BSC
+// WalletConnect v2 з глибоким посиланням у MetaMask Mobile + авто‑перемикання на BSC
 
 import EthereumProvider from '@walletconnect/ethereum-provider';
 
@@ -11,6 +11,7 @@ const CHAIN_ID_DEC = parseInt(CHAIN_ID_HEX, 16);
 let _provider: any | null = null;
 let _ready = false;
 
+/** Додатковий helper: перевіряє, чи ми на мобільному. */
 function isMobileUA(): boolean {
   if (typeof navigator === 'undefined') return false;
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
@@ -57,12 +58,36 @@ async function ensureSwitchToBSC(eth: any) {
  * відкриває MetaMask Mobile через deeplink, без QR та вибору браузера.
  */
 export async function ensureMobileWalletProvider(): Promise<any> {
+  // Якщо провайдер уже кешований та готовий — повертаємо його
   if (_ready && _provider) return _provider;
 
+  // ✅ Новий крок: використати вже інʼєктований провайдер, якщо він є (MetaMask чи WalletConnect).
+  if (typeof window !== 'undefined') {
+    const injected: any = (window as any).ethereum;
+    if (injected) {
+      // Зберігаємо та використовуємо існуючий провайдер
+      _provider = injected;
+      _ready = true;
+
+      // Переключаємо мережу на BSC, якщо треба
+      try {
+        await ensureSwitchToBSC(injected);
+      } catch {/* ігноруємо */}
+
+      // Ставимо слухачі для можливих змін акаунтів або мережі
+      injected.on?.('accountsChanged', () => {});
+      injected.on?.('chainChanged', () => {});
+      injected.on?.('disconnect', () => { _ready = false; _provider = null; });
+
+      return injected;
+    }
+  }
+
+  // Без projectId WalletConnect не спрацює
   if (!WC_PID) throw new Error('VITE_WC_PROJECT_ID is missing');
 
   // 1) Створюємо WC-провайдер
-  const p = await EthereumProvider.init({
+  const p: any = await EthereumProvider.init({
     projectId: WC_PID,
     showQrModal: false,                  // без модалки
     chains: [CHAIN_ID_DEC],
@@ -92,7 +117,7 @@ export async function ensureMobileWalletProvider(): Promise<any> {
   // 2) З’єднання (на мобільному це викличе metamask://wc?uri=...)
   try {
     await p.connect();
-  } catch (e) {
+  } catch {
     // інколи connect кидає, але deeplink вже відправлено — продовжуємо
   }
 
