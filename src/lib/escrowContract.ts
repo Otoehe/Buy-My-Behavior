@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ethers } from 'ethers';
 import { supabase } from './supabase';
-import { connectWallet, ensureBSC, type Eip1193Provider } from './wallet';
+import { connectWallet, ensureBSC, type Eip1193Provider } from './providerBridge';
 
 export const USDT_ADDRESS   = import.meta.env.VITE_USDT_ADDRESS as string;
 export const ESCROW_ADDRESS = import.meta.env.VITE_ESCROW_ADDRESS as string;
@@ -26,7 +26,7 @@ const ESCROW_ABI = [
   'function getDeal(bytes32 scenarioId) view returns (tuple(address customer,address executor,address referrer,uint128 amount,uint40 execAt,uint40 deadline,uint8 flags,uint8 status,uint40 disputeOpenedAt,uint16 votesExecutor,uint16 votesCustomer))',
 ];
 
-export type DealTuple = {
+type DealTuple = {
   customer: string;
   executor: string;
   referrer: string;
@@ -41,7 +41,7 @@ export type DealTuple = {
 };
 
 async function getWeb3Bundle() {
-  const { provider } = await connectWallet();
+  const { provider } = await connectWallet();           // ✅ один-єдиний провайдер
   await ensureBSC(provider);
   const web3   = new ethers.providers.Web3Provider(provider as any, 'any');
   const signer = web3.getSigner();
@@ -60,7 +60,7 @@ export function generateScenarioIdBytes32(id: string): string {
 async function assertNetworkAndCode(eip1193: Eip1193Provider, web3: ethers.providers.Web3Provider) {
   const net = await web3.getNetwork();
   if (Number(net.chainId) !== CHAIN_ID_DEC) {
-    await eip1193.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] });
+    await eip1193.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] as any });
   }
   const [codeEscrow, codeUsdt] = await Promise.all([
     web3.getCode(ESCROW_ADDRESS),
@@ -121,8 +121,9 @@ function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, executi
   return unix > 0 ? unix : Math.floor(Date.now() / 1000);
 }
 
+// “розбудити” підпис (дешевий спосіб синхронізувати стан провайдера після повернення з MM)
 async function warmupSignature(signer: ethers.Signer) {
-  try { await signer.signMessage('BMB warmup ' + Date.now()); } catch {}
+  try { await signer.signMessage('BMB warmup ' + Date.now()); } catch { /* ігноруємо */ }
 }
 
 export async function quickOneClickSetup(): Promise<{ address: string; approveTxHash?: string }> {
@@ -153,7 +154,7 @@ export async function lockFunds(
   const { eip1193, web3, signer, addr: from } = await getWeb3Bundle();
   await assertNetworkAndCode(eip1193, web3);
 
-  await warmupSignature(signer);
+  await warmupSignature(signer); // 👈 допомагає мобільним після повернення з MM
 
   let amountHuman: string;
   let scenarioId: string | undefined;
