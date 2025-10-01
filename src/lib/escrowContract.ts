@@ -43,16 +43,26 @@ type DealTuple = {
 function humanize(err: any): string {
   const m = String(err?.shortMessage || err?.reason || err?.error?.message || err?.message || '');
   if (/user rejected|User rejected|denied|cancel/i.test(m)) return 'Користувач скасував дію у гаманці';
-  if (/insufficient funds|intrinsic gas too low|base fee/i.test(m)) return 'Недостатньо нативної монети для комісії';
-  if (/chain|network|different chain|wrong network/i.test(m)) return 'Неправильна мережа — перемкнись на BSC';
+  if (/insufficient funds|intrinsic gas too low|base fee/i.test(m)) return 'Недостатньо BNB для комісії';
+  if (/chain|network|different chain|wrong network/i.test(m)) return 'Неправильна мережа — перемкніться на BSC';
   return m || 'Невідома помилка';
 }
 
 async function getWeb3Bundle() {
-  const { provider } = await connectWallet();                 // ✅ один-єдиний провайдер
+  // 0) віддаємо пріоритет уже інʼєктованому провайдеру
+  let provider: Eip1193Provider | undefined = (globalThis as any).ethereum as any;
+  if (!provider) ({ provider } = await connectWallet());
+
   await ensureBSC(provider);
-  // “розбудити” провайдера без підпису (на мобільних safe-пінг)
-  try { await provider.request?.({ method: 'eth_accounts' }); } catch {}
+
+  // 1) гарантуємо акаунти до створення signer
+  try {
+    const accs: string[] = await provider.request({ method: 'eth_accounts' });
+    if (!accs || accs.length === 0) {
+      await provider.request({ method: 'eth_requestAccounts' });
+    }
+  } catch {}
+
   const web3   = new ethers.providers.Web3Provider(provider as any, 'any');
   const signer = web3.getSigner();
   const addr   = await signer.getAddress();
@@ -99,7 +109,6 @@ async function ensureAllowance(
   const have  = await token.allowance(owner, spender);
   if (have.gte(needAmtWei)) return;
 
-  // деякі токени вимагають approve(0) → approve(N)
   if (!have.isZero()) {
     const tx0 = await token.approve(spender, 0);
     await tx0.wait(1);
@@ -107,14 +116,13 @@ async function ensureAllowance(
   const tx = await token.approve(spender, needAmtWei);
   await tx.wait(1);
 
-  // повторна перевірка (WalletConnect інколи оновлює allowance із затримкою)
+  // повторна перевірка allowance
   const after = await token.allowance(owner, spender);
   if (ethers.BigNumber.from(after).lt(needAmtWei)) {
-    // невеличкий ретрай
     await new Promise(r => setTimeout(r, 1200));
     const again = await token.allowance(owner, spender);
     if (ethers.BigNumber.from(again).lt(needAmtWei)) {
-      throw new Error('Allowance не оновився після approve — повтори ще раз');
+      throw new Error('Allowance не оновився після approve — спробуйте ще раз');
     }
   }
 }
@@ -151,12 +159,6 @@ function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, executi
   return unix > 0 ? unix : Math.floor(Date.now() / 1000);
 }
 
-// мʼяке “пробудження” без підпису (signMessage деякі MM/WC блокують)
-async function warmupProvider(eip1193: Eip1193Provider) {
-  try { await eip1193.request({ method: 'eth_chainId' }); } catch {}
-  try { await eip1193.request({ method: 'eth_accounts' }); } catch {}
-}
-
 export async function quickOneClickSetup(): Promise<{ address: string; approveTxHash?: string }> {
   const { signer, addr } = await getWeb3Bundle();
   const token  = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
@@ -183,7 +185,9 @@ export async function lockFunds(
       }
 ) {
   const { eip1193, web3, signer, addr: from } = await getWeb3Bundle();
-  await warmupProvider(eip1193);
+  // мʼякий пінг провайдера
+  try { await eip1193.request({ method: 'eth_chainId' }); } catch {}
+  try { await eip1193.request({ method: 'eth_accounts' }); } catch {}
   await assertNetworkAndCode(eip1193, web3);
 
   let amountHuman: string;
@@ -236,51 +240,37 @@ export async function lockFunds(
   const c   = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
 
-  // 2) simulate (із явним from та value:0 — деякі мобільні провайдери це вимагають)
+  // 2) simulate (із явним from і value:0)
   try {
     await (c as any).callStatic.lockFunds(
-      b32,
-      executorWallet,
-      refWallet ?? ethers.constants.AddressZero,
-      amountWei,
-      execUnix,
+      b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix,
       { from, value: 0 }
     );
   } catch (e: any) {
     throw new Error(`lockFunds (simulate) reverted: ${humanize(e)}`);
   }
 
-  // 3) газ/ціна газу — дружній fallback
+  // 3) estimate gas
   let gas: ethers.BigNumber;
   try {
     gas = await (c as any).estimateGas.lockFunds(
-      b32,
-      executorWallet,
-      refWallet ?? ethers.constants.AddressZero,
-      amountWei,
-      execUnix,
+      b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix,
       { from, value: 0 }
     );
-  } catch {
-    gas = ethers.BigNumber.from(300_000);
-  }
+  } catch { gas = ethers.BigNumber.from(300_000); }
 
   let gasPrice: ethers.BigNumber | undefined;
   try { gasPrice = await web3.getGasPrice(); } catch {}
 
-  // 4) відправка транзакції (обовʼязково value:0 для payable)
+  // 4) send tx (обовʼязково value:0)
   try {
     const tx = await (c as any).lockFunds(
-      b32,
-      executorWallet,
-      refWallet ?? ethers.constants.AddressZero,
-      amountWei,
-      execUnix,
+      b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix,
       {
         from,
         gasLimit: gas.mul(12).div(10),
         ...(gasPrice ? { gasPrice } : {}),
-        value: 0
+        value: 0,
       }
     );
     await tx.wait(1);

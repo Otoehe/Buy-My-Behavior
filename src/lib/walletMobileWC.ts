@@ -1,9 +1,9 @@
 // src/lib/walletMobileWC.ts
-// WalletConnect v2 з глибоким посиланням у MetaMask Mobile + авто‑перемикання на BSC
+// WalletConnect v2 з глибоким посиланням у MetaMask Mobile + авто-перемикання на BSC
 
 import EthereumProvider from '@walletconnect/ethereum-provider';
 
-const WC_PID = import.meta.env.VITE_WC_PROJECT_ID as string;   // обов'язково заповнено у Vercel
+const WC_PID = import.meta.env.VITE_WC_PROJECT_ID as string;   // обов'язково
 const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38'; // 0x38 = 56
 const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
 const CHAIN_ID_DEC = parseInt(CHAIN_ID_HEX, 16);
@@ -11,17 +11,13 @@ const CHAIN_ID_DEC = parseInt(CHAIN_ID_HEX, 16);
 let _provider: any | null = null;
 let _ready = false;
 
-/** Додатковий helper: перевіряє, чи ми на мобільному. */
 function isMobileUA(): boolean {
   if (typeof navigator === 'undefined') return false;
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
 }
 
 function ensureWindowEthereum(p: any) {
-  // робимо WC провайдер основним, щоб увесь app користувався ним
-  if (typeof window !== 'undefined') {
-    (window as any).ethereum = p;
-  }
+  if (typeof window !== 'undefined') (window as any).ethereum = p;
 }
 
 async function ensureSwitchToBSC(eth: any) {
@@ -48,48 +44,33 @@ async function ensureSwitchToBSC(eth: any) {
         throw e;
       }
     }
-  } catch {
-    // ігноруємо — користувач ще може сам перемкнути
-  }
+  } catch { /* ігноруємо */ }
 }
 
-/**
- * Головна функція: ініціалізує WalletConnect і
- * відкриває MetaMask Mobile через deeplink, без QR та вибору браузера.
- */
+/** Основна функція: ініціалізує WalletConnect і відкриває MetaMask Mobile через deeplink */
 export async function ensureMobileWalletProvider(): Promise<any> {
-  // Якщо провайдер уже кешований та готовий — повертаємо його
   if (_ready && _provider) return _provider;
 
-  // ✅ Новий крок: використати вже інʼєктований провайдер, якщо він є (MetaMask чи WalletConnect).
-  if (typeof window !== 'undefined') {
-    const injected: any = (window as any).ethereum;
-    if (injected) {
-      // Зберігаємо та використовуємо існуючий провайдер
-      _provider = injected;
-      _ready = true;
-
-      // Переключаємо мережу на BSC, якщо треба
-      try {
-        await ensureSwitchToBSC(injected);
-      } catch {/* ігноруємо */}
-
-      // Ставимо слухачі для можливих змін акаунтів або мережі
-      injected.on?.('accountsChanged', () => {});
-      injected.on?.('chainChanged', () => {});
-      injected.on?.('disconnect', () => { _ready = false; _provider = null; });
-
-      return injected;
-    }
+  // Якщо вже є інʼєктований провайдер (MM або WC) — використовуємо його
+  const injected = (typeof window !== 'undefined' ? (window as any).ethereum : null);
+  if (injected) {
+    try { await injected.request?.({ method: 'eth_accounts' }); } catch {}
+    ensureWindowEthereum(injected);
+    await ensureSwitchToBSC(injected);
+    injected.on?.('accountsChanged', () => {});
+    injected.on?.('chainChanged', () => {});
+    injected.on?.('disconnect', () => { _ready = false; _provider = null; });
+    _provider = injected;
+    _ready = true;
+    return injected;
   }
 
-  // Без projectId WalletConnect не спрацює
   if (!WC_PID) throw new Error('VITE_WC_PROJECT_ID is missing');
 
-  // 1) Створюємо WC-провайдер
+  // 1) WC-провайдер без QR-модалки, з підказкою "metamask"
   const p: any = await EthereumProvider.init({
     projectId: WC_PID,
-    showQrModal: false,                  // без модалки
+    showQrModal: false,
     chains: [CHAIN_ID_DEC],
     optionalChains: [CHAIN_ID_DEC],
     methods: [
@@ -99,14 +80,12 @@ export async function ensureMobileWalletProvider(): Promise<any> {
       'eth_signTypedData','eth_signTypedData_v4'
     ],
     events: ['accountsChanged','chainChanged','disconnect'],
-    // ключове — підказуємо WC відкривати саме MetaMask
     metadata: {
       name: 'Buy My Behavior',
       description: 'BMB dapp',
       url: typeof window !== 'undefined' ? window.location.origin : 'https://www.buymybehavior.com',
       icons: ['https://www.buymybehavior.com/favicon.ico'],
     },
-    // Працює як для мобільних (deeplink), так і для десктопних клієнтів
     qrModalOptions: {
       desktopLinks: ['metamask'],
       mobileLinks: ['metamask'],
@@ -114,27 +93,19 @@ export async function ensureMobileWalletProvider(): Promise<any> {
     },
   });
 
-  // 2) З’єднання (на мобільному це викличе metamask://wc?uri=...)
-  try {
-    await p.connect();
-  } catch {
-    // інколи connect кидає, але deeplink вже відправлено — продовжуємо
-  }
+  // 2) Конект (на мобілі це тригерить metamask://wc?uri=...)
+  try { await p.connect(); } catch { /* deeplink уже міг відправитись */ }
 
-  // 3) Робимо його глобальним провайдером
+  // 3) Робимо глобальним провайдером
   ensureWindowEthereum(p);
 
-  // 4) Підстрахуємось та попросимо акаунт (це “розбудить” MM, якщо він не відкрився)
-  try {
-    await p.request({ method: 'eth_requestAccounts' });
-  } catch {
-    // на деяких прошивках MetaMask відповість після повернення у dapp — ок
-  }
+  // 4) Попросимо акаунти (розбуджує MM)
+  try { await p.request({ method: 'eth_requestAccounts' }); } catch {}
 
-  // 5) Перемикаємо на BSC
+  // 5) Перемикаємо мережу
   await ensureSwitchToBSC(p);
 
-  // 6) слухачі — якщо користувач перемкне акаунт/мережу
+  // 6) Слухачі
   p.on?.('accountsChanged', () => {});
   p.on?.('chainChanged', () => {});
   p.on?.('disconnect', () => { _ready = false; _provider = null; });
