@@ -18,7 +18,7 @@ import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 
-// ⬇⬇⬇ ДОДАНО: WalletConnect мобільний провайдер (авто-відкриває MetaMask без вибору Chrome/MM)
+// ⬇⬇⬇ WalletConnect мобільний провайдер (автовідкриває MetaMask без вибору Chrome/MM)
 import { ensureMobileWalletProvider } from '../lib/walletMobileWC';
 
 const SOUND = new Audio('/notification.wav');
@@ -78,22 +78,20 @@ function waitUntilVisible(timeoutMs = 15000): Promise<void> {
 let __sdk: any | null = null;
 
 /**
- * Гарантовано піднімає **MetaMask SDK** на мобільному, робить **sdk.connect()**,
- * потім **eth_requestAccounts**, **switch/add chain**, і повертає стабільний провайдер.
- * ВАЖЛИВО: викликається у **жесті кліку** перед транзакцією.
+ * MetaMask SDK fallback (мобільний): sdk.connect → eth_requestAccounts →
+ * switch/add chain → poke. Викликається лише як запасний варіант.
  */
 async function ensureMobileWalletReady() {
   if (!isMobileUA()) return;
 
-  // 1) ініціалізуємо SDK (навіть якщо інжект вже є — буває “битий” стан без сесії)
   const { default: MetaMaskSDK } = await import('@metamask/sdk');
   if (!__sdk) {
     __sdk = new MetaMaskSDK({
       injectProvider: true,
-      preferDesktop: false,                     // критично для мобіли
-      useDeeplink: true,                        // відкриває MetaMask і повертає назад у браузер
+      preferDesktop: false,
+      useDeeplink: true,
       communicationLayerPreference: 'webrtc',
-      storage: localStorage,                    // стабільніша сесія
+      storage: localStorage,
       checkInstallationImmediately: false,
       dappMetadata: { name: 'Buy My Behavior', url: window.location.origin },
       modals: { install: false },
@@ -103,32 +101,21 @@ async function ensureMobileWalletReady() {
 
   const eth = (window as any).ethereum;
 
-  // 2) явний connect через SDK (це створює сесію “браузер ↔ MetaMask app”)
   try {
     await withTimeout(__sdk.connect(), 15000, 'sdk.connect');
-  } catch (_) {
-    // навіть якщо connect впав — провайдер може бути ок; підемо далі
-  }
+  } catch (_) {}
 
-  // 3) конект акаунту (у жесті кліку)
   try {
     await withTimeout(eth.request({ method: 'eth_requestAccounts' }), 15000, 'connect');
-  } catch (e) {
-    // fallback — іноді допомагає на iOS
+  } catch {
     try {
-      await eth.request({
-        method: 'wallet_requestPermissions',
-        params: [{ eth_accounts: {} }],
-      });
+      await eth.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
     } catch {}
-    // і ще раз легкий ping
     try { await eth.request({ method: 'eth_accounts' }); } catch {}
   }
 
-  // чекаємо видимість вкладки у браузері
   try { await waitUntilVisible(15000); } catch {}
 
-  // 4) Перемикання на BSC (56)
   try {
     await withTimeout(
       eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] }),
@@ -153,30 +140,24 @@ async function ensureMobileWalletReady() {
     }
   }
 
-  // 5) перевіримо ланцюг і “розбудимо” провайдера після повернень
   try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke:chain'); } catch {}
   try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke:acc'); } catch {}
 
-  // контрольна перевірка
   const cid = await eth.request({ method: 'eth_chainId' }).catch(() => null);
   if ((cid as string)?.toLowerCase() !== '0x38') {
     throw new Error('Не вдалося перемкнутися на Binance Smart Chain (0x38).');
   }
 }
 
-/**
- * ⬇⬇⬇ Гібридна функція: спершу пробує WalletConnect (авто-відкриє MetaMask без вибору),
- * якщо щось пішло не так — падаємо у старий MetaMask SDK як fallback.
- */
+/** Спершу WalletConnect (авто-MetaMask без вибору), далі fallback на MetaMask SDK */
 async function ensureProviderMobileFirst() {
   if (isMobileUA()) {
     try {
-      await ensureMobileWalletProvider(); // WalletConnect v2 → metamask://wc?uri=... (без Chrome)
+      await ensureMobileWalletProvider(); // metamask://wc?uri=... → MM відкриється автоматично
       return;
-    } catch (e) {
-      // fallback на MetaMask SDK
-      try { await ensureMobileWalletReady(); return; } catch (_) {}
-      throw e;
+    } catch {
+      await ensureMobileWalletReady();    // fallback
+      return;
     }
   }
 }
@@ -378,24 +359,23 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // === 1) МОБІЛЬНИЙ: спробуємо WalletConnect (авто-відкриє MetaMask без вибору Chrome/MM),
-      // якщо не вдалось — fallback на MetaMask SDK
+      // === 1) МОБІЛЬНИЙ: WalletConnect (автовідкриє MetaMask), далі fallback на MetaMask SDK
       await ensureProviderMobileFirst();
 
       const eth = (window as any).ethereum;
 
-      // watchdog/poke, аби “розбудити” провайдера після повернення
+      // watchdog/poke після повернення з app
       try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1'); } catch {}
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2'); } catch {}
       try { await waitUntilVisible(15000); } catch {}
 
-      // === 2) “розігрів” (approve за потреби)
+      // === 2) approve (за потреби)
       const setup = await quickOneClickSetup();
       if (setup?.approveTxHash) {
         // optional toast
       }
 
-      // ще один poke — деякі прошивки Android цього вимагають
+      // ще один poke — інколи допомагає
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke3'); } catch {}
 
       // === 3) Транзакція блокування
@@ -414,7 +394,6 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // така сама стратегія: WalletConnect → fallback на MM SDK
       await ensureProviderMobileFirst();
       const eth = (window as any).ethereum;
 
