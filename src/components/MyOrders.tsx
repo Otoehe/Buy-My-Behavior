@@ -69,8 +69,20 @@ function waitUntilVisible(timeoutMs = 15000): Promise<void> {
 // WalletConnect first
 async function ensureProviderMobileFirst() {
   if (isMobileUA()) {
-    // піднімаємо WalletConnect, який відкриє MetaMask автоматично
-    await ensureMobileWalletProvider();
+    // Try to initialize WalletConnect. On mobile this should trigger MetaMask.
+    try {
+      await ensureMobileWalletProvider();
+    } catch (err) {
+      // If the provider cannot be initialized, fall back to opening the dapp inside MetaMask mobile.
+      try {
+        const currentUrl = encodeURIComponent(window.location.href);
+        // Open Metamask mobile deep link. This should prompt the user to open the dapp in MetaMask.
+        window.location.href = `https://metamask.app.link/dapp/${currentUrl}`;
+      } catch (innerErr) {
+        console.error('Failed to open MetaMask deep link', innerErr);
+        throw err;
+      }
+    }
   }
 }
 
