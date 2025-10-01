@@ -17,22 +17,10 @@ import { initiateDispute, getLatestDisputeByScenario } from '../lib/disputeApi';
 import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
-import { ensureMobileWalletProvider } from '../lib/walletMobileWC';
+import { ensureBSC, connectWallet } from '../lib/providerBridge';
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
-
-async function waitForChainRelease(scenarioId: string, tries = 6, delayMs = 1200): Promise<number> {
-  for (let i = 0; i < tries; i++) {
-    try {
-      const deal = await getDealOnChain(scenarioId);
-      const st = Number((deal as any).status);
-      if (st === 3 || st === 4) return st;
-    } catch {}
-    await new Promise(r => setTimeout(r, delayMs));
-  }
-  return 0;
-}
 
 /* ─ Mobile helpers ─ */
 const isMobileUA = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
@@ -66,24 +54,11 @@ function waitUntilVisible(timeoutMs = 15000): Promise<void> {
   });
 }
 
-// WalletConnect first
-async function ensureProviderMobileFirst() {
-  if (isMobileUA()) {
-    // Try to initialize WalletConnect. On mobile this should trigger MetaMask.
-    try {
-      await ensureMobileWalletProvider();
-    } catch (err) {
-      // If the provider cannot be initialized, fall back to opening the dapp inside MetaMask mobile.
-      try {
-        const currentUrl = encodeURIComponent(window.location.href);
-        // Open Metamask mobile deep link. This should prompt the user to open the dapp in MetaMask.
-        window.location.href = `https://metamask.app.link/dapp/${currentUrl}`;
-      } catch (innerErr) {
-        console.error('Failed to open MetaMask deep link', innerErr);
-        throw err;
-      }
-    }
-  }
+async function ensureProviderReady() {
+  // Гарантуємо наявність провайдера + правильну мережу
+  const { provider } = await connectWallet();
+  await ensureBSC(provider);
+  return (window as any).ethereum;
 }
 
 /* ─ Stages ─ */
@@ -233,12 +208,11 @@ export default function MyOrders() {
               if (i === -1) return prev;
               const before = prev[i];
               const after = { ...before, ...s };
+
+              // 🔔 нотифік і тост при підтвердженні виконання
               if (before.status !== 'confirmed' && after.status === 'confirmed') {
                 (async () => {
-                  try {
-                    SOUND.currentTime = 0;
-                    await SOUND.play();
-                  } catch {}
+                  try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
                   await pushNotificationManager.showNotification({
                     title: '🎉 Виконання підтверджено',
                     body: 'Escrow розподілив кошти.',
@@ -248,8 +222,20 @@ export default function MyOrders() {
                 })();
                 setToast(true);
               }
+
+              // ⭐ АВТОЗАПУСК БЛОКУВАННЯ: обидві згоди, tx ще немає, це мій сценарій
+              const bothAgreed = !!after.is_agreed_by_customer && !!after.is_agreed_by_executor;
+              const needLock = bothAgreed && !after.escrow_tx_hash && after.creator_id === uid;
+
               const cp = [...prev];
               cp[i] = after;
+
+              if (needLock && !(window as any).__locking) {
+                (window as any).__locking = true;
+                // не блокуємо рендер, запускаємо async
+                setTimeout(() => handleLock(after).finally(() => { (window as any).__locking = false; }), 0);
+              }
+
               return cp;
             }
             return prev;
@@ -267,12 +253,8 @@ export default function MyOrders() {
         .subscribe();
 
       return () => {
-        try {
-          supabase.removeChannel(ch);
-        } catch {}
-        try {
-          supabase.removeChannel(chRatings);
-        } catch {}
+        try { supabase.removeChannel(ch); } catch {}
+        try { supabase.removeChannel(chRatings); } catch {}
       };
     })();
   }, [load, list, refreshRated]);
@@ -280,9 +262,7 @@ export default function MyOrders() {
   useEffect(() => {
     if (!userId) return;
     refreshRated(userId, list);
-    list.forEach(s => {
-      if (s?.id) loadOpenDispute(s.id);
-    });
+    list.forEach(s => { if (s?.id) loadOpenDispute(s.id); });
   }, [userId, list, loadOpenDispute, refreshRated]);
 
   const handleAgree = async (s: Scenario) => {
@@ -319,22 +299,18 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // 0) Ініціалізація мобільного провайдера (WalletConnect → MetaMask)
-      await ensureProviderMobileFirst();
+      const eth = await ensureProviderReady();
 
-      const eth = (window as any).ethereum;
-      if (!eth) throw new Error('Провайдер гаманця недоступний');
-
-      // 1) “покльови” — синхронізувати стан після повернення з MM
+      // легкі "поштовхи" провайдера на мобільному
       try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1'); } catch {}
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2'); } catch {}
       try { await waitUntilVisible(15000); } catch {}
 
-      // 2) approve (за потреби)
+      // approve (за потреби)
       await quickOneClickSetup();
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke3'); } catch {}
 
-      // 3) lockFunds
+      // lockFunds
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
       setLocal(s.id, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
@@ -349,7 +325,7 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
-      await ensureProviderMobileFirst();
+      await ensureProviderReady();
       const eth = (window as any).ethereum;
 
       try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke4'); } catch {}
@@ -365,12 +341,6 @@ export default function MyOrders() {
       if (Number((deal as any).status) === 3) {
         await supabase.from('scenarios').update({ status: 'confirmed' }).eq('id', s.id);
         setToast(true);
-      } else {
-        const st = await waitForChainRelease(s.id);
-        if (st === 3) {
-          await supabase.from('scenarios').update({ status: 'confirmed' }).eq('id', s.id);
-          setToast(true);
-        }
       }
     } catch (e: any) {
       alert(e?.message || 'Помилка підтвердження.');
@@ -456,24 +426,15 @@ export default function MyOrders() {
             <ScenarioCard
               role="customer"
               s={s}
-              onChangeDesc={v => {
-                if (fieldsEditable) setLocal(s.id, { description: v });
-              }}
+              onChangeDesc={v => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async v => {
                 if (!fieldsEditable) return;
                 await supabase
                   .from('scenarios')
-                  .update({
-                    description: v,
-                    status: 'pending',
-                    is_agreed_by_customer: false,
-                    is_agreed_by_executor: false,
-                  })
+                  .update({ description: v, status: 'pending', is_agreed_by_customer: false, is_agreed_by_executor: false })
                   .eq('id', s.id);
               }}
-              onChangeAmount={v => {
-                if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v });
-              }}
+              onChangeAmount={v => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
               onCommitAmount={async v => {
                 if (!fieldsEditable) return;
                 if (v !== null && (!Number.isFinite(v) || v <= 0)) {
@@ -483,12 +444,7 @@ export default function MyOrders() {
                 }
                 await supabase
                   .from('scenarios')
-                  .update({
-                    donation_amount_usdt: v,
-                    status: 'pending',
-                    is_agreed_by_customer: false,
-                    is_agreed_by_executor: false,
-                  })
+                  .update({ donation_amount_usdt: v, status: 'pending', is_agreed_by_customer: false, is_agreed_by_executor: false })
                   .eq('id', s.id);
               }}
               onAgree={() => handleAgree(s)}
