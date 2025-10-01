@@ -1,4 +1,4 @@
-// 📄 src/lib/pushNotifications.ts — система push-сповіщень для BuyMyBehavior
+// 📄 src/lib/pushNotifications.ts — безпечні push-сповіщення (lazy init, без крашів у мобільних WebView)
 
 import React from 'react';
 
@@ -24,24 +24,24 @@ export interface ScenarioNotificationEvent {
 
 export type NotificationPermission = 'granted' | 'denied' | 'default';
 
-/* ============ Внутрішні хелпери/дефекти середовищ ============ */
+/* ============ Хелпери середовищ ============ */
 
-/** Чи ми всередині мобільного MetaMask / вбудованого браузера, де Push API часто недоступний */
+function isBrowser(): boolean {
+  return typeof window !== 'undefined' && typeof document !== 'undefined';
+}
+
 function isMetaMaskMobile(): boolean {
-  const ua = (navigator?.userAgent || '').toLowerCase();
-  // UA MetaMask Mobile різний на iOS/Android, страхуємося по підрядку 'metamask'
+  if (!isBrowser()) return false;
+  const ua = (navigator.userAgent || '').toLowerCase();
   const inApp = ua.includes('metamask');
-  // Додатковий маркер — інжектований провайдер
   const hasMM = !!(window as any).ethereum?.isMetaMask;
-  // Важливо: навіть якщо є Notification, показ часто валиться — краще no-op
   return inApp || hasMM;
 }
 
-/** У деяких вбудованих вебвью Push/Notification або недоступні, або працюють нестабільно */
+/** У мобільних WebView (MetaMask тощо) пуші часто недоступні/ламають UX — тихо no-op */
 function shouldNoopPush(): boolean {
-  // Якщо зовсім немає Notification API — точно no-op
+  if (!isBrowser()) return true;
   if (!('Notification' in window)) return true;
-  // Мобільний MetaMask: робимо no-op, щоб уникнути "Failed to publish payload"
   if (isMetaMaskMobile()) return true;
   return false;
 }
@@ -49,30 +49,36 @@ function shouldNoopPush(): boolean {
 /* ===================== Менеджер пушів ===================== */
 
 class PushNotificationManager {
-  private audio: HTMLAudioElement | null = null;
+  private audio: HTMLAudioElement | null = null;           // lazy
+  private audioReady = false;
   private lastNotificationTime = 0;
   private readonly NOTIFICATION_COOLDOWN = 2000; // 2s
   private notificationHistory: Set<string> = new Set();
 
-  constructor() {
-    this.initializeAudio();
-  }
+  /* ---------- Ледача ініціалізація аудіо ---------- */
+  private ensureAudio() {
+    if (!isBrowser()) return; // SSR / build
+    if (this.audioReady) return;
 
-  /* ---------- Аудіо ---------- */
-  private initializeAudio() {
     try {
-      // файл лежить у /public
-      this.audio = new Audio('/notification.wav');
-      this.audio.volume = 0.6;
-      this.audio.preload = 'auto';
-    } catch (e) {
-      // тихо
-      console.warn('[push] audio init fail:', e);
+      // створюємо лише в реальному браузері
+      if (typeof (window as any).Audio !== 'undefined') {
+        const a = new Audio('/notification.wav');
+        a.volume = 0.6;
+        a.preload = 'auto';
+        this.audio = a;
+        this.audioReady = true;
+      }
+    } catch {
+      // ігноруємо — звук не критичний
     }
   }
 
   private playNotificationSound(): void {
+    if (!isBrowser()) return;
+    this.ensureAudio();
     if (!this.audio) return;
+
     try {
       this.audio.currentTime = 0;
       const p = this.audio.play();
@@ -82,9 +88,9 @@ class PushNotificationManager {
     }
   }
 
-  /* ---------- Базові перевірки ---------- */
+  /* ---------- Перевірки ---------- */
   public isSupported(): boolean {
-    return 'Notification' in window;
+    return isBrowser() && 'Notification' in window;
   }
 
   public getPermissionStatus(): NotificationPermission {
@@ -106,17 +112,16 @@ class PushNotificationManager {
 
   /* ---------- Показ сповіщення ---------- */
   public async showNotification(data: NotificationData): Promise<boolean> {
-    // 0) Не показуємо в середовищах, де це ламає UX (MetaMask mobile тощо)
-    if (shouldNoopPush()) return false;
+    if (shouldNoopPush()) return false; // без падінь у MetaMask Mobile
 
-    // 1) Анти-дублі
+    // Анти-дублі
     if (data.tag && this.notificationHistory.has(data.tag)) return false;
 
-    // 2) Cooldown
+    // Cooldown
     const now = Date.now();
     if (now - this.lastNotificationTime < this.NOTIFICATION_COOLDOWN) return false;
 
-    // 3) Пермішени
+    // Дозвіл
     if (this.getPermissionStatus() !== 'granted') return false;
 
     try {
@@ -133,16 +138,11 @@ class PushNotificationManager {
       });
 
       n.onclick = () => {
-        try {
-          window.focus?.();
-          n.close();
-        } catch {}
+        try { window.focus?.(); } catch {}
+        try { n.close(); } catch {}
       };
 
-      // авто-закриття через 6с
-      setTimeout(() => {
-        try { n.close(); } catch {}
-      }, 6000);
+      setTimeout(() => { try { n.close(); } catch {} }, 6000);
 
       if (data.tag) {
         this.notificationHistory.add(data.tag);
@@ -152,7 +152,6 @@ class PushNotificationManager {
       this.lastNotificationTime = now;
       return true;
     } catch {
-      // Якщо Notification API є, але показ звалився — не валимо додаток
       return false;
     }
   }
@@ -212,9 +211,12 @@ class PushNotificationManager {
   }
 
   public cleanup(): void {
-    try { this.audio?.pause(); } catch {}
-    this.audio = null;
+    if (this.audio) {
+      try { this.audio.pause(); } catch {}
+      this.audio = null;
+    }
     this.notificationHistory.clear();
+    this.audioReady = false;
   }
 }
 
@@ -233,7 +235,7 @@ export const getNotificationPermissionStatus = (): NotificationPermission =>
 export const sendTestNotification = (): Promise<boolean> =>
   pushNotificationManager.sendTestNotification();
 
-/** Універсальна функція — делегує в менеджер. Тримай єдиний шлях показу. */
+/** Універсальна функція — делегує в менеджер */
 export interface NotificationOptions {
   body?: string;
   icon?: string;
