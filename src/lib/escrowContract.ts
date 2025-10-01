@@ -6,10 +6,12 @@ import { connectWallet, ensureBSC, type Eip1193Provider } from './wallet';
 export const USDT_ADDRESS   = import.meta.env.VITE_USDT_ADDRESS as string;
 export const ESCROW_ADDRESS = import.meta.env.VITE_ESCROW_ADDRESS as string;
 
+/** network */
 const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38';
 const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
 const CHAIN_ID_DEC = parseInt(CHAIN_ID_HEX, 16);
 
+/** ABIs */
 const ERC20_ABI = [
   'function decimals() view returns (uint8)',
   'function allowance(address owner, address spender) view returns (uint256)',
@@ -17,6 +19,7 @@ const ERC20_ABI = [
 ];
 
 const ESCROW_ABI = [
+  // твій актуальний контракт
   'function lockFunds(bytes32 scenarioId,address executor,address referrer,uint256 amount,uint256 executionTime) payable',
   'function confirmCompletion(bytes32 scenarioId)',
   'function openDispute(bytes32 scenarioId)',
@@ -40,18 +43,20 @@ type DealTuple = {
   votesCustomer: number;
 };
 
-// ── Беремо провайдер лише з connectWallet() і користуємось ним скрізь
+/* ───────── helpers ───────── */
+
+function escrow(con: ethers.Signer | ethers.providers.Provider) {
+  return new ethers.Contract(ESCROW_ADDRESS, ESCROW_ABI, con);
+}
+
+/** єдиний спосіб отримання провайдера — через connectWallet() */
 async function getWeb3Bundle() {
-  const { provider } = await connectWallet();
-  await ensureBSC(provider);
+  const { provider } = await connectWallet();        // тут уже повинно відкривати MetaMask Mobile
+  await ensureBSC(provider);                         // і перемикати мережу
   const web3   = new ethers.providers.Web3Provider(provider as any, 'any');
   const signer = web3.getSigner();
   const addr   = await signer.getAddress();
   return { eip1193: provider, web3, signer, addr };
-}
-
-function escrow(con: ethers.Signer | ethers.providers.Provider) {
-  return new ethers.Contract(ESCROW_ADDRESS, ESCROW_ABI, con);
 }
 
 export function generateScenarioIdBytes32(id: string): string {
@@ -82,6 +87,7 @@ async function ensureAllowance(
   const have  = await token.allowance(owner, spender);
   if (have.gte(needAmtWei)) return;
 
+  // скидання старого allowance (деякі токени цього вимагають)
   if (!have.isZero()) {
     const tx0 = await token.approve(spender, 0);
     await tx0.wait(1);
@@ -90,16 +96,16 @@ async function ensureAllowance(
   await tx.wait(1);
 }
 
-export async function approveUsdtUnlimited(): Promise<{ txHash: string } | null> {
-  const { signer } = await getWeb3Bundle();
-  const owner  = await signer.getAddress();
-  const token  = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
-  const current: ethers.BigNumber = await token.allowance(owner, ESCROW_ADDRESS);
-  const MAX = ethers.constants.MaxUint256;
-  if (current.gte(MAX.div(2))) return null;
-  const tx = await token.approve(ESCROW_ADDRESS, MAX);
-  const rc = await tx.wait(1);
-  return { txHash: rc.transactionHash };
+/** дрібний warm-up щоб MetaMask Mobile точно “прокинувся” */
+async function warmupSignature(signer: ethers.Signer) {
+  try { await signer.signMessage('BMB warmup ' + Date.now()); } catch { /* ігноруємо */ }
+}
+
+function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, execution_time?: string | null) {
+  const s = execution_time ?? (dateStr ? `${dateStr}T${timeStr || '00:00'}` : '');
+  const dt = s ? new Date(s) : new Date();
+  const unix = Math.floor(dt.getTime() / 1000);
+  return unix > 0 ? unix : Math.floor(Date.now() / 1000);
 }
 
 async function getWalletByUserId(userId: string): Promise<string | null> {
@@ -115,23 +121,16 @@ async function getReferrerWalletOfUser(userId: string): Promise<string | null> {
   return (data as any)?.referrer_wallet ?? null;
 }
 
-function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, execution_time?: string | null) {
-  const s = execution_time ?? (dateStr ? `${dateStr}T${timeStr || '00:00'}` : '');
-  const dt = s ? new Date(s) : new Date();
-  const unix = Math.floor(dt.getTime() / 1000);
-  return unix > 0 ? unix : Math.floor(Date.now() / 1000);
-}
+/* ───────── public API ───────── */
 
-// 👇 “розбудити” MetaMask Mobile (безкоштовний signMessage)
-async function warmupSignature(signer: ethers.Signer) {
-  try { await signer.signMessage('BMB warmup ' + Date.now()); } catch { /* ігноруємо відмову */ }
-}
-
-export async function quickOneClickSetup(): Promise<{ address: string; approveTxHash?: string }> {
+/** одноразова підготовка: перевіряє мережу + робить unlimited approve(USDT→ESCROW) */
+export async function quickOneClickSetup(): Promise<{ address: string; approveTxHash?: string | null }> {
   const { signer, addr } = await getWeb3Bundle();
-  const token  = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
-  const current: ethers.BigNumber = await token.allowance(addr, ESCROW_ADDRESS);
-  let approveTxHash: string | undefined;
+
+  const token   = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
+  const current = (await token.allowance(addr, ESCROW_ADDRESS)) as ethers.BigNumber;
+
+  let approveTxHash: string | null = null;
   if (current.lt(ethers.constants.MaxUint256.div(2))) {
     const tx = await token.approve(ESCROW_ADDRESS, ethers.constants.MaxUint256);
     const rc = await tx.wait(1);
@@ -140,6 +139,19 @@ export async function quickOneClickSetup(): Promise<{ address: string; approveTx
   return { address: addr, approveTxHash };
 }
 
+export async function approveUsdtUnlimited(): Promise<{ txHash: string } | null> {
+  const { signer } = await getWeb3Bundle();
+  const owner  = await signer.getAddress();
+  const token  = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
+  const current: ethers.BigNumber = await token.allowance(owner, ESCROW_ADDRESS);
+  const MAX = ethers.constants.MaxUint256;
+  if (current.gte(MAX.div(2))) return null;
+  const tx = await token.approve(ESCROW_ADDRESS, MAX);
+  const rc = await tx.wait(1);
+  return { txHash: rc.transactionHash };
+}
+
+/** основна транзакція lockFunds */
 export async function lockFunds(
   arg:
     | number
@@ -155,7 +167,7 @@ export async function lockFunds(
   const { eip1193, web3, signer, addr: from } = await getWeb3Bundle();
   await assertNetworkAndCode(eip1193, web3);
 
-  // 👉 обов’язковий warm-up для MetaMask Mobile
+  // warm-up для MM Mobile (після повернення з аппки)
   await warmupSignature(signer);
 
   let amountHuman: string;
@@ -207,6 +219,7 @@ export async function lockFunds(
   const c   = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
 
+  // simulate
   try {
     await (c as any).callStatic.lockFunds(
       b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix
@@ -215,6 +228,7 @@ export async function lockFunds(
     throw new Error(`lockFunds (simulate) reverted: ${e?.message || e}`);
   }
 
+  // gas estimate (із запасом 20%)
   let gas: ethers.BigNumber;
   try {
     gas = await (c as any).estimateGas.lockFunds(
@@ -230,6 +244,7 @@ export async function lockFunds(
   return tx;
 }
 
+/** підтвердження виконання */
 export async function confirmCompletion(args: { scenarioId: string }) {
   const { eip1193, web3, signer } = await getWeb3Bundle();
   await assertNetworkAndCode(eip1193, web3);
@@ -241,6 +256,7 @@ export async function confirmCompletion(args: { scenarioId: string }) {
 }
 export const confirmCompletionOnChain = confirmCompletion;
 
+/** спір: відкрити, голос, фіналізація */
 export async function openDisputeOnChain(scenarioId: string) {
   const { eip1193, web3, signer } = await getWeb3Bundle();
   await assertNetworkAndCode(eip1193, web3);
@@ -271,6 +287,7 @@ export async function finalizeDisputeOnChain(scenarioId: string) {
   return tx;
 }
 
+/** читання угоди */
 export async function getDealOnChain(scenarioId: string): Promise<DealTuple> {
   const { web3 } = await getWeb3Bundle();
   const c = escrow(web3);
