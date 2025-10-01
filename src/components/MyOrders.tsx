@@ -18,9 +18,6 @@ import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 
-// ✅ WalletConnect-провайдер, який **автоматично** відкриває MetaMask на мобільному
-import { ensureMobileWalletProvider } from '../lib/walletMobileWC';
-
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
@@ -70,85 +67,83 @@ function waitUntilVisible(timeoutMs = 15000): Promise<void> {
   });
 }
 
-// кеш SDK
-let __sdk: any | null = null;
-
-/** MetaMask SDK fallback (викликається ЛИШЕ якщо WalletConnect не піднявся) */
-async function ensureMobileWalletReady() {
-  if (!isMobileUA()) return;
-
-  const { default: MetaMaskSDK } = await import('@metamask/sdk');
-  if (!__sdk) {
-    __sdk = new MetaMaskSDK({
-      injectProvider: true,
-      preferDesktop: false,
-      useDeeplink: true,
-      communicationLayerPreference: 'webrtc',
-      storage: localStorage,
-      checkInstallationImmediately: false,
-      dappMetadata: { name: 'Buy My Behavior', url: window.location.origin },
-      modals: { install: false },
-    });
-    __sdk.getProvider();
-  }
-
+/**
+ * ШВИДКИЙ ХОТФІКС: агресивно піднімаємо MetaMask (mobile/desktop) і перемикаємось на BSC.
+ * - Якщо є window.ethereum → eth_requestAccounts → switch/add chain 0x38.
+ * - Якщо інжекту немає і це мобільний → відкриваємо MetaMask через офіційний deeplink metamask://dapp/<url>,
+ *   чекаємо повернення і знову робимо connect+switch.
+ */
+async function ensureMMNow() {
+  const isMobile = isMobileUA();
   const eth = (window as any).ethereum;
 
-  try { await withTimeout(__sdk.connect(), 15000, 'sdk.connect'); } catch {}
-
-  try {
-    await withTimeout(eth.request({ method: 'eth_requestAccounts' }), 15000, 'connect');
-  } catch {
-    try { await eth.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] }); } catch {}
-    try { await eth.request({ method: 'eth_accounts' }); } catch {}
-  }
-
-  try { await waitUntilVisible(15000); } catch {}
-
-  try {
-    await withTimeout(
-      eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] }),
-      15000,
-      'switchChain'
-    );
-  } catch (err: any) {
-    if (err?.code === 4902) {
-      await eth.request({
-        method: 'wallet_addEthereumChain',
-        params: [{
-          chainId: '0x38',
-          chainName: 'Binance Smart Chain',
-          nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
-          rpcUrls: ['https://bsc-dataseed.binance.org/'],
-          blockExplorerUrls: ['https://bscscan.com'],
-        }],
-      });
+  // 1) Якщо інжект є — просто конект + switch chain
+  if (eth && (eth.isMetaMask || eth.request)) {
+    try { await eth.request({ method: 'eth_requestAccounts' }); } catch {}
+    try {
       await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] });
-    } else {
-      throw err;
+    } catch (err: any) {
+      if (err?.code === 4902) {
+        await eth.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: '0x38',
+            chainName: 'Binance Smart Chain',
+            nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+            rpcUrls: ['https://bsc-dataseed.binance.org/'],
+            blockExplorerUrls: ['https://bscscan.com'],
+          }],
+        });
+        await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] });
+      }
     }
+    return;
   }
 
-  try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke:chain'); } catch {}
-  try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke:acc'); } catch {}
+  // 2) Якщо інжекту немає і ми на мобілці — відкрити MetaMask через deeplink на поточну сторінку
+  if (isMobile) {
+    const loc = window.location;
+    const dappUrl = encodeURIComponent(loc.origin + loc.pathname + loc.search + loc.hash);
+    const deeplink = `metamask://dapp/${dappUrl}`;
 
-  const cid = await eth.request({ method: 'eth_chainId' }).catch(() => null);
-  if ((cid as string)?.toLowerCase() !== '0x38') {
-    throw new Error('Не вдалося перемкнутися на Binance Smart Chain (0x38).');
+    // позначка, щоб уникнути випадкового повтору
+    sessionStorage.setItem('mm-deeplink-at', String(Date.now()));
+
+    // відкрити MetaMask
+    window.location.href = deeplink;
+
+    // зачекати повернення (MetaMask поверне у браузер після дії)
+    await new Promise<void>((resolve) => setTimeout(() => resolve(), 15000));
+
+    // після повернення інжект має з'явитись
+    const eth2 = (window as any).ethereum;
+    if (!eth2) throw new Error('MetaMask не інжектувався після deeplink.');
+    try { await eth2.request({ method: 'eth_requestAccounts' }); } catch {}
+    try {
+      await eth2.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] });
+    } catch (err: any) {
+      if (err?.code === 4902) {
+        await eth2.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: '0x38',
+            chainName: 'Binance Smart Chain',
+            nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+            rpcUrls: ['https://bsc-dataseed.binance.org/'],
+            blockExplorerUrls: ['https://bscscan.com'],
+          }],
+        });
+        await eth2.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] });
+      }
+    }
+    return;
   }
+
+  // 3) Десктоп без інжекту — просимо встановити MetaMask
+  throw new Error('MetaMask не знайдено. Встановіть MetaMask або відкрийте сайт у MetaMask Mobile.');
 }
 
-/** Спершу WalletConnect (авто-MetaMask), далі — fallback на MetaMask SDK */
-async function ensureProviderMobileFirst() {
-  if (!isMobileUA()) return;
-  try {
-    await ensureMobileWalletProvider(); // metamask://wc?uri=... → MM відкриється автоматично
-  } catch {
-    await ensureMobileWalletReady();
-  }
-}
-
-/* ─────────── Етапи замовлення ─────────── */
+/* ─────────── Логіка етапів ─────────── */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
@@ -345,10 +340,11 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // 1) Мобільний провайдер (WalletConnect → MetaMask), і fallback на MM SDK
-      await ensureProviderMobileFirst();
+      // 1) ЖОРСТКО ПІДНІМАЄМО METAMASK (mobile/desktop)
+      await ensureMMNow();
 
       const eth = (window as any).ethereum;
+      // watchdog/poke після повернення з app
       try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1'); } catch {}
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2'); } catch {}
       try { await waitUntilVisible(15000); } catch {}
@@ -356,7 +352,7 @@ export default function MyOrders() {
       // 2) approve за потреби
       const setup = await quickOneClickSetup();
       if (setup?.approveTxHash) {
-        // можна показати тост, якщо хочеш
+        // за бажанням — показати тост
       }
 
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke3'); } catch {}
@@ -377,7 +373,7 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
-      await ensureProviderMobileFirst();
+      await ensureMMNow();
       const eth = (window as any).ethereum;
 
       try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke4'); } catch {}
