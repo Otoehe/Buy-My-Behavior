@@ -18,6 +18,9 @@ import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 
+// ⬇⬇⬇ ДОДАНО: WalletConnect мобільний провайдер (авто-відкриває MetaMask без вибору Chrome/MM)
+import { ensureMobileWalletProvider } from '../lib/walletMobileWC';
+
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
@@ -158,6 +161,23 @@ async function ensureMobileWalletReady() {
   const cid = await eth.request({ method: 'eth_chainId' }).catch(() => null);
   if ((cid as string)?.toLowerCase() !== '0x38') {
     throw new Error('Не вдалося перемкнутися на Binance Smart Chain (0x38).');
+  }
+}
+
+/**
+ * ⬇⬇⬇ Гібридна функція: спершу пробує WalletConnect (авто-відкриє MetaMask без вибору),
+ * якщо щось пішло не так — падаємо у старий MetaMask SDK як fallback.
+ */
+async function ensureProviderMobileFirst() {
+  if (isMobileUA()) {
+    try {
+      await ensureMobileWalletProvider(); // WalletConnect v2 → metamask://wc?uri=... (без Chrome)
+      return;
+    } catch (e) {
+      // fallback на MetaMask SDK
+      try { await ensureMobileWalletReady(); return; } catch (_) {}
+      throw e;
+    }
   }
 }
 
@@ -358,8 +378,9 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // === 1) готуємо мобільний гаманець (SDK + sdk.connect + connect + chain 56)
-      await ensureMobileWalletReady();
+      // === 1) МОБІЛЬНИЙ: спробуємо WalletConnect (авто-відкриє MetaMask без вибору Chrome/MM),
+      // якщо не вдалось — fallback на MetaMask SDK
+      await ensureProviderMobileFirst();
 
       const eth = (window as any).ethereum;
 
@@ -393,7 +414,8 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
-      await ensureMobileWalletReady();
+      // така сама стратегія: WalletConnect → fallback на MM SDK
+      await ensureProviderMobileFirst();
       const eth = (window as any).ethereum;
 
       try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke4'); } catch {}
