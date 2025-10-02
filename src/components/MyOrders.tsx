@@ -29,7 +29,7 @@ async function withTimeout<T>(p: Promise<T>, ms = 8000, label = 'op'): Promise<T
     new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Timeout:${label}`)), ms)) as any,
   ]);
 }
-function waitUntilVisible(timeoutMs = 15000): Promise<void> {
+function waitUntilVisible(timeoutMs = 20000): Promise<void> {
   if (document.visibilityState === 'visible') return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
     const onVis = () => {
@@ -56,7 +56,7 @@ async function ensureProviderReady() {
   return (window as any).ethereum;
 }
 
-/* state helpers */
+/* ui helpers */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 const getStage = (s: Scenario) => (s.status === 'confirmed' ? 3 : s.escrow_tx_hash ? 2 : isBothAgreed(s) ? 1 : 0);
@@ -218,7 +218,7 @@ export default function MyOrders() {
   }, [userId, list, loadOpenDispute, refreshRated]);
 
   const handleAgree = async (s: Scenario) => {
-    if (agreeBusy[s.id] || !(!s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer)) return;
+    if (agreeBusy[s.id] || !canAgree(s)) return;
     setAgreeBusy(p => ({ ...p, [s.id]: true }));
     try {
       const { data: rec, error } = await supabase
@@ -243,21 +243,23 @@ export default function MyOrders() {
     if (!(s.is_agreed_by_customer && s.is_agreed_by_executor)) { alert('Спершу потрібні дві згоди.'); return; }
     if (s.escrow_tx_hash) return;
 
-    // 🔴 ВАЖЛИВО: миттєво віддати deeplink у клік-жесті:
+    // 1) у клік-жесті — тільки праймим deeplink (URI-only, без миттєвого metamask://)
     primeMobileWalletDeeplink('lock');
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // далі — вже можна чекати проміси
+      // 2) далі — піднімаємо провайдера
       const eth = await ensureProviderReady();
 
       try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1'); } catch {}
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2'); } catch {}
       try { await waitUntilVisible(20000); } catch {}
 
+      // 3) approve за потреби
       await quickOneClickSetup();
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke3'); } catch {}
 
+      // 4) lock funds
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
       setLocal(s.id, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
@@ -271,7 +273,7 @@ export default function MyOrders() {
   const handleConfirm = async (s: Scenario) => {
     if (confirmBusy[s.id] || !s.escrow_tx_hash) return;
 
-    // те саме — миттєво підняти MM
+    // так само — тільки прайм deeplink
     primeMobileWalletDeeplink('confirm');
 
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
@@ -337,7 +339,6 @@ export default function MyOrders() {
         const canLockBtn = Boolean(bothAgreed && amountOk && !s.escrow_tx_hash);
         const fieldsEditable = !bothAgreed && !s.escrow_tx_hash && s.status !== 'confirmed';
         const rated = ratedOrders.has(s.id);
-        const showBigRate = !!(s as any).is_completed_by_executor && !rated;
 
         return (
           <div key={s.id} style={{ marginBottom: 18 }}>
@@ -365,7 +366,7 @@ export default function MyOrders() {
                   is_agreed_by_customer: false, is_agreed_by_executor: false,
                 }).eq('id', s.id);
               }}
-              onAgree={() => {/* погодження лише кнопкою нижче */}}
+              onAgree={() => handleAgree(s)}
               onLock={() => handleLock(s)}
               onConfirm={() => handleConfirm(s)}
               onDispute={() => handleDispute(s)}
@@ -373,7 +374,7 @@ export default function MyOrders() {
                 if (hasCoords(s)) window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank');
                 else alert('Локацію ще не встановлено або її не видно.');
               }}
-              canAgree={!s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer}
+              canAgree={canAgree(s)}
               canLock={canLockBtn}
               canConfirm={(() => {
                 if (!s.escrow_tx_hash) return false;
@@ -381,12 +382,10 @@ export default function MyOrders() {
                 const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
                 return !Number.isNaN(dt.getTime()) && new Date() >= dt;
               })()}
-              canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
+              canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && (userId === s.creator_id)}
               hasCoords={true}
               isRated={rated}
-              onOpenRate={() => {
-                setRateScore(10); setRateComment(''); setRateFor({ scenarioId: s.id, counterpartyId: s.executor_id }); setRateOpen(true);
-              }}
+              onOpenRate={() => {}}
               lockBusy={!!lockBusy[s.id]}
             />
           </div>
@@ -396,28 +395,14 @@ export default function MyOrders() {
       <CelebrationToast open={toast} variant="customer" onClose={() => setToast(false)} />
 
       <RateModal
-        open={rateOpen}
-        score={rateScore}
-        comment={rateComment}
-        onChangeScore={setRateScore}
-        onChangeComment={setRateComment}
-        onCancel={() => setRateOpen(false)}
-        onSave={async () => {
-          if (!rateFor) return;
-          setRateBusy(true);
-          try {
-            await upsertRating({ scenarioId: rateFor.scenarioId, rateeId: rateFor.counterpartyId, score: rateScore, comment: rateComment });
-            setRateOpen(false);
-            setRatedOrders(prev => new Set([...Array.from(prev), rateFor.scenarioId]));
-            window.dispatchEvent(new CustomEvent('ratings:updated', { detail: { userId: rateFor.counterpartyId } }));
-            alert('Рейтинг збережено ✅');
-          } catch (e: any) {
-            alert(e?.message ?? 'Помилка під час збереження рейтингу');
-          } finally {
-            setRateBusy(false);
-          }
-        }}
-        disabled={rateBusy}
+        open={false}
+        score={10}
+        comment={''}
+        onChangeScore={() => {}}
+        onChangeComment={() => {}}
+        onCancel={() => {}}
+        onSave={() => {}}
+        disabled={false}
       />
     </div>
   );

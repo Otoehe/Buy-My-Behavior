@@ -8,21 +8,26 @@ export type Eip1193Provider = {
   isMetaMask?: boolean;
 } & ExternalProvider;
 
+// ───────────────── Env & platform ─────────────────
+const IS_BROWSER = typeof window !== 'undefined';
 const IS_MOBILE =
-  typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+  IS_BROWSER && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
 
-const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38';
-const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : '0x' + Number(RAW_CHAIN_ID).toString(16);
+const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38'; // BSC mainnet
+const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
 const CHAIN_ID_DEC = parseInt(CHAIN_ID_HEX, 16);
 
 const WC_PROJECT_ID = import.meta.env.VITE_WC_PROJECT_ID as string;
 
 let _cachedProvider: Eip1193Provider | null = null;
 
-// ───────────────── MetaMask SDK ─────────────────
+// ───────────────── MetaMask SDK (dynamic import) ─────────────────
 let _sdk: any | null = null;
+
 async function connectMetaMaskSDK(): Promise<Eip1193Provider> {
-  const { default: MetaMaskSDK } = await import('@metamask/sdk');
+  // dynamic import → SSR safe
+  const mod = await import('@metamask/sdk');
+  const MetaMaskSDK = mod.default;
 
   if (!_sdk) {
     _sdk = new MetaMaskSDK({
@@ -33,21 +38,22 @@ async function connectMetaMaskSDK(): Promise<Eip1193Provider> {
       checkInstallationImmediately: false,
       dappMetadata: {
         name: 'Buy My Behavior',
-        url: typeof window !== 'undefined' ? window.location.origin : 'https://www.buymybehavior.com',
+        url: IS_BROWSER ? window.location.origin : 'https://www.buymybehavior.com',
       },
       modals: { install: false },
       logging: { developerMode: false },
-      storage: localStorage,
+      storage: IS_BROWSER ? localStorage : undefined,
     });
     _sdk.getProvider();
   }
 
-  const eth = (window as any).ethereum as Eip1193Provider | undefined;
+  const eth = (IS_BROWSER ? (window as any).ethereum : undefined) as Eip1193Provider | undefined;
   if (!eth) throw new Error('MetaMask provider не інʼєктувався');
 
-  await _sdk.connect().catch(() => { /* ігноруємо — deeplink все одно пішов */ });
+  // open/connect — якщо користувач відмінив, все одно могли відправити deeplink
+  try { await _sdk.connect(); } catch {}
 
-  // access
+  // accounts
   try {
     await eth.request({ method: 'eth_requestAccounts' });
   } catch {
@@ -81,87 +87,13 @@ async function connectMetaMaskSDK(): Promise<Eip1193Provider> {
   return eth;
 }
 
-// ───────────────── WalletConnect v2 ─────────────────
-// @ts-ignore
-import EthereumProvider from '@walletconnect/ethereum-provider';
+// ───────────────── WalletConnect (dynamic import) ─────────────────
+async function createWCProvider(): Promise<any> {
+  // dynamic import → SSR safe
+  const mod = await import('@walletconnect/ethereum-provider');
+  const EthereumProvider = mod.default;
 
-let __wcConnecting = false;
-let __deeplinkPrimedAt = 0;
-
-/**
- * ВАЖЛИВО: Викликаємо в onClick БЕЗ `await` перед цим!
- * Миттєво відкриває MetaMask (metamask://), паралельно стартує WC.
- * Коли приходить display_uri — добиває універсальним лінком, який відкриє сесію.
- */
-export function primeMobileWalletDeeplink(intent: 'lock' | 'approve' | 'confirm' = 'lock') {
-  if (!IS_MOBILE) return;
-
-  // 0) миттєвий "поштовх" — відкриє MetaMask (якщо дозволено ОС)
-  try {
-    // просто відкрити додаток; далі підʼєднаємося WC/SDK
-    window.location.href = 'metamask://';
-    __deeplinkPrimedAt = Date.now();
-  } catch {}
-
-  // 1) якщо вже створюємо WC — не дублюємо
-  if (__wcConnecting) return;
-  __wcConnecting = true;
-
-  (async () => {
-    try {
-      if (!WC_PROJECT_ID) throw new Error('VITE_WC_PROJECT_ID не заданий');
-      const provider: Eip1193Provider = (await EthereumProvider.init({
-        projectId: WC_PROJECT_ID,
-        showQrModal: false,
-        chains: [CHAIN_ID_DEC],
-        optionalChains: [CHAIN_ID_DEC],
-        methods: [
-          'eth_sendTransaction',
-          'personal_sign',
-          'eth_signTypedData',
-          'eth_sign',
-          'wallet_switchEthereumChain',
-          'wallet_addEthereumChain',
-          'eth_requestAccounts',
-        ],
-        events: ['chainChanged', 'accountsChanged', 'disconnect', 'session_event'],
-        rpcMap: { [CHAIN_ID_DEC]: 'https://bsc-dataseed.binance.org/' },
-        metadata: {
-          name: 'Buy My Behavior',
-          description: 'Web3 escrow',
-          url: typeof window !== 'undefined' ? window.location.origin : 'https://www.buymybehavior.com',
-          icons: ['https://www.buymybehavior.com/icon.png'],
-        },
-      })) as any;
-
-      // 2) як тільки зʼявився wc URI — відкриваємо універсальний лінк MM
-      provider.on?.('display_uri', (uri: string) => {
-        const uni = `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}`;
-        // віддати MM точний запит (вже знаходячись у фокусі або ще у браузері)
-        try { window.location.href = uni; } catch {}
-        // підстраховка
-        setTimeout(() => { try { window.location.href = uni; } catch {} }, 300);
-      });
-
-      // 3) старт сесії (без await — не блокуємо клік)
-      (provider as any).connect().catch(() => {});
-
-      // 4) кеш як глобальний ethereum (зручно для web3)
-      (window as any).ethereum = provider;
-      _cachedProvider = provider;
-    } catch (e) {
-      // fallback: при наступній спробі підемо через SDK
-    } finally {
-      // через секунду дозволимо перезапуск, якщо треба
-      setTimeout(() => { __wcConnecting = false; }, 1000);
-    }
-  })();
-}
-
-async function connectWalletConnect(): Promise<Eip1193Provider> {
-  if (!WC_PROJECT_ID) throw new Error('VITE_WC_PROJECT_ID не заданий у середовищі!');
-
-  const provider: Eip1193Provider = (await EthereumProvider.init({
+  const provider = await EthereumProvider.init({
     projectId: WC_PROJECT_ID,
     showQrModal: false,
     chains: [CHAIN_ID_DEC],
@@ -180,22 +112,72 @@ async function connectWalletConnect(): Promise<Eip1193Provider> {
     metadata: {
       name: 'Buy My Behavior',
       description: 'Web3 escrow',
-      url: typeof window !== 'undefined' ? window.location.origin : 'https://www.buymybehavior.com',
+      url: IS_BROWSER ? window.location.origin : 'https://www.buymybehavior.com',
       icons: ['https://www.buymybehavior.com/icon.png'],
     },
-  })) as any;
+  });
+
+  return provider;
+}
+
+/**
+ * ВАЖЛИВО: викликати В САМЕЙ onClick без awaited дій ДО нього.
+ * Стратегія “URI-only”: чекаємо display_uri і відкриваємо universal link.
+ * Без миттєвого `metamask://` → менше шансів на “білий екран”.
+ */
+export function primeMobileWalletDeeplink(intent: 'lock' | 'approve' | 'confirm' = 'lock') {
+  if (!IS_BROWSER || !IS_MOBILE) return;
+
+  // стартуємо асинхронно, але виклик цієї функції має бути в user-gesture.
+  (async () => {
+    if (!WC_PROJECT_ID) return;
+
+    try {
+      const provider: Eip1193Provider = await createWCProvider();
+
+      provider.on?.('display_uri', (uri: string) => {
+        const uni = `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}`;
+
+        // створюємо прихований <a>, клікаємо одразу (ще в контексті користувацького кліку)
+        const a = document.createElement('a');
+        a.href = uni;
+        a.rel = 'noreferrer noopener';
+        a.target = '_self';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        try { a.click(); } catch {}
+        setTimeout(() => { try { document.body.removeChild(a); } catch {} }, 1000);
+      });
+
+      // не блокуємо клік — connect у фоні
+      (provider as any).connect().catch(() => {});
+      (window as any).ethereum = provider;
+      _cachedProvider = provider;
+    } catch {
+      // якщо WC зірвався — нічого, далі connectWallet() підбере SDK або інший шлях
+    }
+  })();
+}
+
+async function connectWalletConnect(): Promise<Eip1193Provider> {
+  if (!WC_PROJECT_ID) throw new Error('VITE_WC_PROJECT_ID не заданий у середовищі!');
+
+  const provider: Eip1193Provider = await createWCProvider();
 
   provider.on?.('display_uri', (uri: string) => {
-    const link = `metamask://wc?uri=${encodeURIComponent(uri)}`;
-    try { window.location.href = link; } catch {}
-    setTimeout(() => {
-      try { window.location.href = `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}`; } catch {}
-    }, 250);
+    const uni = `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}`;
+    const a = document.createElement('a');
+    a.href = uni;
+    a.rel = 'noreferrer noopener';
+    a.target = '_self';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    try { a.click(); } catch {}
+    setTimeout(() => { try { document.body.removeChild(a); } catch {} }, 1000);
   });
 
   try { await (provider as any).connect(); } catch (e) { throw e; }
 
-  // мережа
   try {
     await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] as any });
   } catch (err: any) {
@@ -221,14 +203,14 @@ async function connectWalletConnect(): Promise<Eip1193Provider> {
 export async function connectWallet(): Promise<{ provider: Eip1193Provider }> {
   if (_cachedProvider) return { provider: _cachedProvider };
 
-  // Desktop з інʼєктованим MM
-  if (!IS_MOBILE && (window as any).ethereum?.isMetaMask) {
+  // Desktop із інʼєктованим MM
+  if (IS_BROWSER && !IS_MOBILE && (window as any).ethereum?.isMetaMask) {
     _cachedProvider = (window as any).ethereum;
     return { provider: _cachedProvider };
   }
 
   if (IS_MOBILE) {
-    // якщо wc ще не вистрілив — можна підхопити SDK
+    // спершу SDK (мінімум переходів), якщо не вийшло — WC
     try {
       _cachedProvider = await connectMetaMaskSDK();
       return { provider: _cachedProvider };
