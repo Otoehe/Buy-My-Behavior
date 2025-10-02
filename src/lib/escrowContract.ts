@@ -1,10 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ethers } from 'ethers';
 import { supabase } from './supabase';
-import { connectWallet, ensureBSC, type Eip1193Provider, CHAIN_ID_DEC, CHAIN_ID_HEX } from './providerBridge';
+import { connectWallet, ensureBSC, type Eip1193Provider } from './providerBridge';
 
-export const USDT_ADDRESS = import.meta.env.VITE_USDT_ADDRESS as string;
+export const USDT_ADDRESS   = import.meta.env.VITE_USDT_ADDRESS as string;
 export const ESCROW_ADDRESS = import.meta.env.VITE_ESCROW_ADDRESS as string;
+
+const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38';
+const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
+const CHAIN_ID_DEC = parseInt(CHAIN_ID_HEX, 16);
 
 const ERC20_ABI = [
   'function decimals() view returns (uint8)',
@@ -37,11 +41,11 @@ type DealTuple = {
 };
 
 async function getWeb3Bundle() {
-  const { provider } = await connectWallet();
+  const { provider } = await connectWallet();  // один-єдиний провайдер
   await ensureBSC(provider);
-  const web3 = new ethers.providers.Web3Provider(provider as any, 'any');
+  const web3   = new ethers.providers.Web3Provider(provider as any, 'any');
   const signer = web3.getSigner();
-  const addr = await signer.getAddress();
+  const addr   = await signer.getAddress();
   return { eip1193: provider, web3, signer, addr };
 }
 
@@ -56,26 +60,19 @@ export function generateScenarioIdBytes32(id: string): string {
 async function assertNetworkAndCode(eip1193: Eip1193Provider, web3: ethers.providers.Web3Provider) {
   const net = await web3.getNetwork();
   if (Number(net.chainId) !== CHAIN_ID_DEC) {
-    await eip1193.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: CHAIN_ID_HEX }] as any,
-    });
+    await eip1193.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] as any });
   }
-  const [codeEscrow, codeUsdt] = await Promise.all([web3.getCode(ESCROW_ADDRESS), web3.getCode(USDT_ADDRESS)]);
+  const [codeEscrow, codeUsdt] = await Promise.all([
+    web3.getCode(ESCROW_ADDRESS),
+    web3.getCode(USDT_ADDRESS),
+  ]);
   if (!codeEscrow || codeEscrow === '0x') throw new Error('ESCROW_ADDRESS не є контрактом у цій мережі');
-  if (!codeUsdt || codeUsdt === '0x') throw new Error('USDT_ADDRESS не є контрактом у цій мережі');
+  if (!codeUsdt || codeUsdt === '0x')   throw new Error('USDT_ADDRESS не є контрактом у цій мережі');
 }
 
-// ---- Allowance helpers ----
-export async function getAllowanceWei(ownerAddress?: string): Promise<{ wei: ethers.BigNumber; decimals: number }> {
-  const { signer, addr } = await getWeb3Bundle();
-  const owner = ownerAddress ?? addr;
-  const token = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
-  const [decimals, allowance] = await Promise.all([
-    token.decimals(),
-    token.allowance(owner, ESCROW_ADDRESS),
-  ]);
-  return { wei: allowance as ethers.BigNumber, decimals };
+// “розбудити” підпис (після повернення з MM/WC)
+async function warmupSignature(signer: ethers.Signer) {
+  try { await signer.signMessage('BMB warmup ' + Date.now()); } catch { /* ignore */ }
 }
 
 async function ensureAllowance(
@@ -86,9 +83,10 @@ async function ensureAllowance(
   needAmtWei: ethers.BigNumberish
 ) {
   const token = new ethers.Contract(tokenAddr, ERC20_ABI, signer);
-  const have = await token.allowance(owner, spender);
+  const have  = await token.allowance(owner, spender);
   if (have.gte(needAmtWei)) return;
 
+  // деякі токени вимагають нульування перед новим approve
   if (!have.isZero()) {
     const tx0 = await token.approve(spender, 0);
     await tx0.wait(1);
@@ -99,8 +97,8 @@ async function ensureAllowance(
 
 export async function approveUsdtUnlimited(): Promise<{ txHash: string } | null> {
   const { signer } = await getWeb3Bundle();
-  const owner = await signer.getAddress();
-  const token = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
+  const owner  = await signer.getAddress();
+  const token  = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
   const current: ethers.BigNumber = await token.allowance(owner, ESCROW_ADDRESS);
   const MAX = ethers.constants.MaxUint256;
   if (current.gte(MAX.div(2))) return null;
@@ -109,7 +107,6 @@ export async function approveUsdtUnlimited(): Promise<{ txHash: string } | null>
   return { txHash: rc.transactionHash };
 }
 
-// ---- Profiles helpers (Supabase) ----
 async function getWalletByUserId(userId: string): Promise<string | null> {
   if (!userId) return null;
   const { data, error } = await supabase.from('profiles').select('wallet').eq('user_id', userId).maybeSingle();
@@ -130,15 +127,9 @@ function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, executi
   return unix > 0 ? unix : Math.floor(Date.now() / 1000);
 }
 
-async function warmupSignature(signer: ethers.Signer) {
-  try {
-    await signer.signMessage('BMB warmup ' + Date.now());
-  } catch {}
-}
-
 export async function quickOneClickSetup(): Promise<{ address: string; approveTxHash?: string }> {
   const { signer, addr } = await getWeb3Bundle();
-  const token = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
+  const token  = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
   const current: ethers.BigNumber = await token.allowance(addr, ESCROW_ADDRESS);
   let approveTxHash: string | undefined;
   if (current.lt(ethers.constants.MaxUint256.div(2))) {
@@ -173,18 +164,18 @@ export async function lockFunds(
   let executionTime: number | undefined;
 
   if (typeof arg === 'object' && arg !== null) {
-    amountHuman = String(arg.amount);
-    scenarioId = arg.scenarioId;
-    executorId = arg.executorId;
+    amountHuman    = String(arg.amount);
+    scenarioId     = arg.scenarioId;
+    executorId     = arg.executorId;
     referrerWallet = arg.referrerWallet;
-    executionTime = arg.executionTime;
+    executionTime  = arg.executionTime;
   } else {
     amountHuman = String(arg);
-    scenarioId = undefined;
+    scenarioId  = undefined;
   }
 
   if (!amountHuman) throw new Error('Amount is required for lockFunds');
-  if (!scenarioId) throw new Error('ScenarioId is required for the new escrow. Pass { amount, scenarioId }.');
+  if (!scenarioId)  throw new Error('ScenarioId is required for the new escrow. Pass { amount, scenarioId }.');
 
   const { data: sc, error: se } = await supabase
     .from('scenarios')
@@ -193,29 +184,33 @@ export async function lockFunds(
     .maybeSingle();
   if (se) throw se;
 
-  const exId = executorId ?? (sc as any)?.executor_id ?? undefined;
-  const custId = (sc as any)?.creator_id ?? undefined;
-  const date = (sc as any)?.date ?? null;
-  const time = (sc as any)?.time ?? null;
+  const exId     = executorId ?? (sc as any)?.executor_id ?? undefined;
+  const custId   = (sc as any)?.creator_id ?? undefined;
+  const date     = (sc as any)?.date ?? null;
+  const time     = (sc as any)?.time ?? null;
   const execUnix = executionTime ?? toUnixSeconds(date ?? undefined, time ?? undefined, (sc as any)?.execution_time ?? null);
 
   const executorWallet = exId ? await getWalletByUserId(exId) : null;
   if (!executorWallet) throw new Error('Не знайдено гаманець виконавця');
 
-  const refWallet =
-    referrerWallet !== undefined ? referrerWallet || null : custId ? await getReferrerWalletOfUser(custId) : null;
+  const refWallet = (referrerWallet !== undefined)
+    ? (referrerWallet || null)
+    : (custId ? await getReferrerWalletOfUser(custId) : null);
 
-  const usdt = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
-  const decimals = await usdt.decimals();
+  const usdt      = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
+  const decimals  = await usdt.decimals();
   const amountWei = ethers.utils.parseUnits(String(amountHuman), decimals);
 
   await ensureAllowance(signer, from, USDT_ADDRESS, ESCROW_ADDRESS, amountWei);
 
-  const c = escrow(signer);
+  const c   = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
 
   try {
-    await (c as any).callStatic.lockFunds(b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix);
+    await (c as any).callStatic.lockFunds(
+      b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix,
+      { value: 0 }
+    );
   } catch (e: any) {
     throw new Error(`lockFunds (simulate) reverted: ${e?.message || e}`);
   }
@@ -223,49 +218,17 @@ export async function lockFunds(
   let gas: ethers.BigNumber;
   try {
     gas = await (c as any).estimateGas.lockFunds(
-      b32,
-      executorWallet,
-      refWallet ?? ethers.constants.AddressZero,
-      amountWei,
-      execUnix
+      b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix,
+      { value: 0 }
     );
-  } catch {
-    gas = ethers.BigNumber.from(300_000);
-  }
+  } catch { gas = ethers.BigNumber.from(300_000); }
 
   const tx = await (c as any).lockFunds(
-    b32,
-    executorWallet,
-    refWallet ?? ethers.constants.AddressZero,
-    amountWei,
-    execUnix,
-    { gasLimit: gas.mul(12).div(10) }
+    b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix,
+    { gasLimit: gas.mul(12).div(10), value: 0 }
   );
   await tx.wait(1);
   return tx;
-}
-
-export async function lockFundsOneTap(opts: {
-  amount: number | string;
-  scenarioId: string;
-  executorId?: string;
-  referrerWallet?: string | null;
-  executionTime?: number;
-}) {
-  const { eip1193, web3, signer, addr: from } = await getWeb3Bundle();
-  await assertNetworkAndCode(eip1193, web3);
-
-  const usdt = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
-  const decimals = await usdt.decimals();
-  const amountWei = ethers.utils.parseUnits(String(opts.amount), decimals);
-
-  const have = await usdt.allowance(from, ESCROW_ADDRESS);
-  if (have.lt(amountWei)) {
-    const txA = await usdt.approve(ESCROW_ADDRESS, ethers.constants.MaxUint256);
-    await txA.wait(1);
-  }
-
-  return await lockFunds(opts);
 }
 
 export async function confirmCompletion(args: { scenarioId: string }) {
