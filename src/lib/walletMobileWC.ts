@@ -1,23 +1,24 @@
 // src/lib/walletMobileWC.ts
-// WalletConnect v2 → MetaMask Mobile (deeplink) із надійним дотиском конекту після повернення з MetaMask.
-/* eslint-disable @typescript-eslint/no-explicit-any */
+// WalletConnect v2 → MetaMask Mobile з обов'язковим очікуванням акаунтів
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import EthereumProvider from '@walletconnect/ethereum-provider';
 
-const WC_PID = import.meta.env.VITE_WC_PROJECT_ID as string;
-const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38'; // BSC mainnet
-export const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x')
-  ? RAW_CHAIN_ID
-  : ('0x' + Number(RAW_CHAIN_ID).toString(16));
+export const WC_PID = import.meta.env.VITE_WC_PROJECT_ID as string;
+const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38'; // BSC mainnet (56)
+export const CHAIN_ID_HEX =
+  RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
 export const CHAIN_ID_DEC = parseInt(CHAIN_ID_HEX, 16);
 
 let _provider: any | null = null;
 let _ready = false;
 
-const isMobileUA = () =>
-  typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+function isMobileUA(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+}
 
-function setWindowEthereum(p: any) {
+function ensureWindowEthereum(p: any) {
   if (typeof window !== 'undefined') (window as any).ethereum = p;
 }
 
@@ -27,98 +28,88 @@ async function ensureSwitchToBSC(eth: any) {
     if ((curr as string)?.toLowerCase() === CHAIN_ID_HEX.toLowerCase()) return;
 
     try {
-      await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] });
+      await eth.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: CHAIN_ID_HEX }],
+      });
     } catch (e: any) {
       if (e?.code === 4902) {
         await eth.request({
           method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: CHAIN_ID_HEX,
-            chainName: 'Binance Smart Chain',
-            nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
-            rpcUrls: ['https://bsc-dataseed.binance.org/'],
-            blockExplorerUrls: ['https://bscscan.com'],
-          }],
+          params: [
+            {
+              chainId: CHAIN_ID_HEX,
+              chainName: 'Binance Smart Chain',
+              nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+              rpcUrls: ['https://bsc-dataseed.binance.org/'],
+              blockExplorerUrls: ['https://bscscan.com'],
+            },
+          ],
         });
-        await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] });
+        await eth.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: CHAIN_ID_HEX }],
+        });
       } else {
         throw e;
       }
     }
-  } catch {/* ignore */}
+  } catch {
+    // ігноруємо — юзер може сам перемкнути
+  }
 }
 
-// чекаємо повернення у вкладку після оверлею "Return to app"
-function waitUntilVisible(timeoutMs = 25000): Promise<void> {
-  if (typeof document === 'undefined' || document.visibilityState === 'visible') return Promise.resolve();
-  return new Promise<void>((resolve, reject) => {
-    const onVis = () => {
-      if (document.visibilityState === 'visible') {
-        document.removeEventListener('visibilitychange', onVis);
-        resolve();
+/** Чекаємо допоки зʼявиться хоча б один акаунт у провайдера */
+function waitForAccounts(eth: any, timeoutMs = 30000): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (accs: string[]) => {
+      if (!done) {
+        done = true;
+        try { eth.removeListener?.('accountsChanged', onAccs); } catch {}
+        resolve(accs);
       }
     };
-    const t = setTimeout(() => {
-      document.removeEventListener('visibilitychange', onVis);
-      reject(new Error('Timeout:visible'));
-    }, timeoutMs);
-    document.addEventListener('visibilitychange', onVis);
-  });
-}
-
-// чекаємо на акаунти (агресивний пулінг + резерв через події)
-async function waitForAccounts(eth: any, totalMs = 45000): Promise<string[]> {
-  const start = Date.now();
-
-  const fromEvent = new Promise<string[] | null>(resolve => {
-    const h = (accs: string[]) => {
-      eth.removeListener?.('accountsChanged', h);
-      resolve(accs);
+    const onAccs = (accs: string[]) => {
+      if (Array.isArray(accs) && accs.length) finish(accs);
     };
-    eth.on?.('accountsChanged', h);
+
+    eth.on?.('accountsChanged', onAccs);
+
+    // перший poll
+    (async () => {
+      for (let i = 0; i < 40 && !done; i++) {
+        try {
+          const accs = await eth.request({ method: 'eth_accounts' }).catch(() => []);
+          if (Array.isArray(accs) && accs.length) return finish(accs);
+        } catch {}
+        await new Promise(r => setTimeout(r, 750));
+      }
+      if (!done) {
+        try { eth.removeListener?.('accountsChanged', onAccs); } catch {}
+        reject(new Error('WalletConnect connected, but no accounts'));
+      }
+    })();
+
     setTimeout(() => {
-      eth.removeListener?.('accountsChanged', h);
-      resolve(null);
-    }, 6000);
+      if (!done) {
+        try { eth.removeListener?.('accountsChanged', onAccs); } catch {}
+        reject(new Error('Timeout waiting for accounts'));
+      }
+    }, timeoutMs);
   });
-
-  while (Date.now() - start < totalMs) {
-    try {
-      // 1) деякі збірки віддають акаунти саме через enable()
-      const viaEnable = await eth.enable?.().catch(() => undefined);
-      if (Array.isArray(viaEnable) && viaEnable.length) return viaEnable;
-    } catch {}
-
-    try {
-      const accs = await eth.request({ method: 'eth_requestAccounts' });
-      if (Array.isArray(accs) && accs.length) return accs as string[];
-    } catch {}
-
-    try {
-      const accs2 = await eth.request({ method: 'eth_accounts' });
-      if (Array.isArray(accs2) && accs2.length) return accs2 as string[];
-    } catch {}
-
-    const ev = await Promise.race([
-      fromEvent,
-      new Promise<null>(r => setTimeout(() => r(null), 900)),
-    ]);
-    if (Array.isArray(ev) && ev.length) return ev;
-
-    await new Promise(r => setTimeout(r, 300));
-  }
-  throw new Error('Wallet did not return accounts in time');
 }
 
 /**
- * Основна функція: ініціалізація WC, deeplink у MetaMask, коректне завершення handshake, перемикання на BSC.
+ * Головна: ініціалізуємо WC-провайдер, відкриваємо MetaMask deeplink,
+ * чекаємо появи accounts, робимо його window.ethereum і перемикаємо мережу.
  */
 export async function ensureMobileWalletProvider(): Promise<any> {
   if (_ready && _provider) return _provider;
   if (!WC_PID) throw new Error('VITE_WC_PROJECT_ID is missing');
 
-  // 1) Ініт провайдера
-  const p: any = await EthereumProvider.init({
+  // init
+  const p = await EthereumProvider.init({
     projectId: WC_PID,
     showQrModal: false,
     chains: [CHAIN_ID_DEC],
@@ -129,48 +120,44 @@ export async function ensureMobileWalletProvider(): Promise<any> {
       'eth_sendTransaction','eth_sign','personal_sign',
       'eth_signTypedData','eth_signTypedData_v4'
     ],
-    events: ['display_uri','connect','session_event','accountsChanged','chainChanged','disconnect'],
-    rpcMap: { [CHAIN_ID_DEC]: 'https://bsc-dataseed.binance.org/' },
+    events: ['accountsChanged','chainChanged','disconnect','session_event'],
     metadata: {
       name: 'Buy My Behavior',
       description: 'BMB dapp',
       url: typeof window !== 'undefined' ? window.location.origin : 'https://www.buymybehavior.com',
       icons: ['https://www.buymybehavior.com/favicon.ico'],
     },
-    qrModalOptions: { desktopLinks: ['metamask'], mobileLinks: ['metamask'], preferDesktop: false },
+    qrModalOptions: {
+      desktopLinks: ['metamask'],
+      mobileLinks: ['metamask'],
+      preferDesktop: false,
+    },
   });
 
-  // 2) Deeplink → MetaMask
+  // deeplink за сигналом від WC
   p.on?.('display_uri', (uri: string) => {
     if (!isMobileUA()) return;
     const link = `metamask://wc?uri=${encodeURIComponent(uri)}`;
     try { window.location.href = link; } catch {}
+    setTimeout(() => { try { window.open(link, '_blank'); } catch {} }, 400);
   });
 
-  // 3) Pairing (усередині MetaMask ви натискаєте "Connect")
-  await p.connect();
+  p.on?.('disconnect', () => {
+    _ready = false; _provider = null;
+  });
 
-  // 4) Повернулися у браузер → дотискаємо конект
-  setWindowEthereum(p);
-  try { await waitUntilVisible(25000); } catch {}
+  // встановлюємо сесію (на мобільному при цьому відкриється MM)
+  try { await p.connect(); } catch {}
 
-  let accounts: string[] = [];
-  try {
-    accounts = await waitForAccounts(p, 45000);
-  } catch {
-    // fallback: відкрити ваш сайт у вбудованому браузері MetaMask (інʼєктований provider гарантовано)
-    if (isMobileUA()) {
-      const clean = window.location.href.replace(/^https?:\/\//, '');
-      const dapp = encodeURIComponent(clean);
-      try { window.location.href = `https://metamask.app.link/dapp/${dapp}`; } catch {}
-    }
-    throw new Error('MetaMask did not return accounts. Opened fallback.');
-  }
+  // робимо глобальним
+  ensureWindowEthereum(p);
 
-  // 5) Перемикання на BSC
+  // просимо акаунти (деякі прошивки вимагають 2 запити)
+  try { await p.request({ method: 'eth_requestAccounts' }); } catch {}
+  await waitForAccounts(p); // 👈 критично: без цього отримаємо "Return to app"
+
+  // мережа
   await ensureSwitchToBSC(p);
-
-  p.on?.('disconnect', () => { _ready = false; _provider = null; });
 
   _provider = p;
   _ready = true;
