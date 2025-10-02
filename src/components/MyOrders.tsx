@@ -1,3 +1,4 @@
+// src/components/MyOrders.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import {
@@ -35,6 +36,7 @@ async function ensureProviderReady() {
   return provider;
 }
 
+/* ─ helpers ─ */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
@@ -354,4 +356,128 @@ export default function MyOrders() {
   };
 
   const headerRight = useMemo(
-    () =>
+    () => (
+      <div className="scenario-status-panel">
+        <span>
+          🔔 {permissionStatus === 'granted'
+            ? 'Увімкнено'
+            : permissionStatus === 'denied'
+              ? 'Не підключено'
+              : 'Не запитано'}
+        </span>
+        <span>📡 {rt.isListening ? `${rt.method} активний` : 'Не підключено'}</span>
+        {permissionStatus !== 'granted' && (
+          <button className="notify-btn" onClick={requestPermission}>
+            🔔 Дозволити
+          </button>
+        )}
+      </div>
+    ),
+    [permissionStatus, requestPermission, rt.isListening, rt.method]
+  );
+
+  return (
+    <div className="scenario-list">
+      <div className="scenario-header">
+        <h2>Мої замовлення</h2>
+        {headerRight}
+      </div>
+
+      {list.length === 0 && <div className="empty-hint">Немає активних замовлень.</div>}
+
+      {list.map(s => {
+        const bothAgreed = isBothAgreed(s);
+        const fieldsEditable = canEditFields(s);
+        const rated = ratedOrders.has(s.id);
+        const showBigRate = canCustomerRate(s, rated);
+
+        return (
+          <div key={s.id} style={{ marginBottom: 18 }}>
+            <StatusStrip s={s} />
+
+            <ScenarioCard
+              role="customer"
+              s={s}
+              onChangeDesc={v => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
+              onCommitDesc={async v => {
+                if (!fieldsEditable) return;
+                await supabase
+                  .from('scenarios')
+                  .update({ description: v, status: 'pending', is_agreed_by_customer: false, is_agreed_by_executor: false })
+                  .eq('id', s.id);
+              }}
+              onChangeAmount={v => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
+              onCommitAmount={async v => {
+                if (!fieldsEditable) return;
+                if (v !== null && (!Number.isFinite(v) || v <= 0)) {
+                  alert('Сума має бути > 0');
+                  setLocal(s.id, { donation_amount_usdt: null });
+                  return;
+                }
+                await supabase
+                  .from('scenarios')
+                  .update({ donation_amount_usdt: v, status: 'pending', is_agreed_by_customer: false, is_agreed_by_executor: false })
+                  .eq('id', s.id);
+              }}
+              onAgree={() => handleAgree(s)}
+              onLock={() => handleLock(s)}
+              onConfirm={() => handleConfirm(s)}
+              onDispute={() => handleDispute(s)}
+              onOpenLocation={() => {
+                if (hasCoords(s)) {
+                  window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank');
+                } else {
+                  alert('Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію.');
+                }
+              }}
+              canAgree={canAgree(s)}
+              canLock={bothAgreed && !s.escrow_tx_hash}
+              canConfirm={canConfirm(s)}
+              canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
+              hasCoords={true}
+              isRated={rated}
+              onOpenRate={() => openRateFor(s)}
+            />
+
+            {showBigRate && (
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => openRateFor(s)}
+                  style={{
+                    width: '100%',
+                    maxWidth: 520,
+                    marginTop: 10,
+                    padding: '12px 18px',
+                    borderRadius: 999,
+                    background: '#ffd7e0',
+                    color: '#111',
+                    fontWeight: 800,
+                    border: '1px solid #f3c0ca',
+                    cursor: 'pointer',
+                    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.7)',
+                  }}
+                >
+                  ⭐ Оцінити виконавця
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <CelebrationToast open={toast} variant="customer" onClose={() => setToast(false)} />
+
+      <RateModal
+        open={rateOpen}
+        score={rateScore}
+        comment={rateComment}
+        onChangeScore={setRateScore}
+        onChangeComment={setRateComment}
+        onCancel={() => setRateOpen(false)}
+        onSave={saveRating}
+        disabled={rateBusy}
+      />
+    </div>
+  );
+}
