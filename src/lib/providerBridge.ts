@@ -1,91 +1,67 @@
-// src/lib/providerBridge.ts
 import MetaMaskSDK from '@metamask/sdk';
-import { ethers } from 'ethers';
 
-const APP_NAME = import.meta.env.VITE_APP_NAME || 'Buy My Behavior';
-const APP_URL  = import.meta.env.VITE_PUBLIC_APP_URL || 'https://www.buymybehavior.com';
+const APP_URL  = (import.meta as any).env?.VITE_PUBLIC_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+const APP_NAME = (import.meta as any).env?.VITE_APP_NAME || 'Buy My Behavior';
+const BSC_RPC  = (import.meta as any).env?.VITE_BSC_RPC || 'https://bsc-dataseed.binance.org';
 
-// chainId → hex
-function toHexChainId(val: string | number) {
-  if (typeof val === 'string' && val.startsWith('0x')) return val.toLowerCase();
-  const num = typeof val === 'string' ? Number(val) : val;
-  return '0x' + num.toString(16);
+let _sdk: MetaMaskSDK | null = null;
+let _provider: any | null = null;
+
+function hasWindow() { return typeof window !== 'undefined'; }
+
+function useInjectedIfAvailable(): any | null {
+  if (!hasWindow()) return null;
+  const eth = (window as any).ethereum;
+  if (eth && eth.isMetaMask) return eth;
+  return null;
 }
 
-const TARGET_CHAIN_HEX = toHexChainId(import.meta.env.VITE_CHAIN_ID || 56); // 56 → 0x38
-const RPC_URL = import.meta.env.VITE_BSC_RPC || 'https://bsc-dataseed.binance.org';
+function ensureSDK(): { provider: any } {
+  if (_provider) return { provider: _provider };
 
-let mmSdk: MetaMaskSDK | null = null;
-
-const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
-const hasInjectedMM = () => typeof (window as any).ethereum !== 'undefined';
-
-/**
- * Піднімаємо MetaMask SDK тільки коли треба (мобілка без injected провайдера)
- */
-function getOrCreateSdk() {
-  if (mmSdk) return mmSdk;
-  mmSdk = new MetaMaskSDK({
-    dappMetadata: { name: APP_NAME, url: APP_URL },
-    useDeeplink: true,
-    preferDeepLink: true, // відкриває саме додаток MetaMask
-    checkInstallationImmediately: false,
-    logging: { developerMode: false }
-  });
-  return mmSdk;
-}
-
-/**
- * 1) Конект до гаманця:
- *    - desktop: використовуємо injected window.ethereum
- *    - mobile: через MetaMask SDK робимо deeplink у додаток і повертаємось назад
- */
-export async function connectWallet() {
-  if (typeof window === 'undefined') throw new Error('No window');
-
-  let ethereum: any = (window as any).ethereum;
-
-  if (!ethereum && isMobile()) {
-    const sdk = getOrCreateSdk();
-    ethereum = sdk.getProvider();
-    (window as any).ethereum = ethereum;
+  const injected = useInjectedIfAvailable();
+  if (injected) {
+    _provider = injected;
+    return { provider: _provider };
   }
 
-  if (!ethereum) throw new Error('MetaMask не знайдено. Встановіть розширення/додаток.');
-
-  // запит на підключення
-  await ethereum.request({ method: 'eth_requestAccounts' });
-
-  return { provider: ethereum as any };
+  _sdk = new MetaMaskSDK({
+    dappMetadata: { name: APP_NAME, url: APP_URL },
+    logging: { developerMode: false },
+    checkInstallationImmediately: false,
+    storage: { enabled: true },
+    // WalletConnect не використовуємо
+  });
+  _provider = _sdk.getProvider();
+  return { provider: _provider };
 }
 
-/**
- * 2) Перемикаємо мережу на BNB Smart Chain (0x38), додаємо якщо нема
- */
+export async function connectWallet(): Promise<{ provider: any; accounts: string[]; chainId: string }> {
+  const { provider } = ensureSDK();
+  const accounts: string[] = await provider.request({ method: 'eth_requestAccounts' });
+  const chainId: string = await provider.request({ method: 'eth_chainId' });
+  return { provider, accounts, chainId };
+}
+
 export async function ensureBSC(provider?: any) {
-  const eth = provider || (window as any).ethereum;
-  if (!eth) throw new Error('Provider відсутній');
-
-  let cur: string | undefined;
-  try { cur = await eth.request({ method: 'eth_chainId' }); } catch {}
-
-  if (cur && cur.toLowerCase() === TARGET_CHAIN_HEX) return eth;
+  const eth = provider ?? ensureSDK().provider;
+  const chainId: string = await eth.request({ method: 'eth_chainId' });
+  if (chainId === '0x38') return;
 
   try {
     await eth.request({
       method: 'wallet_switchEthereumChain',
-      params: [{ chainId: TARGET_CHAIN_HEX }]
+      params: [{ chainId: '0x38' }],
     });
   } catch (err: any) {
-    // 4902 – мережа не додана в гаманець
     if (err?.code === 4902) {
       await eth.request({
         method: 'wallet_addEthereumChain',
         params: [{
-          chainId: TARGET_CHAIN_HEX,
+          chainId: '0x38',
           chainName: 'BNB Smart Chain',
           nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
-          rpcUrls: [RPC_URL],
+          rpcUrls: [BSC_RPC],
           blockExplorerUrls: ['https://bscscan.com']
         }]
       });
@@ -93,16 +69,25 @@ export async function ensureBSC(provider?: any) {
       throw err;
     }
   }
-  return eth;
 }
 
-/**
- * 3) Зручний хелпер для ethers.js
- */
-export function getEthers() {
-  const eth = (window as any).ethereum;
-  if (!eth) throw new Error('Provider відсутній');
-  const provider = new ethers.providers.Web3Provider(eth, 'any');
-  const signer = provider.getSigner();
-  return { provider, signer, eth };
+/** Чекаємо повернення з MetaMask (visibility/focus). */
+export function waitForReturn(timeoutMs = 15000): Promise<void> {
+  if (!hasWindow()) return Promise.resolve();
+  if (document.visibilityState === 'visible') return Promise.resolve();
+
+  return new Promise<void>((resolve, reject) => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') { cleanup(); resolve(); }
+    };
+    const onFocus = () => { cleanup(); resolve(); };
+    const t = setTimeout(() => { cleanup(); reject(new Error('Timeout:return')); }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(t);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', onFocus);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onFocus);
+  });
 }

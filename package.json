@@ -2,17 +2,13 @@
   "name": "bmb-app",
   "version": "1.0.0",
   "private": true,
-  "engines": {
-    "node": "20.x"
-  },
+  "engines": { "node": "20.x" },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "clean": "rimraf node_modules package-lock.json pnpm-lock.yaml yarn.lock node_modules/.vite && npm cache clean --force",
-    "rebuild": "npm run clean && npm install && npm run vercel-build && npm run preview",
-    "fix-imports": "node scripts/sanitize-imports.cjs --fix",
-    "vercel-build": "node scripts/sanitize-imports.cjs --fix && vite build"
+    "vercel-build": "vite build",
+    "clean": "rimraf node_modules package-lock.json pnpm-lock.yaml yarn.lock node_modules/.vite && npm cache clean --force"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.10.1",
