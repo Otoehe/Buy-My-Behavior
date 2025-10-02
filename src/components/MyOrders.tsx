@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   quickOneClickSetup,
-  lockFunds,
+  lockFundsOneTap,
   confirmCompletionOnChain,
   getDealOnChain,
 } from '../lib/escrowContract';
@@ -22,14 +22,18 @@ import { ensureBSC, connectWallet } from '../lib/providerBridge';
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
-/* ─ Helpers (mobile-safe) ─ */
-const isMobileUA = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+/* ─ Helpers ─ */
+async function ensureProviderReady() {
+  const { provider } = await connectWallet();
+  await ensureBSC(provider);
+  return (window as any).ethereum;
+}
 
 async function withTimeout<T>(p: Promise<T>, ms = 8000, label = 'op'): Promise<T> {
-  return await Promise.race([
+  return (await Promise.race([
     p,
     new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Timeout:${label}`)), ms)) as any,
-  ]);
+  ])) as T;
 }
 
 function waitUntilVisible(timeoutMs = 15000): Promise<void> {
@@ -52,34 +56,6 @@ function waitUntilVisible(timeoutMs = 15000): Promise<void> {
       }
     });
   });
-}
-
-/** Надійно чекаємо, поки провайдер поверне хоча б 1 акаунт */
-async function waitForAccounts(eth: any, timeoutMs = 30000): Promise<string[]> {
-  const started = Date.now();
-  // одразу пробуємо запитати акаунти
-  try { await eth.request?.({ method: 'eth_requestAccounts' }); } catch {}
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const accs = await eth.request?.({ method: 'eth_accounts' });
-      if (Array.isArray(accs) && accs.length) return accs as string[];
-    } catch {}
-    await new Promise(r => setTimeout(r, 700));
-  }
-  throw new Error('Wallet connected but no accounts returned (timeout)');
-}
-
-async function ensureProviderReady() {
-  // 1) Підʼєднати провайдера (MetaMask SDK / WalletConnect)
-  const { provider } = await connectWallet();
-
-  // 2) Чітко дочекатися акаунтів
-  const eth = (window as any).ethereum || provider;
-  await waitForAccounts(eth);
-
-  // 3) Мережа
-  await ensureBSC(eth);
-  return eth;
 }
 
 /* ─ Stages ─ */
@@ -230,9 +206,13 @@ export default function MyOrders() {
               const before = prev[i];
               const after = { ...before, ...s };
 
+              // Нотифік при підтвердженні
               if (before.status !== 'confirmed' && after.status === 'confirmed') {
                 (async () => {
-                  try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
+                  try {
+                    SOUND.currentTime = 0;
+                    await SOUND.play();
+                  } catch {}
                   await pushNotificationManager.showNotification({
                     title: '🎉 Виконання підтверджено',
                     body: 'Escrow розподілив кошти.',
@@ -243,18 +223,15 @@ export default function MyOrders() {
                 setToast(true);
               }
 
-              // Автозапуск блокування після двох згод
+              // автозапуск блокування, якщо вже обидві згоди, а tx ще немає
               const bothAgreed = !!after.is_agreed_by_customer && !!after.is_agreed_by_executor;
               const needLock = bothAgreed && !after.escrow_tx_hash && after.creator_id === uid;
-
               const cp = [...prev];
               cp[i] = after;
-
               if (needLock && !(window as any).__locking) {
                 (window as any).__locking = true;
-                setTimeout(() => handleLock(after).finally(() => { (window as any).__locking = false; }), 0);
+                setTimeout(() => handleLock(after).finally(() => ((window as any).__locking = false)), 0);
               }
-
               return cp;
             }
             return prev;
@@ -272,8 +249,12 @@ export default function MyOrders() {
         .subscribe();
 
       return () => {
-        try { supabase.removeChannel(ch); } catch {}
-        try { supabase.removeChannel(chRatings); } catch {}
+        try {
+          supabase.removeChannel(ch);
+        } catch {}
+        try {
+          supabase.removeChannel(chRatings);
+        } catch {}
       };
     })();
   }, [load, list, refreshRated]);
@@ -281,7 +262,9 @@ export default function MyOrders() {
   useEffect(() => {
     if (!userId) return;
     refreshRated(userId, list);
-    list.forEach(s => { if (s?.id) loadOpenDispute(s.id); });
+    list.forEach(s => {
+      if (s?.id) loadOpenDispute(s.id);
+    });
   }, [userId, list, loadOpenDispute, refreshRated]);
 
   const handleAgree = async (s: Scenario) => {
@@ -320,18 +303,26 @@ export default function MyOrders() {
     try {
       const eth = await ensureProviderReady();
 
-      // легкі «поштовхи» та перевірка акаунту
-      try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1'); } catch {}
-      const accs = await waitForAccounts(eth, 15000);
-      if (!accs?.length) throw new Error('MetaMask не надав акаунт');
+      // легкі «поштовхи» провайдера на мобільному
+      try {
+        await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1');
+      } catch {}
+      try {
+        await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2');
+      } catch {}
+      try {
+        await waitUntilVisible(15000);
+      } catch {}
 
-      try { await waitUntilVisible(15000); } catch {}
-
-      // approve (за потреби)
+      // наперед — approve, якщо треба
       await quickOneClickSetup();
+      try {
+        await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke3');
+      } catch {}
 
-      // lockFunds
-      const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
+      // one-tap: approve (якщо треба) → lockFunds
+      const tx = await lockFundsOneTap({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
+
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
       setLocal(s.id, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
     } catch (e: any) {
@@ -345,16 +336,23 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
-      const eth = await ensureProviderReady();
+      await ensureProviderReady();
+      const eth = (window as any).ethereum;
 
-      try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke4'); } catch {}
-      await waitForAccounts(eth, 15000);
-      try { await waitUntilVisible(15000); } catch {}
+      try {
+        await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke4');
+      } catch {}
+      try {
+        await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke5');
+      } catch {}
+      try {
+        await waitUntilVisible(15000);
+      } catch {}
 
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
 
-      await supabase.from('scenarios').update({ is_completed_by_customer: true }).eq('id', s.id).eq('is_agreed_by_customer', true);
+      await supabase.from('scenarios').update({ is_completed_by_customer: true }).eq('id', s.id).eq('is_completed_by_customer', false);
 
       const deal = await getDealOnChain(s.id);
       if (Number((deal as any).status) === 3) {
@@ -445,15 +443,24 @@ export default function MyOrders() {
             <ScenarioCard
               role="customer"
               s={s}
-              onChangeDesc={v => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
+              onChangeDesc={v => {
+                if (fieldsEditable) setLocal(s.id, { description: v });
+              }}
               onCommitDesc={async v => {
                 if (!fieldsEditable) return;
                 await supabase
                   .from('scenarios')
-                  .update({ description: v, status: 'pending', is_agreed_by_customer: false, is_agreed_by_executor: false })
+                  .update({
+                    description: v,
+                    status: 'pending',
+                    is_agreed_by_customer: false,
+                    is_agreed_by_executor: false,
+                  })
                   .eq('id', s.id);
               }}
-              onChangeAmount={v => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
+              onChangeAmount={v => {
+                if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v });
+              }}
               onCommitAmount={async v => {
                 if (!fieldsEditable) return;
                 if (v !== null && (!Number.isFinite(v) || v <= 0)) {
@@ -463,7 +470,12 @@ export default function MyOrders() {
                 }
                 await supabase
                   .from('scenarios')
-                  .update({ donation_amount_usdt: v, status: 'pending', is_agreed_by_customer: false, is_agreed_by_executor: false })
+                  .update({
+                    donation_amount_usdt: v,
+                    status: 'pending',
+                    is_agreed_by_customer: false,
+                    is_agreed_by_executor: false,
+                  })
                   .eq('id', s.id);
               }}
               onAgree={() => handleAgree(s)}
