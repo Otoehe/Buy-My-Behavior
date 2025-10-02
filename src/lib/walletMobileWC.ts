@@ -1,26 +1,22 @@
 // src/lib/walletMobileWC.ts
-// WalletConnect v2 з глибоким посиланням у MetaMask Mobile + авто-перемикання на BSC
-
+// WalletConnect v2 для мобільного: deeplink у MetaMask + надійний handshake після повернення
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
 import EthereumProvider from '@walletconnect/ethereum-provider';
 
-const WC_PID = import.meta.env.VITE_WC_PROJECT_ID as string;   // обов'язково заповнено
-const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38'; // 0x38 = 56
+const WC_PID = import.meta.env.VITE_WC_PROJECT_ID as string;
+const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38'; // BSC
 export const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
 export const CHAIN_ID_DEC = parseInt(CHAIN_ID_HEX, 16);
 
 let _provider: any | null = null;
 let _ready = false;
 
-function isMobileUA(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
-}
+const isMobileUA = () =>
+  typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
 
-function ensureWindowEthereum(p: any) {
-  if (typeof window !== 'undefined') {
-    (window as any).ethereum = p;
-  }
+function setWindowEthereum(p: any) {
+  if (typeof window !== 'undefined') (window as any).ethereum = p;
 }
 
 async function ensureSwitchToBSC(eth: any) {
@@ -47,14 +43,42 @@ async function ensureSwitchToBSC(eth: any) {
         throw e;
       }
     }
-  } catch {
-    // ігноруємо — юзер може сам перемкнути
+  } catch {/* ігноруємо */}
+}
+
+// чекаємо, поки юзер повернеться у вкладку (після оверлею "Return to app")
+function waitUntilVisible(timeoutMs = 20000): Promise<void> {
+  if (typeof document === 'undefined' || document.visibilityState === 'visible') return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        document.removeEventListener('visibilitychange', onVis);
+        resolve();
+      }
+    };
+    const t = setTimeout(() => {
+      document.removeEventListener('visibilitychange', onVis);
+      reject(new Error('Timeout: visible'));
+    }, timeoutMs);
+    document.addEventListener('visibilitychange', onVis);
+  });
+}
+
+// опитуємо гаманця, поки не зʼявляться акаунти
+async function waitForAccounts(eth: any, timeoutMs = 30000): Promise<string[]> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const accs: string[] = await eth.request({ method: 'eth_accounts' });
+      if (Array.isArray(accs) && accs.length > 0) return accs;
+    } catch {}
+    await new Promise(r => setTimeout(r, 700));
   }
+  throw new Error('Wallet not connected (no accounts)');
 }
 
 /**
- *  Ініціалізує WalletConnect і відкриває MetaMask Mobile через deeplink (без QR).
- *  Після конекту робить провайдер глобальним window.ethereum.
+ * Головна: ініціює WalletConnect, відкриває MetaMask і коректно завершує handshake
  */
 export async function ensureMobileWalletProvider(): Promise<any> {
   if (_ready && _provider) return _provider;
@@ -87,33 +111,34 @@ export async function ensureMobileWalletProvider(): Promise<any> {
     },
   });
 
-  // 2) Deeplink у MetaMask при генерації URI (критично для мобільного браузера)
+  // 2) Deeplink у MetaMask (Android/iOS)
   p.on?.('display_uri', (uri: string) => {
     if (!isMobileUA()) return;
     const link = `metamask://wc?uri=${encodeURIComponent(uri)}`;
     try { window.location.href = link; } catch {}
-    setTimeout(() => { try { window.open(link, '_blank'); } catch {} }, 400);
   });
 
-  // 3) Встановлюємо сесію (на мобільному це викличе metamask://wc?uri=...)
+  // 3) Запускаємо pairing (поки юзер у MetaMask)
+  await p.connect();
+
+  // 4) Після повернення у ваш додаток — завершуємо handshake
+  setWindowEthereum(p);
+  try { await waitUntilVisible(20000); } catch {}
+
   try {
-    await p.connect();
+    // інколи MetaMask ще «прокидається» — допомагає повторний request
+    try { await p.request({ method: 'eth_requestAccounts' }); } catch {}
+    await waitForAccounts(p, 30000);
   } catch {
-    // інколи connect кидає, але deeplink вже відправлено — продовжуємо
+    // остання спроба
+    try { await p.request({ method: 'eth_requestAccounts' }); } catch {}
+    await waitForAccounts(p, 15000);
   }
 
-  // 4) Робимо його глобальним провайдером
-  ensureWindowEthereum(p);
-
-  // 5) Запросимо акаунти (розбудить MM, якщо треба)
-  try {
-    await p.request({ method: 'eth_requestAccounts' });
-  } catch {}
-
-  // 6) Перемикаємо на BSC
+  // 5) Перемикаємо на BSC
   await ensureSwitchToBSC(p);
 
-  // 7) Слухачі
+  // 6) Слухачі
   p.on?.('disconnect', () => { _ready = false; _provider = null; });
 
   _provider = p;
