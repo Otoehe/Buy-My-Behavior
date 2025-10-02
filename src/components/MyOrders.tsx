@@ -17,21 +17,18 @@ import { initiateDispute, getLatestDisputeByScenario } from '../lib/disputeApi';
 import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
-import { ensureBSC, connectWallet } from '../lib/providerBridge';
+import { ensureBSC, connectWallet, primeMobileWalletDeeplink } from '../lib/providerBridge';
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
-/* ─ Mobile helpers ─ */
-const isMobileUA = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
-
+/* helpers */
 async function withTimeout<T>(p: Promise<T>, ms = 8000, label = 'op'): Promise<T> {
   return await Promise.race([
     p,
     new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Timeout:${label}`)), ms)) as any,
   ]);
 }
-
 function waitUntilVisible(timeoutMs = 15000): Promise<void> {
   if (document.visibilityState === 'visible') return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
@@ -53,55 +50,29 @@ function waitUntilVisible(timeoutMs = 15000): Promise<void> {
     });
   });
 }
-
 async function ensureProviderReady() {
-  // Гарантуємо наявність провайдера + правильну мережу
   const { provider } = await connectWallet();
   await ensureBSC(provider);
   return (window as any).ethereum;
 }
 
-/* ─ Stages ─ */
+/* state helpers */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
-
-const getStage = (s: Scenario) => {
-  if (s.status === 'confirmed') return 3;
-  if (s.escrow_tx_hash) return 2;
-  if (isBothAgreed(s)) return 1;
-  return 0;
-};
+const getStage = (s: Scenario) => (s.status === 'confirmed' ? 3 : s.escrow_tx_hash ? 2 : isBothAgreed(s) ? 1 : 0);
 
 function StatusStrip({ s }: { s: Scenario }) {
   const stage = getStage(s);
   const Dot = ({ active }: { active: boolean }) => (
-    <span
-      style={{
-        width: 10,
-        height: 10,
-        borderRadius: 9999,
-        display: 'inline-block',
-        margin: '0 6px',
-        background: active ? '#111' : '#e5e7eb',
-      }}
-    />
+    <span style={{
+      width: 10, height: 10, borderRadius: 9999, display: 'inline-block', margin: '0 6px',
+      background: active ? '#111' : '#e5e7eb',
+    }}/>
   );
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '6px 10px',
-        borderRadius: 10,
-        background: 'rgba(0,0,0,0.035)',
-        margin: '6px 0 10px',
-      }}
-    >
-      <Dot active={stage >= 0} />
-      <Dot active={stage >= 1} />
-      <Dot active={stage >= 2} />
-      <Dot active={stage >= 3} />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px',
+      borderRadius: 10, background: 'rgba(0,0,0,0.035)', margin: '6px 0 10px' }}>
+      <Dot active={stage >= 0} /><Dot active={stage >= 1} /><Dot active={stage >= 2} /><Dot active={stage >= 3} />
       <div style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>
         {stage === 0 && '• Угоду погоджено → далі кошти в Escrow'}
         {stage === 1 && '• Погоджено → кошти ще не заблоковані'}
@@ -135,10 +106,8 @@ export default function MyOrders() {
     setList(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
   const hasCoords = (s: Scenario) =>
-    typeof s.latitude === 'number' &&
-    Number.isFinite(s.latitude) &&
-    typeof s.longitude === 'number' &&
-    Number.isFinite(s.longitude);
+    typeof s.latitude === 'number' && Number.isFinite(s.latitude) &&
+    typeof s.longitude === 'number' && Number.isFinite(s.longitude);
 
   const canAgree = (s: Scenario) => !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
 
@@ -194,26 +163,21 @@ export default function MyOrders() {
           setList(prev => {
             if (ev === 'DELETE' && oldId) return prev.filter(x => x.id !== oldId);
             if (!s) return prev;
-
             if (s.creator_id !== uid) return prev.filter(x => x.id !== s.id);
 
             const i = prev.findIndex(x => x.id === s.id);
             if (ev === 'INSERT') {
               if (i === -1) return [s, ...prev];
-              const cp = [...prev];
-              cp[i] = { ...cp[i], ...s };
-              return cp;
+              const cp = [...prev]; cp[i] = { ...cp[i], ...s }; return cp;
             }
             if (ev === 'UPDATE') {
               if (i === -1) return prev;
               const before = prev[i];
               const after = { ...before, ...s };
+
               if (before.status !== 'confirmed' && after.status === 'confirmed') {
                 (async () => {
-                  try {
-                    SOUND.currentTime = 0;
-                    await SOUND.play();
-                  } catch {}
+                  try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
                   await pushNotificationManager.showNotification({
                     title: '🎉 Виконання підтверджено',
                     body: 'Escrow розподілив кошти.',
@@ -223,9 +187,8 @@ export default function MyOrders() {
                 })();
                 setToast(true);
               }
-              const cp = [...prev];
-              cp[i] = after;
-              return cp;
+
+              const cp = [...prev]; cp[i] = after; return cp;
             }
             return prev;
           });
@@ -242,12 +205,8 @@ export default function MyOrders() {
         .subscribe();
 
       return () => {
-        try {
-          supabase.removeChannel(ch);
-        } catch {}
-        try {
-          supabase.removeChannel(chRatings);
-        } catch {}
+        try { supabase.removeChannel(ch); } catch {}
+        try { supabase.removeChannel(chRatings); } catch {}
       };
     })();
   }, [load, list, refreshRated]);
@@ -255,13 +214,11 @@ export default function MyOrders() {
   useEffect(() => {
     if (!userId) return;
     refreshRated(userId, list);
-    list.forEach(s => {
-      if (s?.id) loadOpenDispute(s.id);
-    });
+    list.forEach(s => { if (s?.id) loadOpenDispute(s.id); });
   }, [userId, list, loadOpenDispute, refreshRated]);
 
   const handleAgree = async (s: Scenario) => {
-    if (agreeBusy[s.id] || !canAgree(s)) return;
+    if (agreeBusy[s.id] || !(!s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer)) return;
     setAgreeBusy(p => ({ ...p, [s.id]: true }));
     try {
       const { data: rec, error } = await supabase
@@ -282,30 +239,25 @@ export default function MyOrders() {
 
   const handleLock = async (s: Scenario) => {
     if (lockBusy[s.id]) return;
-    if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) {
-      alert('Сума має бути > 0');
-      return;
-    }
-    if (!isBothAgreed(s)) {
-      alert('Спершу потрібні дві згоди.');
-      return;
-    }
+    if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) { alert('Сума має бути > 0'); return; }
+    if (!(s.is_agreed_by_customer && s.is_agreed_by_executor)) { alert('Спершу потрібні дві згоди.'); return; }
     if (s.escrow_tx_hash) return;
+
+    // 🔴 ВАЖЛИВО: миттєво віддати deeplink у клік-жесті:
+    primeMobileWalletDeeplink('lock');
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
+      // далі — вже можна чекати проміси
       const eth = await ensureProviderReady();
 
-      // легкі "поштовхи" провайдера на мобільному
       try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1'); } catch {}
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2'); } catch {}
-      try { await waitUntilVisible(15000); } catch {}
+      try { await waitUntilVisible(20000); } catch {}
 
-      // approve (за потреби)
       await quickOneClickSetup();
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke3'); } catch {}
 
-      // lockFunds
       const tx = await lockFunds({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
       setLocal(s.id, { escrow_tx_hash: (tx?.hash || 'locked') as any, status: 'agreed' });
@@ -317,7 +269,11 @@ export default function MyOrders() {
   };
 
   const handleConfirm = async (s: Scenario) => {
-    if (confirmBusy[s.id] || !canConfirm(s)) return;
+    if (confirmBusy[s.id] || !s.escrow_tx_hash) return;
+
+    // те саме — миттєво підняти MM
+    primeMobileWalletDeeplink('confirm');
+
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
       await ensureProviderReady();
@@ -325,11 +281,10 @@ export default function MyOrders() {
 
       try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke4'); } catch {}
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke5'); } catch {}
-      try { await waitUntilVisible(15000); } catch {}
+      try { await waitUntilVisible(20000); } catch {}
 
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
-
       await supabase.from('scenarios').update({ is_completed_by_customer: true }).eq('id', s.id).eq('is_completed_by_customer', false);
 
       const deal = await getDealOnChain(s.id);
@@ -354,45 +309,13 @@ export default function MyOrders() {
     }
   };
 
-  const openRateFor = (s: Scenario) => {
-    setRateScore(10);
-    setRateComment('');
-    setRateFor({ scenarioId: s.id, counterpartyId: s.executor_id });
-    setRateOpen(true);
-  };
-
-  const saveRating = async () => {
-    if (!rateFor) return;
-    setRateBusy(true);
-    try {
-      await upsertRating({
-        scenarioId: rateFor.scenarioId,
-        rateeId: rateFor.counterpartyId,
-        score: rateScore,
-        comment: rateComment,
-      });
-      setRateOpen(false);
-      setRatedOrders(prev => new Set([...Array.from(prev), rateFor.scenarioId]));
-      window.dispatchEvent(new CustomEvent('ratings:updated', { detail: { userId: rateFor.counterpartyId } }));
-      alert('Рейтинг збережено ✅');
-    } catch (e: any) {
-      alert(e?.message ?? 'Помилка під час збереження рейтингу');
-    } finally {
-      setRateBusy(false);
-    }
-  };
-
   const headerRight = useMemo(
     () => (
       <div className="scenario-status-panel">
-        <span>
-          🔔 {permissionStatus === 'granted' ? 'Увімкнено' : permissionStatus === 'denied' ? 'Не підключено' : 'Не запитано'}
-        </span>
+        <span>🔔 {permissionStatus === 'granted' ? 'Увімкнено' : permissionStatus === 'denied' ? 'Не підключено' : 'Не запитано'}</span>
         <span>📡 {rt.isListening ? `${rt.method} активний` : 'Не підключено'}</span>
         {permissionStatus !== 'granted' && (
-          <button className="notify-btn" onClick={requestPermission}>
-            🔔 Дозволити
-          </button>
+          <button className="notify-btn" onClick={requestPermission}>🔔 Дозволити</button>
         )}
       </div>
     ),
@@ -409,10 +332,12 @@ export default function MyOrders() {
       {list.length === 0 && <div className="empty-hint">Немає активних замовлень.</div>}
 
       {list.map(s => {
-        const bothAgreed = isBothAgreed(s);
-        const fieldsEditable = canEditFields(s);
+        const bothAgreed = s.is_agreed_by_customer && s.is_agreed_by_executor;
+        const amountOk = Number(s.donation_amount_usdt) > 0;
+        const canLockBtn = Boolean(bothAgreed && amountOk && !s.escrow_tx_hash);
+        const fieldsEditable = !bothAgreed && !s.escrow_tx_hash && s.status !== 'confirmed';
         const rated = ratedOrders.has(s.id);
-        const showBigRate = canCustomerRate(s, rated);
+        const showBigRate = !!(s as any).is_completed_by_executor && !rated;
 
         return (
           <div key={s.id} style={{ marginBottom: 18 }}>
@@ -424,77 +349,46 @@ export default function MyOrders() {
               onChangeDesc={v => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async v => {
                 if (!fieldsEditable) return;
-                await supabase
-                  .from('scenarios')
-                  .update({
-                    description: v,
-                    status: 'pending',
-                    is_agreed_by_customer: false,
-                    is_agreed_by_executor: false,
-                  })
-                  .eq('id', s.id);
+                await supabase.from('scenarios').update({
+                  description: v, status: 'pending',
+                  is_agreed_by_customer: false, is_agreed_by_executor: false,
+                }).eq('id', s.id);
               }}
               onChangeAmount={v => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
               onCommitAmount={async v => {
                 if (!fieldsEditable) return;
                 if (v !== null && (!Number.isFinite(v) || v <= 0)) {
-                  alert('Сума має бути > 0');
-                  setLocal(s.id, { donation_amount_usdt: null });
-                  return;
+                  alert('Сума має бути > 0'); setLocal(s.id, { donation_amount_usdt: null }); return;
                 }
-                await supabase
-                  .from('scenarios')
-                  .update({
-                    donation_amount_usdt: v,
-                    status: 'pending',
-                    is_agreed_by_customer: false,
-                    is_agreed_by_executor: false,
-                  })
-                  .eq('id', s.id);
+                await supabase.from('scenarios').update({
+                  donation_amount_usdt: v, status: 'pending',
+                  is_agreed_by_customer: false, is_agreed_by_executor: false,
+                }).eq('id', s.id);
               }}
-              onAgree={() => handleAgree(s)}
+              onAgree={() => {/* погодження лише кнопкою нижче */}}
               onLock={() => handleLock(s)}
               onConfirm={() => handleConfirm(s)}
               onDispute={() => handleDispute(s)}
               onOpenLocation={() => {
-                if (hasCoords(s)) {
-                  window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank');
-                } else {
-                  alert('Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію.');
-                }
+                if (hasCoords(s)) window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank');
+                else alert('Локацію ще не встановлено або її не видно.');
               }}
-              canAgree={canAgree(s)}
-              canLock={bothAgreed && !s.escrow_tx_hash}
-              canConfirm={canConfirm(s)}
+              canAgree={!s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer}
+              canLock={canLockBtn}
+              canConfirm={(() => {
+                if (!s.escrow_tx_hash) return false;
+                if (s.is_completed_by_customer) return false;
+                const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
+                return !Number.isNaN(dt.getTime()) && new Date() >= dt;
+              })()}
               canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
               hasCoords={true}
               isRated={rated}
-              onOpenRate={() => openRateFor(s)}
+              onOpenRate={() => {
+                setRateScore(10); setRateComment(''); setRateFor({ scenarioId: s.id, counterpartyId: s.executor_id }); setRateOpen(true);
+              }}
+              lockBusy={!!lockBusy[s.id]}
             />
-
-            {showBigRate && (
-              <div style={{ display: 'flex', justifyContent: 'center' }}>
-                <button
-                  type="button"
-                  onClick={() => openRateFor(s)}
-                  style={{
-                    width: '100%',
-                    maxWidth: 520,
-                    marginTop: 10,
-                    padding: '12px 18px',
-                    borderRadius: 999,
-                    background: '#ffd7e0',
-                    color: '#111',
-                    fontWeight: 800,
-                    border: '1px solid #f3c0ca',
-                    cursor: 'pointer',
-                    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.7)',
-                  }}
-                >
-                  ⭐ Оцінити виконавця
-                </button>
-              </div>
-            )}
           </div>
         );
       })}
@@ -508,7 +402,21 @@ export default function MyOrders() {
         onChangeScore={setRateScore}
         onChangeComment={setRateComment}
         onCancel={() => setRateOpen(false)}
-        onSave={saveRating}
+        onSave={async () => {
+          if (!rateFor) return;
+          setRateBusy(true);
+          try {
+            await upsertRating({ scenarioId: rateFor.scenarioId, rateeId: rateFor.counterpartyId, score: rateScore, comment: rateComment });
+            setRateOpen(false);
+            setRatedOrders(prev => new Set([...Array.from(prev), rateFor.scenarioId]));
+            window.dispatchEvent(new CustomEvent('ratings:updated', { detail: { userId: rateFor.counterpartyId } }));
+            alert('Рейтинг збережено ✅');
+          } catch (e: any) {
+            alert(e?.message ?? 'Помилка під час збереження рейтингу');
+          } finally {
+            setRateBusy(false);
+          }
+        }}
         disabled={rateBusy}
       />
     </div>

@@ -1,254 +1,240 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
-// Універсальний міст провайдерів.
-// Порядок пріоритетів:
-// 1) MetaMask in-app браузер → injected provider (без будь-яких реєстрацій/редиректів)
-// 2) Desktop з MetaMask → injected provider
-// 3) Мобільний поза in-app → MetaMask SDK (deeplink) з shim у window.ethereum
-// 4) Fallback → WalletConnect v2 з deeplink у MetaMask
-
 import type { ExternalProvider } from '@ethersproject/providers';
 
-export type Eip1193Request = (args: { method: string; params?: any[] | Record<string, any> }) => Promise<any>;
-export type Eip1193Provider = ExternalProvider & {
-  request: Eip1193Request;
+export type Eip1193Provider = {
+  request: (args: { method: string; params?: any[] | Record<string, any> }) => Promise<any>;
   on?: (event: string, cb: (...args: any[]) => void) => void;
   removeListener?: (event: string, cb: (...args: any[]) => void) => void;
   isMetaMask?: boolean;
-  providers?: any[];
-  isConnected?: () => boolean;
-  connect?: () => Promise<void>;
-};
+} & ExternalProvider;
 
-const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38'; // BSC mainnet
-const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
+const IS_MOBILE =
+  typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+
+const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38';
+const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : '0x' + Number(RAW_CHAIN_ID).toString(16);
 const CHAIN_ID_DEC = parseInt(CHAIN_ID_HEX, 16);
 
-const BSC_RPC = (import.meta.env.VITE_BSC_RPC as string) || 'https://bsc-dataseed.binance.org';
-const APP_NAME = (import.meta.env.VITE_APP_NAME as string) || 'Buy My Behavior';
-const APP_URL  = (import.meta.env.VITE_PUBLIC_APP_URL as string) || (typeof window !== 'undefined' ? window.location.origin : 'https://buymybehavior.com');
 const WC_PROJECT_ID = import.meta.env.VITE_WC_PROJECT_ID as string;
 
-let cached: Eip1193Provider | null = null;
-let sdkInstance: any | null = null;
-
-// ───────────────── helpers ─────────────────
-const isMobile = () => typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
-const isMetaMaskInApp = () => typeof navigator !== 'undefined' && /MetaMaskMobile/i.test(navigator.userAgent || '');
-
-function pickInjected(): Eip1193Provider | null {
-  const eth = (globalThis as any).ethereum as Eip1193Provider | undefined;
-  if (!eth) return null;
-  if (Array.isArray((eth as any).providers) && (eth as any).providers.length) {
-    const mm = (eth as any).providers.find((p: any) => p && p.isMetaMask);
-    return (mm || (eth as any).providers[0]) as Eip1193Provider;
-  }
-  return eth ?? null;
-}
-
-function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
-
-async function pollAccounts(p: Eip1193Provider, totalMs = 25000, step = 500): Promise<string[]> {
-  const t0 = Date.now();
-  while (Date.now() - t0 < totalMs) {
-    try {
-      const accs: string[] = await p.request({ method: 'eth_accounts' });
-      if (Array.isArray(accs) && accs.length) return accs;
-    } catch {}
-    await sleep(step);
-  }
-  return [];
-}
-
-async function requestWithConnect(p: Eip1193Provider, method: string, params?: any): Promise<any> {
-  try {
-    return await p.request({ method, params });
-  } catch (err: any) {
-    // частий кейс на мобільному: “already processing request” → пробуємо дополучити акаунти
-    const msg = String(err?.message || '');
-    if (err?.code === -32002 || /already processing|request pending/i.test(msg)) {
-      const accs = await pollAccounts(p, 30000, 500);
-      if (method === 'eth_requestAccounts' && accs.length) return accs;
-    }
-    throw err;
-  }
-}
-
-function setWindowEthereum(p: Eip1193Provider) {
-  try { (globalThis as any).ethereum = p; } catch {}
-}
-
-async function ensureChainBSC(p: Eip1193Provider) {
-  let cid: any;
-  try {
-    cid = await requestWithConnect(p, 'eth_chainId');
-  } catch {}
-  const norm = typeof cid === 'number' ? '0x' + cid.toString(16) : String(cid || '').toLowerCase();
-  if (norm === CHAIN_ID_HEX.toLowerCase()) return;
-
-  try {
-    await requestWithConnect(p, 'wallet_switchEthereumChain', [{ chainId: CHAIN_ID_HEX }]);
-  } catch (e: any) {
-    if (e?.code === 4902 || /Unrecognized chain|not added/i.test(String(e?.message || ''))) {
-      await requestWithConnect(p, 'wallet_addEthereumChain', [{
-        chainId: CHAIN_ID_HEX,
-        chainName: 'Binance Smart Chain',
-        nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
-        rpcUrls: [BSC_RPC],
-        blockExplorerUrls: ['https://bscscan.com'],
-      }]);
-      await requestWithConnect(p, 'wallet_switchEthereumChain', [{ chainId: CHAIN_ID_HEX }]);
-    } else {
-      throw e;
-    }
-  }
-}
+let _cachedProvider: Eip1193Provider | null = null;
 
 // ───────────────── MetaMask SDK ─────────────────
-async function connectViaMetaMaskSDK(): Promise<Eip1193Provider> {
+let _sdk: any | null = null;
+async function connectMetaMaskSDK(): Promise<Eip1193Provider> {
   const { default: MetaMaskSDK } = await import('@metamask/sdk');
 
-  if (!sdkInstance) {
-    sdkInstance = new MetaMaskSDK({
-      dappMetadata: { name: APP_NAME, url: APP_URL },
+  if (!_sdk) {
+    _sdk = new MetaMaskSDK({
+      injectProvider: true,
       useDeeplink: true,
-      shouldShimWeb3: true,       // <-- важливо: інʼєктує window.ethereum
+      preferDesktop: false,
+      communicationLayerPreference: 'webrtc',
       checkInstallationImmediately: false,
-      logging: { developerMode: false },
-      enableAnalytics: false,
+      dappMetadata: {
+        name: 'Buy My Behavior',
+        url: typeof window !== 'undefined' ? window.location.origin : 'https://www.buymybehavior.com',
+      },
       modals: { install: false },
+      logging: { developerMode: false },
+      storage: localStorage,
     });
+    _sdk.getProvider();
   }
 
-  const provider = sdkInstance.getProvider() as Eip1193Provider;
-  setWindowEthereum(provider);
+  const eth = (window as any).ethereum as Eip1193Provider | undefined;
+  if (!eth) throw new Error('MetaMask provider не інʼєктувався');
 
-  // тригеримо відкриття MetaMask та сесію
-  try { await sdkInstance.connect(); } catch {}
+  await _sdk.connect().catch(() => { /* ігноруємо — deeplink все одно пішов */ });
 
-  // добиваємося наявності акаунтів
+  // access
   try {
-    await requestWithConnect(provider, 'eth_requestAccounts');
+    await eth.request({ method: 'eth_requestAccounts' });
   } catch {
-    const accs = await pollAccounts(provider, 30000, 500);
-    if (!accs.length) throw new Error('MetaMask SDK: не отримано акаунтів');
+    try {
+      await eth.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] as any });
+    } catch {}
+    await eth.request({ method: 'eth_accounts' });
   }
 
-  await ensureChainBSC(provider);
+  // network
+  try {
+    await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] as any });
+  } catch (err: any) {
+    if (err?.code === 4902) {
+      await eth.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: CHAIN_ID_HEX,
+          chainName: 'Binance Smart Chain',
+          nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+          rpcUrls: ['https://bsc-dataseed.binance.org/'],
+          blockExplorerUrls: ['https://bscscan.com'],
+        }] as any,
+      });
+      await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] as any });
+    } else {
+      throw err;
+    }
+  }
 
-  // підстрахуємо обриви
-  provider.on?.('disconnect', () => { cached = null; });
-  provider.on?.('chainChanged', () => {});
-  provider.on?.('accountsChanged', () => {});
-
-  return provider;
+  return eth;
 }
 
-// ───────────────── WalletConnect v2 → MetaMask deeplink ─────────────────
-// @ts-ignore типи інколи не підтягуються
+// ───────────────── WalletConnect v2 ─────────────────
+// @ts-ignore
 import EthereumProvider from '@walletconnect/ethereum-provider';
 
-async function connectViaWalletConnect(): Promise<Eip1193Provider> {
-  if (!WC_PROJECT_ID) throw new Error('VITE_WC_PROJECT_ID is missing');
+let __wcConnecting = false;
+let __deeplinkPrimedAt = 0;
 
-  const provider = await EthereumProvider.init({
+/**
+ * ВАЖЛИВО: Викликаємо в onClick БЕЗ `await` перед цим!
+ * Миттєво відкриває MetaMask (metamask://), паралельно стартує WC.
+ * Коли приходить display_uri — добиває універсальним лінком, який відкриє сесію.
+ */
+export function primeMobileWalletDeeplink(intent: 'lock' | 'approve' | 'confirm' = 'lock') {
+  if (!IS_MOBILE) return;
+
+  // 0) миттєвий "поштовх" — відкриє MetaMask (якщо дозволено ОС)
+  try {
+    // просто відкрити додаток; далі підʼєднаємося WC/SDK
+    window.location.href = 'metamask://';
+    __deeplinkPrimedAt = Date.now();
+  } catch {}
+
+  // 1) якщо вже створюємо WC — не дублюємо
+  if (__wcConnecting) return;
+  __wcConnecting = true;
+
+  (async () => {
+    try {
+      if (!WC_PROJECT_ID) throw new Error('VITE_WC_PROJECT_ID не заданий');
+      const provider: Eip1193Provider = (await EthereumProvider.init({
+        projectId: WC_PROJECT_ID,
+        showQrModal: false,
+        chains: [CHAIN_ID_DEC],
+        optionalChains: [CHAIN_ID_DEC],
+        methods: [
+          'eth_sendTransaction',
+          'personal_sign',
+          'eth_signTypedData',
+          'eth_sign',
+          'wallet_switchEthereumChain',
+          'wallet_addEthereumChain',
+          'eth_requestAccounts',
+        ],
+        events: ['chainChanged', 'accountsChanged', 'disconnect', 'session_event'],
+        rpcMap: { [CHAIN_ID_DEC]: 'https://bsc-dataseed.binance.org/' },
+        metadata: {
+          name: 'Buy My Behavior',
+          description: 'Web3 escrow',
+          url: typeof window !== 'undefined' ? window.location.origin : 'https://www.buymybehavior.com',
+          icons: ['https://www.buymybehavior.com/icon.png'],
+        },
+      })) as any;
+
+      // 2) як тільки зʼявився wc URI — відкриваємо універсальний лінк MM
+      provider.on?.('display_uri', (uri: string) => {
+        const uni = `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}`;
+        // віддати MM точний запит (вже знаходячись у фокусі або ще у браузері)
+        try { window.location.href = uni; } catch {}
+        // підстраховка
+        setTimeout(() => { try { window.location.href = uni; } catch {} }, 300);
+      });
+
+      // 3) старт сесії (без await — не блокуємо клік)
+      (provider as any).connect().catch(() => {});
+
+      // 4) кеш як глобальний ethereum (зручно для web3)
+      (window as any).ethereum = provider;
+      _cachedProvider = provider;
+    } catch (e) {
+      // fallback: при наступній спробі підемо через SDK
+    } finally {
+      // через секунду дозволимо перезапуск, якщо треба
+      setTimeout(() => { __wcConnecting = false; }, 1000);
+    }
+  })();
+}
+
+async function connectWalletConnect(): Promise<Eip1193Provider> {
+  if (!WC_PROJECT_ID) throw new Error('VITE_WC_PROJECT_ID не заданий у середовищі!');
+
+  const provider: Eip1193Provider = (await EthereumProvider.init({
     projectId: WC_PROJECT_ID,
     showQrModal: false,
     chains: [CHAIN_ID_DEC],
     optionalChains: [CHAIN_ID_DEC],
     methods: [
-      'eth_chainId','eth_accounts','eth_requestAccounts',
-      'wallet_switchEthereumChain','wallet_addEthereumChain',
-      'eth_sendTransaction','eth_sign','personal_sign',
-      'eth_signTypedData','eth_signTypedData_v4'
+      'eth_sendTransaction',
+      'personal_sign',
+      'eth_signTypedData',
+      'eth_sign',
+      'wallet_switchEthereumChain',
+      'wallet_addEthereumChain',
+      'eth_requestAccounts',
     ],
-    events: ['display_uri','accountsChanged','chainChanged','disconnect'],
-    rpcMap: { [CHAIN_ID_DEC]: BSC_RPC },
+    events: ['chainChanged', 'accountsChanged', 'disconnect', 'session_event'],
+    rpcMap: { [CHAIN_ID_DEC]: 'https://bsc-dataseed.binance.org/' },
     metadata: {
-      name: APP_NAME,
-      description: 'BMB dapp',
-      url: APP_URL,
-      icons: [`${APP_URL.replace(/\/$/, '')}/favicon.ico`],
+      name: 'Buy My Behavior',
+      description: 'Web3 escrow',
+      url: typeof window !== 'undefined' ? window.location.origin : 'https://www.buymybehavior.com',
+      icons: ['https://www.buymybehavior.com/icon.png'],
     },
-    qrModalOptions: {
-      desktopLinks: ['metamask'],
-      mobileLinks: ['metamask'],
-      preferDesktop: false,
-    },
-  }) as unknown as Eip1193Provider;
+  })) as any;
 
-  // Важливо: коли WC дає URI — відкриваємо MetaMask одразу
-  (provider as any).on?.('display_uri', (uri: string) => {
+  provider.on?.('display_uri', (uri: string) => {
     const link = `metamask://wc?uri=${encodeURIComponent(uri)}`;
     try { window.location.href = link; } catch {}
-    setTimeout(() => { try { window.open(link, '_blank'); } catch {} }, 350);
+    setTimeout(() => {
+      try { window.location.href = `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}`; } catch {}
+    }, 250);
   });
 
-  try { await (provider as any).connect(); } catch {}
+  try { await (provider as any).connect(); } catch (e) { throw e; }
 
-  setWindowEthereum(provider);
-
-  // дочікуємося акаунтів
+  // мережа
   try {
-    await requestWithConnect(provider, 'eth_requestAccounts');
-  } catch {
-    const accs = await pollAccounts(provider, 30000, 500);
-    if (!accs.length) throw new Error('WalletConnect: не отримано акаунтів (Return to App?)');
+    await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] as any });
+  } catch (err: any) {
+    if (err?.code === 4902) {
+      await provider.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: CHAIN_ID_HEX,
+          chainName: 'Binance Smart Chain',
+          nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+          rpcUrls: ['https://bsc-dataseed.binance.org/'],
+          blockExplorerUrls: ['https://bscscan.com'],
+        }] as any,
+      });
+      await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] as any });
+    }
   }
-
-  await ensureChainBSC(provider);
-
-  provider.on?.('disconnect', () => { cached = null; });
 
   return provider;
 }
 
 // ───────────────── Публічне API ─────────────────
+export async function connectWallet(): Promise<{ provider: Eip1193Provider }> {
+  if (_cachedProvider) return { provider: _cachedProvider };
 
-export async function connectWallet(): Promise<{ provider: Eip1193Provider; accounts: string[]; chainId: string }> {
-  if (cached) {
-    const cid: any = await requestWithConnect(cached, 'eth_chainId').catch(() => null);
-    return { provider: cached, accounts: (await cached.request({ method: 'eth_accounts' }).catch(() => [])) || [], chainId: typeof cid === 'number' ? '0x' + cid.toString(16) : (cid || CHAIN_ID_HEX) };
+  // Desktop з інʼєктованим MM
+  if (!IS_MOBILE && (window as any).ethereum?.isMetaMask) {
+    _cachedProvider = (window as any).ethereum;
+    return { provider: _cachedProvider };
   }
 
-  // 1) MetaMask in-app → тільки injected, без жодних SDK/WC і БЕЗ повторної реєстрації
-  const injected = pickInjected();
-  if (isMetaMaskInApp() && injected) {
-    setWindowEthereum(injected);
-    try { await requestWithConnect(injected, 'eth_requestAccounts'); } catch {}
-    await ensureChainBSC(injected);
-    cached = injected;
-    const cid: any = await requestWithConnect(injected, 'eth_chainId').catch(() => CHAIN_ID_HEX);
-    const accounts: string[] = (await injected.request({ method: 'eth_accounts' }).catch(() => [])) || [];
-    return { provider: injected, accounts, chainId: typeof cid === 'number' ? '0x' + cid.toString(16) : (cid || CHAIN_ID_HEX) };
-  }
-
-  // 2) Desktop із MetaMask → injected
-  if (!isMobile() && injected?.isMetaMask) {
-    setWindowEthereum(injected);
-    try { await requestWithConnect(injected, 'eth_requestAccounts'); } catch {}
-    await ensureChainBSC(injected);
-    cached = injected;
-    const cid: any = await requestWithConnect(injected, 'eth_chainId').catch(() => CHAIN_ID_HEX);
-    const accounts: string[] = (await injected.request({ method: 'eth_accounts' }).catch(() => [])) || [];
-    return { provider: injected, accounts, chainId: typeof cid === 'number' ? '0x' + cid.toString(16) : (cid || CHAIN_ID_HEX) };
-  }
-
-  // 3) Мобільний зовнішній браузер → MetaMask SDK (deeplink)
-  if (isMobile()) {
+  if (IS_MOBILE) {
+    // якщо wc ще не вистрілив — можна підхопити SDK
     try {
-      const p = await connectViaMetaMaskSDK();
-      cached = p;
-      const cid: any = await requestWithConnect(p, 'eth_chainId').catch(() => CHAIN_ID_HEX);
-      const accounts: string[] = (await p.request({ method: 'eth_accounts' }).catch(() => [])) || [];
-      return { provider: p, accounts, chainId: typeof cid === 'number' ? '0x' + cid.toString(16) : (cid || CHAIN_ID_HEX) };
+      _cachedProvider = await connectMetaMaskSDK();
+      return { provider: _cachedProvider };
     } catch {
-      // 4) Fallback → WalletConnect
-      const p = await connectViaWalletConnect();
-      cached = p;
-      const cid: any = await requestWithConnect(p, 'eth_chainId').catch(() => CHAIN_ID_HEX);
-      const accounts: string[] = (await p.request({ method: 'eth_accounts' }).catch(() => [])) || [];
-      return { provider: p, accounts, chainId: typeof cid === 'number' ? '0x' + cid.toString(16) : (cid || CHAIN_ID_HEX) };
+      _cachedProvider = await connectWalletConnect();
+      return { provider: _cachedProvider };
     }
   }
 
@@ -256,5 +242,27 @@ export async function connectWallet(): Promise<{ provider: Eip1193Provider; acco
 }
 
 export async function ensureBSC(provider: Eip1193Provider): Promise<void> {
-  await ensureChainBSC(provider);
+  try {
+    const cid = await provider.request({ method: 'eth_chainId' });
+    if (String(cid).toLowerCase() === CHAIN_ID_HEX.toLowerCase()) return;
+  } catch {}
+  try {
+    await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] as any });
+  } catch (err: any) {
+    if (err?.code === 4902) {
+      await provider.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: CHAIN_ID_HEX,
+          chainName: 'Binance Smart Chain',
+          nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+          rpcUrls: ['https://bsc-dataseed.binance.org/'],
+          blockExplorerUrls: ['https://bscscan.com'],
+        }] as any,
+      });
+      await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] as any });
+    } else {
+      throw err;
+    }
+  }
 }
