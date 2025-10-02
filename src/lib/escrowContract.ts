@@ -66,6 +66,18 @@ async function assertNetworkAndCode(eip1193: Eip1193Provider, web3: ethers.provi
   if (!codeUsdt || codeUsdt === '0x') throw new Error('USDT_ADDRESS не є контрактом у цій мережі');
 }
 
+// ---- Allowance helpers ----
+export async function getAllowanceWei(ownerAddress?: string): Promise<{ wei: ethers.BigNumber; decimals: number }> {
+  const { signer, addr } = await getWeb3Bundle();
+  const owner = ownerAddress ?? addr;
+  const token = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
+  const [decimals, allowance] = await Promise.all([
+    token.decimals(),
+    token.allowance(owner, ESCROW_ADDRESS),
+  ]);
+  return { wei: allowance as ethers.BigNumber, decimals };
+}
+
 async function ensureAllowance(
   signer: ethers.Signer,
   owner: string,
@@ -97,6 +109,7 @@ export async function approveUsdtUnlimited(): Promise<{ txHash: string } | null>
   return { txHash: rc.transactionHash };
 }
 
+// ---- Profiles helpers (Supabase) ----
 async function getWalletByUserId(userId: string): Promise<string | null> {
   if (!userId) return null;
   const { data, error } = await supabase.from('profiles').select('wallet').eq('user_id', userId).maybeSingle();
@@ -117,7 +130,6 @@ function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, executi
   return unix > 0 ? unix : Math.floor(Date.now() / 1000);
 }
 
-// “розбудити” підпис (для деяких прошивок)
 async function warmupSignature(signer: ethers.Signer) {
   try {
     await signer.signMessage('BMB warmup ' + Date.now());
@@ -233,7 +245,6 @@ export async function lockFunds(
   return tx;
 }
 
-// ── One-tap helper: approve якщо потрібно → одразу lockFunds
 export async function lockFundsOneTap(opts: {
   amount: number | string;
   scenarioId: string;

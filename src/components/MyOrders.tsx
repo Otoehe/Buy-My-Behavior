@@ -5,6 +5,8 @@ import {
   lockFundsOneTap,
   confirmCompletionOnChain,
   getDealOnChain,
+  getAllowanceWei,
+  approveUsdtUnlimited,
 } from '../lib/escrowContract';
 import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
 import { useRealtimeNotifications } from '../lib/realtimeNotifications';
@@ -22,7 +24,7 @@ import { ensureBSC, connectWallet } from '../lib/providerBridge';
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
-/* ─ Helpers ─ */
+/* ─ Provider helpers ─ */
 async function ensureProviderReady() {
   const { provider } = await connectWallet();
   await ensureBSC(provider);
@@ -115,9 +117,12 @@ export default function MyOrders() {
   const [agreeBusy, setAgreeBusy] = useState<Record<string, boolean>>({});
   const [confirmBusy, setConfirmBusy] = useState<Record<string, boolean>>({});
   const [lockBusy, setLockBusy] = useState<Record<string, boolean>>({});
+  const [approveBusy, setApproveBusy] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState(false);
   const [openDisputes, setOpenDisputes] = useState<Record<string, DisputeRow | null>>({});
   const [ratedOrders, setRatedOrders] = useState<Set<string>>(new Set());
+  const [walletAddr, setWalletAddr] = useState<string | null>(null);
+  const [allowanceOK, setAllowanceOK] = useState<Record<string, boolean>>({});
 
   const [rateOpen, setRateOpen] = useState(false);
   const [rateFor, setRateFor] = useState<{ scenarioId: string; counterpartyId: string } | null>(null);
@@ -148,11 +153,7 @@ export default function MyOrders() {
 
   const canCustomerRate = (s: Scenario, rated: boolean) => !!(s as any).is_completed_by_executor && !rated;
 
-  const loadOpenDispute = useCallback(async (scenarioId: string) => {
-    const d = await getLatestDisputeByScenario(scenarioId);
-    setOpenDisputes(prev => ({ ...prev, [scenarioId]: d && d.status === 'open' ? d : null }));
-  }, []);
-
+  // ---- Load list + realtime ----
   const load = useCallback(async (uid: string) => {
     const { data, error } = await supabase
       .from('scenarios')
@@ -181,6 +182,13 @@ export default function MyOrders() {
       setUserId(uid);
       await load(uid);
 
+      // спробувати підтягнути активний акаунт, якщо вже є
+      try {
+        const eth = (window as any).ethereum;
+        const accs = await eth?.request?.({ method: 'eth_accounts' });
+        if (accs?.[0]) setWalletAddr(String(accs[0]).toLowerCase());
+      } catch {}
+
       const ch = supabase
         .channel('realtime:myorders')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'scenarios' }, async p => {
@@ -206,13 +214,9 @@ export default function MyOrders() {
               const before = prev[i];
               const after = { ...before, ...s };
 
-              // Нотифік при підтвердженні
               if (before.status !== 'confirmed' && after.status === 'confirmed') {
                 (async () => {
-                  try {
-                    SOUND.currentTime = 0;
-                    await SOUND.play();
-                  } catch {}
+                  try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
                   await pushNotificationManager.showNotification({
                     title: '🎉 Виконання підтверджено',
                     body: 'Escrow розподілив кошти.',
@@ -223,15 +227,8 @@ export default function MyOrders() {
                 setToast(true);
               }
 
-              // автозапуск блокування, якщо вже обидві згоди, а tx ще немає
-              const bothAgreed = !!after.is_agreed_by_customer && !!after.is_agreed_by_executor;
-              const needLock = bothAgreed && !after.escrow_tx_hash && after.creator_id === uid;
               const cp = [...prev];
               cp[i] = after;
-              if (needLock && !(window as any).__locking) {
-                (window as any).__locking = true;
-                setTimeout(() => handleLock(after).finally(() => ((window as any).__locking = false)), 0);
-              }
               return cp;
             }
             return prev;
@@ -249,24 +246,42 @@ export default function MyOrders() {
         .subscribe();
 
       return () => {
-        try {
-          supabase.removeChannel(ch);
-        } catch {}
-        try {
-          supabase.removeChannel(chRatings);
-        } catch {}
+        try { supabase.removeChannel(ch); } catch {}
+        try { supabase.removeChannel(chRatings); } catch {}
       };
     })();
   }, [load, list, refreshRated]);
 
+  // ---- Allowance detection ----
+  const refreshAllowanceFor = useCallback(async (s: Scenario) => {
+    if (!walletAddr) return;
+    if (!s.donation_amount_usdt || !isBothAgreed(s) || s.escrow_tx_hash) return;
+
+    try {
+      const { wei, decimals } = await getAllowanceWei(walletAddr);
+      const need = ethers.utils.parseUnits(String(s.donation_amount_usdt), decimals);
+      setAllowanceOK(prev => ({ ...prev, [s.id]: wei.gte(need) }));
+    } catch {
+      setAllowanceOK(prev => ({ ...prev, [s.id]: false }));
+    }
+  }, [walletAddr]);
+
+  useEffect(() => {
+    list.forEach(s => refreshAllowanceFor(s));
+  }, [walletAddr, list, refreshAllowanceFor]);
+
+  const loadOpenDispute = useCallback(async (scenarioId: string) => {
+    const d = await getLatestDisputeByScenario(scenarioId);
+    setOpenDisputes(prev => ({ ...prev, [scenarioId]: d && d.status === 'open' ? d : null }));
+  }, []);
+
   useEffect(() => {
     if (!userId) return;
     refreshRated(userId, list);
-    list.forEach(s => {
-      if (s?.id) loadOpenDispute(s.id);
-    });
+    list.forEach(s => { if (s?.id) loadOpenDispute(s.id); });
   }, [userId, list, loadOpenDispute, refreshRated]);
 
+  // ---- Actions ----
   const handleAgree = async (s: Scenario) => {
     if (agreeBusy[s.id] || !canAgree(s)) return;
     setAgreeBusy(p => ({ ...p, [s.id]: true }));
@@ -287,6 +302,21 @@ export default function MyOrders() {
     }
   };
 
+  const handleApprove = async (s: Scenario) => {
+    if (approveBusy[s.id]) return;
+    setApproveBusy(p => ({ ...p, [s.id]: true }));
+    try {
+      await ensureProviderReady();
+      await approveUsdtUnlimited(); // відкриє вікно Spending cap у MetaMask
+      await refreshAllowanceFor(s);
+      alert('Дозвіл налаштовано ✅');
+    } catch (e: any) {
+      alert(e?.message || 'Не вдалося погодити USDT.');
+    } finally {
+      setApproveBusy(p => ({ ...p, [s.id]: false }));
+    }
+  };
+
   const handleLock = async (s: Scenario) => {
     if (lockBusy[s.id]) return;
     if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) {
@@ -299,28 +329,21 @@ export default function MyOrders() {
     }
     if (s.escrow_tx_hash) return;
 
+    // не даємо блокувати без approve
+    if (!allowanceOK[s.id]) {
+      alert('Спершу натисніть «Погодити USDT».');
+      return;
+    }
+
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
       const eth = await ensureProviderReady();
 
-      // легкі «поштовхи» провайдера на мобільному
-      try {
-        await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1');
-      } catch {}
-      try {
-        await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2');
-      } catch {}
-      try {
-        await waitUntilVisible(15000);
-      } catch {}
+      try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke1'); } catch {}
+      try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke2'); } catch {}
+      try { await waitUntilVisible(15000); } catch {}
 
-      // наперед — approve, якщо треба
-      await quickOneClickSetup();
-      try {
-        await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke3');
-      } catch {}
-
-      // one-tap: approve (якщо треба) → lockFunds
+      // one-tap (approve вже є) → lock
       const tx = await lockFundsOneTap({ amount: Number(s.donation_amount_usdt), scenarioId: s.id });
 
       await supabase.from('scenarios').update({ escrow_tx_hash: tx?.hash || 'locked', status: 'agreed' }).eq('id', s.id);
@@ -339,15 +362,9 @@ export default function MyOrders() {
       await ensureProviderReady();
       const eth = (window as any).ethereum;
 
-      try {
-        await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke4');
-      } catch {}
-      try {
-        await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke5');
-      } catch {}
-      try {
-        await waitUntilVisible(15000);
-      } catch {}
+      try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke4'); } catch {}
+      try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke5'); } catch {}
+      try { await waitUntilVisible(15000); } catch {}
 
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
@@ -436,6 +453,9 @@ export default function MyOrders() {
         const rated = ratedOrders.has(s.id);
         const showBigRate = canCustomerRate(s, rated);
 
+        const canLock = bothAgreed && !s.escrow_tx_hash && !!allowanceOK[s.id];
+        const shouldShowApprove = bothAgreed && !s.escrow_tx_hash && allowanceOK[s.id] === false;
+
         return (
           <div key={s.id} style={{ marginBottom: 18 }}>
             <StatusStrip s={s} />
@@ -443,24 +463,15 @@ export default function MyOrders() {
             <ScenarioCard
               role="customer"
               s={s}
-              onChangeDesc={v => {
-                if (fieldsEditable) setLocal(s.id, { description: v });
-              }}
+              onChangeDesc={v => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async v => {
                 if (!fieldsEditable) return;
                 await supabase
                   .from('scenarios')
-                  .update({
-                    description: v,
-                    status: 'pending',
-                    is_agreed_by_customer: false,
-                    is_agreed_by_executor: false,
-                  })
+                  .update({ description: v, status: 'pending', is_agreed_by_customer: false, is_agreed_by_executor: false })
                   .eq('id', s.id);
               }}
-              onChangeAmount={v => {
-                if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v });
-              }}
+              onChangeAmount={v => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
               onCommitAmount={async v => {
                 if (!fieldsEditable) return;
                 if (v !== null && (!Number.isFinite(v) || v <= 0)) {
@@ -470,13 +481,10 @@ export default function MyOrders() {
                 }
                 await supabase
                   .from('scenarios')
-                  .update({
-                    donation_amount_usdt: v,
-                    status: 'pending',
-                    is_agreed_by_customer: false,
-                    is_agreed_by_executor: false,
-                  })
+                  .update({ donation_amount_usdt: v, status: 'pending', is_agreed_by_customer: false, is_agreed_by_executor: false })
                   .eq('id', s.id);
+                // оновити allowance-критерій після зміни суми
+                setTimeout(() => refreshAllowanceFor(s), 0);
               }}
               onAgree={() => handleAgree(s)}
               onLock={() => handleLock(s)}
@@ -490,13 +498,37 @@ export default function MyOrders() {
                 }
               }}
               canAgree={canAgree(s)}
-              canLock={bothAgreed && !s.escrow_tx_hash}
+              canLock={canLock}
               canConfirm={canConfirm(s)}
               canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
               hasCoords={true}
               isRated={rated}
               onOpenRate={() => openRateFor(s)}
             />
+
+            {/* ЯВНА кнопка Погодити USDT під карткою, як на десктопі */}
+            {shouldShowApprove && (
+              <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => handleApprove(s)}
+                  disabled={approveBusy[s.id]}
+                  style={{
+                    width: '100%',
+                    maxWidth: 520,
+                    padding: '12px 18px',
+                    borderRadius: 999,
+                    background: '#eef6ff',
+                    color: '#0b3b8c',
+                    fontWeight: 800,
+                    border: '1px solid #cfe3ff',
+                    cursor: 'pointer',
+                  }}
+                >
+                  ✅ Погодити USDT (spending cap)
+                </button>
+              </div>
+            )}
 
             {showBigRate && (
               <div style={{ display: 'flex', justifyContent: 'center' }}>
