@@ -21,7 +21,6 @@
     "@openzeppelin/contracts": "^5.4.0",
     "@supabase/auth-helpers-react": "^0.5.0",
     "@supabase/supabase-js": "^2.50.2",
-    "@walletconnect/ethereum-provider": "^2.11.1",
     "@web3-storage/w3up-client": "^17.3.0",
     "axios": "^1.11.0",
     "ethers": "5.7.2",
@@ -41,7 +40,7 @@
     "@types/react": "^18.0.28",
     "@types/react-dom": "^18.0.11",
     "@vitejs/plugin-react": "^4.3.2",
-    "dotenv": "^17.2.1",
+    "dotenv": "^16.4.5",
     "hardhat": "^2.22.10",
     "rimraf": "^5.0.10",
     "typescript": "^5.5.4",
@@ -53,9 +52,6 @@
     "@rollup/rollup-linux-x64-gnu": "4.24.0",
     "@rollup/rollup-linux-arm64-gnu": "4.24.0",
     "@rollup/rollup-darwin-x64": "4.24.0",
-    "@rollup/rollup-darwin-arm64": "4.24.0",
-    "@walletconnect/ethereum-provider": "2.11.1",
-    "@walletconnect/universal-provider": "2.11.1",
-    "@walletconnect/sign-client": "2.11.1"
+    "@rollup/rollup-darwin-arm64": "4.24.0"
   }
 }
