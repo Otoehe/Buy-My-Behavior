@@ -33,17 +33,36 @@ function isMobileUA(): boolean {
   if (typeof navigator === 'undefined') return false;
   return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
 }
-function getInjected(): Eip1193Provider | null {
-  const eth = (globalThis as any).ethereum as Eip1193Provider | undefined;
+function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+export async function waitForReturn(ms = 1200) { await delay(ms); }
+
+function pickFromProviders(eth: any): Eip1193Provider | null {
   if (!eth) return null;
-  if (Array.isArray((eth as any).providers) && (eth as any).providers.length) {
-    const mm = (eth as any).providers.find((p: any) => p && (p.isMetaMask || typeof p.request === 'function'));
-    return (mm || (eth as any).providers[0]) as Eip1193Provider;
+  const list: any[] = Array.isArray(eth.providers) ? eth.providers : [];
+  if (list.length) {
+    const mm = list.find(p => p && (p.isMetaMask || typeof p.request === 'function'));
+    return (mm || list[0]) as Eip1193Provider;
   }
   return eth as Eip1193Provider;
 }
-function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
-export async function waitForReturn(ms = 1200) { await delay(ms); }
+
+/** чекаємо до 1.5s поки MetaMask проінжектиться (деякі розширення/браузери) */
+async function waitInjected(timeoutMs = 1500): Promise<Eip1193Provider | null> {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    const eth = (globalThis as any).ethereum;
+    const p = pickFromProviders(eth);
+    if (p && typeof (p as any).request === 'function') return p;
+    await delay(100);
+  }
+  return null;
+}
+
+function assertProvider(p: any): asserts p is Eip1193Provider {
+  if (!p || typeof p.request !== 'function') {
+    throw new Error('Гаманець не готовий. Відкрийте MetaMask, поверніться у браузер і спробуйте ще раз.');
+  }
+}
 
 async function pollAccounts(provider: Eip1193Provider, timeoutMs = 30000, stepMs = 500): Promise<string[]> {
   const t0 = Date.now();
@@ -57,15 +76,8 @@ async function pollAccounts(provider: Eip1193Provider, timeoutMs = 30000, stepMs
   return [];
 }
 
-// Захист від “Cannot read ... request”
-function assertProvider(p: any): asserts p is Eip1193Provider {
-  if (!p || typeof p.request !== 'function') {
-    throw new Error('Гаманець не готовий. Відкрийте MetaMask, поверніться у браузер і спробуйте ще раз.');
-  }
-}
-
 async function requestWithConnect<T = any>(
-  provider: Eip1193Provider | undefined | null,
+  provider: Eip1193Provider,
   args: { method: string; params?: any[] | Record<string, any> },
   keyHint?: string
 ): Promise<T> {
@@ -77,21 +89,19 @@ async function requestWithConnect<T = any>(
       key,
       (async () => {
         try {
-          if (args.method !== 'eth_requestAccounts' && typeof provider!.connect === 'function') {
-            const isConn = typeof provider!.isConnected === 'function'
-              ? provider!.isConnected()
-              : Boolean((provider as any).session);
-            if (!isConn) { try { await provider!.connect!(); } catch {} }
+          if (args.method !== 'eth_requestAccounts' && typeof provider.connect === 'function') {
+            const isConn = typeof provider.isConnected === 'function' ? provider.isConnected() : Boolean((provider as any).session);
+            if (!isConn) { try { await provider.connect!(); } catch {} }
           }
-          return await provider!.request(args);
+          return await provider.request(args);
         } catch (err: any) {
           const msg = String(err?.message || '');
           if (/connect\(\)\s*before\s*request\(\)/i.test(msg)) {
-            try { await provider!.connect?.(); } catch {}
-            return await provider!.request(args);
+            try { await provider.connect?.(); } catch {}
+            return await provider.request(args);
           }
           if (err?.code === -32002 || /already pending/i.test(msg)) {
-            const res = await pollAccounts(provider!, 30000, 500);
+            const res = await pollAccounts(provider, 30000, 500);
             if (args.method === 'eth_requestAccounts' && res.length) return res as any;
           }
           throw err;
@@ -104,15 +114,15 @@ async function requestWithConnect<T = any>(
   return inflightByKey.get(key)!;
 }
 
-// ── MetaMask SDK (app-switch)
+// ── MetaMask SDK (app-switch) — мобільний браузер
 async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
-  const { MetaMaskSDK } = await import('@metamask/sdk');
+  const { default: MetaMaskSDK } = await import('@metamask/sdk');
 
   if (!globalMMSDK) {
     globalMMSDK = new MetaMaskSDK({
       dappMetadata: { name: APP_NAME, url: APP_URL },
       useDeeplink: true,
-      shouldShimWeb3: true,
+      shouldShimWeb3: true,      // дає window.ethereum
       checkInstallationImmediately: false,
       logging: { developerMode: false },
       enableAnalytics: false,
@@ -138,8 +148,9 @@ async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
 }
 
 // ── injected (desktop / MetaMask Browser)
-async function connectInjectedOnce(): Promise<ConnectResult> {
-  const provider = getInjected();
+async function connectInjectedOnce(existing?: Eip1193Provider): Promise<ConnectResult> {
+  const provider = existing ?? (await waitInjected());
+  if (!provider) throw new Error('MetaMask не знайдено у браузері.');
   assertProvider(provider);
 
   try {
@@ -157,24 +168,22 @@ async function connectInjectedOnce(): Promise<ConnectResult> {
 export async function connectWallet(): Promise<ConnectResult> {
   if (!connectInFlight) {
     connectInFlight = (async () => {
-      const injected = getInjected();
+      const injected = await waitInjected();
 
-      // Desktop / MetaMask Browser → injected
+      // Desktop: якщо є інжект — використовуємо його
       if (injected && !isMobileUA()) {
-        return await connectInjectedOnce();
+        return await connectInjectedOnce(injected);
       }
 
-      // Mobile, але вже всередині MetaMask Browser → injected
+      // Mobile: якщо всередині MetaMask Browser — інжект
       if (injected && isMobileUA()) {
         const ua = navigator.userAgent || '';
-        if (/MetaMaskMobile/i.test(ua)) return await connectInjectedOnce();
+        if (/MetaMaskMobile/i.test(ua)) return await connectInjectedOnce(injected);
       }
 
-      // Зовнішній мобільний браузер → SDK deeplink
+      // Mobile зовнішній браузер → SDK app-switch
       if (isMobileUA()) {
-        const res = await connectViaMetaMaskSDK();
-        assertProvider(res.provider);
-        return res;
+        return await connectViaMetaMaskSDK();
       }
 
       throw new Error('NO_WALLET_AVAILABLE');
@@ -220,6 +229,7 @@ export async function ensureBSC(provider: Eip1193Provider): Promise<void> {
   }
 }
 
+// Дрібні утиліти
 export async function getChainId(provider: Eip1193Provider): Promise<string> {
   assertProvider(provider);
   const id = await requestWithConnect<any>(provider, { method: 'eth_chainId' });
@@ -230,6 +240,7 @@ export async function getAccounts(provider: Eip1193Provider): Promise<string[]> 
   return requestWithConnect(provider, { method: 'eth_accounts' });
 }
 export function hasInjectedMetaMask(): boolean {
-  const p = getInjected();
-  return Boolean(p && (p as any).isMetaMask);
+  const eth = (globalThis as any).ethereum;
+  const p = pickFromProviders(eth);
+  return Boolean(p && (p as any).isMetaMask && typeof (p as any).request === 'function');
 }

@@ -1,3 +1,4 @@
+// src/components/MyOrders.tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import {
@@ -29,9 +30,9 @@ async function withTimeout<T>(p: Promise<T>, ms = 8000, label = "op"): Promise<T
   ]);
 }
 
-// 🔐 Гарантовано піднімаємо гаманець і мережу BSC перед будь-яким ончейн-екшеном
 async function ensureProviderReady() {
   const { provider } = await connectWallet();
+  // захист від “Cannot read … request”
   if (!provider || typeof (provider as any).request !== "function") {
     throw new Error("Гаманець ще не під'єднаний. Відкрийте MetaMask і підтвердіть підключення.");
   }
@@ -260,12 +261,14 @@ export default function MyOrders() {
     }
   };
 
-  /** 1) спочатку з scenarios: executor_wallet / referrer_wallet
-   *  2) якщо нема — profiles по user_id (executor_id)
+  /** Дістаємо адреси:
+   * 1) З рядка сценарію (executor_wallet / referrer_wallet).
+   * 2) Якщо порожньо — з profiles, де user_id = executor_id.
    */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = "0x0000000000000000000000000000000000000000";
 
+    // 1) з таблиці scenarios (перевага)
     let executor =
       (s as any).executor_wallet ||
       (s as any).executorAddress ||
@@ -278,7 +281,7 @@ export default function MyOrders() {
       (s as any).referrer ||
       null;
 
-    // fallback: профіль виконавця
+    // 2) fallback у профіль виконавця
     if (!executor && (s as any).executor_id) {
       const { data: prof } = await supabase.from("profiles").select("*").eq("user_id", (s as any).executor_id).single();
       if (prof) {
@@ -333,22 +336,16 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // 🔴 1) під’єднати гаманець і BSC (і виконати deeplink на мобільному)
-      await ensureProviderReady();
-      try { await waitForReturn(800); } catch {}
-
-      // 2) витягнути адреси та час
       const { executor, referrer } = await resolveWallets(s);
       const execTime = deriveExecutionTimeSec(s);
 
-      // 3) ончейн-бронювання (всередині escrowMobile робиться approve/lock)
       const res = await lockFundsMobileFlow({
         scenarioId: s.id,
         executor,
         referrer,
         amount: Number(s.donation_amount_usdt),
         executionTime: execTime,
-        onStatus: () => {},
+        onStatus: () => {}, // можна повісити підказки у UI
         waitConfirms: 1,
       });
 
@@ -373,7 +370,7 @@ export default function MyOrders() {
 
       try { await withTimeout(eth.request({ method: "eth_chainId" }), 4000, "poke4"); } catch {}
       try { await withTimeout(eth.request({ method: "eth_accounts" }), 4000, "poke5"); } catch {}
-      try { await waitForReturn(1200); } catch {}
+      try { await waitForReturn(15000); } catch {}
 
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
