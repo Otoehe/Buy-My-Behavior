@@ -1,56 +1,50 @@
-// src/components/MyOrders.tsx
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { supabase } from "../lib/supabase";
 import {
   confirmCompletionOnChain,
   getDealOnChain,
-} from '../lib/escrowContract';
-import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
-import { useRealtimeNotifications } from '../lib/realtimeNotifications';
-import CelebrationToast from './CelebrationToast';
-import './MyOrders.css';
+} from "../lib/escrowContract";
+import { pushNotificationManager, useNotifications } from "../lib/pushNotifications";
+import { useRealtimeNotifications } from "../lib/realtimeNotifications";
+import CelebrationToast from "./CelebrationToast";
+import "./MyOrders.css";
 
-import type { DisputeRow } from '../lib/tables';
-import { initiateDispute, getLatestDisputeByScenario } from '../lib/disputeApi';
+import type { DisputeRow } from "../lib/tables";
+import { initiateDispute, getLatestDisputeByScenario } from "../lib/disputeApi";
 
-import ScenarioCard, { Scenario, Status } from './ScenarioCard';
-import RateModal from './RateModal';
-import { upsertRating } from '../lib/ratings';
+import ScenarioCard, { Scenario, Status } from "./ScenarioCard";
+import RateModal from "./RateModal";
+import { upsertRating } from "../lib/ratings";
 
-import { connectWallet, ensureBSC, waitForReturn } from '../lib/providerBridge';
-import { lockFundsMobileFlow } from '../lib/escrowMobile';
+import { connectWallet, ensureBSC, waitForReturn } from "../lib/providerBridge";
+import { lockFundsMobileFlow } from "../lib/escrowMobile";
 
-const SOUND = new Audio('/notification.wav');
+const SOUND = new Audio("/notification.wav");
 SOUND.volume = 0.8;
 
-// ──────────────────────────────────────────────────────────────
-// small helper
-async function withTimeout<T>(p: Promise<T>, ms = 8000, label = 'op'): Promise<T> {
+async function withTimeout<T>(p: Promise<T>, ms = 8000, label = "op"): Promise<T> {
   return await Promise.race([
     p,
     new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Timeout:${label}`)), ms)) as any,
   ]);
 }
 
-// Надійно дістаємо провайдера і мережу (BSC)
 async function ensureProviderReady() {
   const { provider } = await connectWallet();
-
-  if (!provider || typeof (provider as any).request !== 'function') {
-    // зрозуміле повідомлення замість "cannot read 'request'"
-    throw new Error('Гаманець ще не під’єднаний. Відкрийте MetaMask і підтвердіть підключення.');
+  // захист від “Cannot read … request”
+  if (!provider || typeof (provider as any).request !== "function") {
+    throw new Error("Гаманець ще не під'єднаний. Відкрийте MetaMask і підтвердіть підключення.");
   }
-
   await ensureBSC(provider);
   return provider;
 }
 
 /* ─ helpers ─ */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
-const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
+const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== "confirmed";
 
 const getStage = (s: Scenario) => {
-  if (s.status === 'confirmed') return 3;
+  if (s.status === "confirmed") return 3;
   if (s.escrow_tx_hash) return 2;
   if (isBothAgreed(s)) return 1;
   return 0;
@@ -64,40 +58,40 @@ function StatusStrip({ s }: { s: Scenario }) {
         width: 10,
         height: 10,
         borderRadius: 9999,
-        display: 'inline-block',
-        margin: '0 6px',
-        background: active ? '#111' : '#e5e7eb',
+        display: "inline-block",
+        margin: "0 6px",
+        background: active ? "#111" : "#e5e7eb",
       }}
     />
   );
   return (
     <div
       style={{
-        display: 'flex',
-        alignItems: 'center',
+        display: "flex",
+        alignItems: "center",
         gap: 10,
-        padding: '6px 10px',
+        padding: "6px 10px",
         borderRadius: 10,
-        background: 'rgba(0,0,0,0.035)',
-        margin: '6px 0 10px',
+        background: "rgba(0,0,0,0.035)",
+        margin: "6px 0 10px",
       }}
     >
       <Dot active={stage >= 0} />
       <Dot active={stage >= 1} />
       <Dot active={stage >= 2} />
       <Dot active={stage >= 3} />
-      <div style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>
-        {stage === 0 && '• Угоду погоджено → далі кошти в Escrow'}
-        {stage === 1 && '• Погоджено → кошти ще не заблоковані'}
-        {stage === 2 && '• Кошти заблоковано → очікуємо виконання'}
-        {stage === 3 && '• Виконання підтверджено'}
+      <div style={{ fontSize: 12, color: "#6b7280", marginLeft: 8 }}>
+        {stage === 0 && "• Угоду погоджено → далі кошти в Escrow"}
+        {stage === 1 && "• Погоджено → кошти ще не заблоковані"}
+        {stage === 2 && "• Кошти заблоковано → очікуємо виконання"}
+        {stage === 3 && "• Виконання підтверджено"}
       </div>
     </div>
   );
 }
 
 export default function MyOrders() {
-  const [userId, setUserId] = useState('');
+  const [userId, setUserId] = useState("");
   const [list, setList] = useState<Scenario[]>([]);
   const [agreeBusy, setAgreeBusy] = useState<Record<string, boolean>>({});
   const [confirmBusy, setConfirmBusy] = useState<Record<string, boolean>>({});
@@ -109,7 +103,7 @@ export default function MyOrders() {
   const [rateOpen, setRateOpen] = useState(false);
   const [rateFor, setRateFor] = useState<{ scenarioId: string; counterpartyId: string } | null>(null);
   const [rateScore, setRateScore] = useState(10);
-  const [rateComment, setRateComment] = useState('');
+  const [rateComment, setRateComment] = useState("");
   const [rateBusy, setRateBusy] = useState(false);
 
   const { permissionStatus, requestPermission } = useNotifications();
@@ -119,17 +113,17 @@ export default function MyOrders() {
     setList(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
   const hasCoords = (s: Scenario) =>
-    typeof s.latitude === 'number' &&
+    typeof s.latitude === "number" &&
     Number.isFinite(s.latitude) &&
-    typeof s.longitude === 'number' &&
+    typeof s.longitude === "number" &&
     Number.isFinite(s.longitude);
 
-  const canAgree = (s: Scenario) => !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
+  const canAgree = (s: Scenario) => !s.escrow_tx_hash && s.status !== "confirmed" && !s.is_agreed_by_customer;
 
   const canConfirm = (s: Scenario) => {
     if (!s.escrow_tx_hash) return false;
     if (s.is_completed_by_customer) return false;
-    const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
+    const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || "00:00"}`);
     return !Number.isNaN(dt.getTime()) && new Date() >= dt;
   };
 
@@ -137,15 +131,15 @@ export default function MyOrders() {
 
   const loadOpenDispute = useCallback(async (scenarioId: string) => {
     const d = await getLatestDisputeByScenario(scenarioId);
-    setOpenDisputes(prev => ({ ...prev, [scenarioId]: d && d.status === 'open' ? d : null }));
+    setOpenDisputes(prev => ({ ...prev, [scenarioId]: d && d.status === "open" ? d : null }));
   }, []);
 
   const load = useCallback(async (uid: string) => {
     const { data, error } = await supabase
-      .from('scenarios')
-      .select('*')
-      .eq('creator_id', uid)
-      .order('created_at', { ascending: false });
+      .from("scenarios")
+      .select("*")
+      .eq("creator_id", uid)
+      .order("created_at", { ascending: false });
     if (error) console.error(error);
     setList(((data || []) as Scenario[]).filter(s => s.creator_id === uid));
   }, []);
@@ -156,7 +150,7 @@ export default function MyOrders() {
       return;
     }
     const ids = items.map(s => s.id);
-    const { data } = await supabase.from('ratings').select('order_id').eq('rater_id', uid).in('order_id', ids);
+    const { data } = await supabase.from("ratings").select("order_id").eq("rater_id", uid).in("order_id", ids);
     setRatedOrders(new Set((data || []).map((r: any) => r.order_id)));
   }, []);
 
@@ -169,36 +163,36 @@ export default function MyOrders() {
       await load(uid);
 
       const ch = supabase
-        .channel('realtime:myorders')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'scenarios' }, async p => {
-          const ev = p.eventType as 'INSERT' | 'UPDATE' | 'DELETE';
+        .channel("realtime:myorders")
+        .on("postgres_changes", { event: "*", schema: "public", table: "scenarios" }, async p => {
+          const ev = p.eventType as "INSERT" | "UPDATE" | "DELETE";
           const s = (p as any).new as Scenario | undefined;
           const oldId = (p as any).old?.id as string | undefined;
 
           setList(prev => {
-            if (ev === 'DELETE' && oldId) return prev.filter(x => x.id !== oldId);
+            if (ev === "DELETE" && oldId) return prev.filter(x => x.id !== oldId);
             if (!s) return prev;
 
             if (s.creator_id !== uid) return prev.filter(x => x.id !== s.id);
 
             const i = prev.findIndex(x => x.id === s.id);
-            if (ev === 'INSERT') {
+            if (ev === "INSERT") {
               if (i === -1) return [s, ...prev];
               const cp = [...prev];
               cp[i] = { ...cp[i], ...s };
               return cp;
             }
-            if (ev === 'UPDATE') {
+            if (ev === "UPDATE") {
               if (i === -1) return prev;
               const before = prev[i];
               const after = { ...before, ...s };
 
-              if (before.status !== 'confirmed' && after.status === 'confirmed') {
+              if (before.status !== "confirmed" && after.status === "confirmed") {
                 (async () => {
                   try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
                   await pushNotificationManager.showNotification({
-                    title: '🎉 Виконання підтверджено',
-                    body: 'Escrow розподілив кошти.',
+                    title: "🎉 Виконання підтверджено",
+                    body: "Escrow розподілив кошти.",
                     tag: `confirm-${after.id}`,
                     requireSound: true,
                   });
@@ -228,7 +222,7 @@ export default function MyOrders() {
 
       const chRatings = supabase
         .channel(`ratings:my:${uid}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'ratings', filter: `rater_id=eq.${uid}` }, async () => {
+        .on("postgres_changes", { event: "*", schema: "public", table: "ratings", filter: `rater_id=eq.${uid}` }, async () => {
           await refreshRated(uid, list);
         })
         .subscribe();
@@ -251,26 +245,29 @@ export default function MyOrders() {
     setAgreeBusy(p => ({ ...p, [s.id]: true }));
     try {
       const { data: rec, error } = await supabase
-        .from('scenarios')
-        .update({ is_agreed_by_customer: true, status: (s.is_agreed_by_executor ? 'agreed' : 'pending') as Status })
-        .eq('id', s.id)
-        .eq('is_agreed_by_customer', false)
+        .from("scenarios")
+        .update({ is_agreed_by_customer: true, status: (s.is_agreed_by_executor ? "agreed" : "pending") as Status })
+        .eq("id", s.id)
+        .eq("is_agreed_by_customer", false)
         .select()
         .single();
-      if (error && error.code !== 'PGRST116') throw error;
+      if (error && error.code !== "PGRST116") throw error;
       setLocal(s.id, { is_agreed_by_customer: true, status: rec?.status || s.status });
     } catch (e: any) {
-      alert(e?.message || 'Помилка погодження.');
+      alert(e?.message || "Помилка погодження.");
     } finally {
       setAgreeBusy(p => ({ ...p, [s.id]: false }));
     }
   };
 
-  /** Витягнути адреси виконавця/реферала зі сценарію або профілю. */
+  /** Витягнути адреси виконавця/реферала:
+   *   1) ПЕРШОЧЕРГОВО з поточного запису scenarios (executor_wallet / referrer_wallet)
+   *   2) якщо порожньо — з profiles за executor_id
+   */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
-    const ZERO = '0x0000000000000000000000000000000000000000';
+    const ZERO = "0x0000000000000000000000000000000000000000";
 
-    // 1) якщо раптом адреси вже збережені у сценарії
+    // 1) з рядка сценарію (те, що ти показував у скріні)
     let executor =
       (s as any).executor_wallet ||
       (s as any).executorAddress ||
@@ -283,9 +280,9 @@ export default function MyOrders() {
       (s as any).referrer ||
       null;
 
-    // 2) інакше — беремо з профілю за executor_id
+    // 2) fallback у профіль виконавця
     if (!executor && (s as any).executor_id) {
-      const { data: prof } = await supabase.from('profiles').select('*').eq('id', (s as any).executor_id).single();
+      const { data: prof } = await supabase.from("profiles").select("*").eq("user_id", (s as any).executor_id).single();
       if (prof) {
         executor =
           (prof as any).wallet ||
@@ -298,9 +295,7 @@ export default function MyOrders() {
           null;
 
         if (!referrer) {
-          referrer =
-            (prof as any).referrer_wallet ||
-            null;
+          referrer = (prof as any).referrer_wallet || null;
         }
       }
     }
@@ -308,7 +303,7 @@ export default function MyOrders() {
     referrer = (s as any).referrer_wallet ?? referrer ?? null;
 
     if (!executor) {
-      throw new Error('Не знайдено адресу гаманця виконавця для цієї угоди.');
+      throw new Error("Не знайдено адресу гаманця виконавця для цієї угоди.");
     }
 
     return { executor, referrer: referrer ?? ZERO };
@@ -320,7 +315,7 @@ export default function MyOrders() {
       if (!Number.isNaN(t)) return Math.floor(t / 1000);
     }
     if ((s as any).date) {
-      const t = new Date(`${(s as any).date}T${(s as any).time || '00:00'}`).getTime();
+      const t = new Date(`${(s as any).date}T${(s as any).time || "00:00"}`).getTime();
       if (!Number.isNaN(t)) return Math.floor(t / 1000);
     }
     return Math.floor(Date.now() / 1000) + 3600; // +1 година
@@ -329,11 +324,11 @@ export default function MyOrders() {
   const handleLock = async (s: Scenario) => {
     if (lockBusy[s.id]) return;
     if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) {
-      alert('Сума має бути > 0');
+      alert("Сума має бути > 0");
       return;
     }
     if (!isBothAgreed(s)) {
-      alert('Спершу потрібні дві згоди.');
+      alert("Спершу потрібні дві згоди.");
       return;
     }
     if (s.escrow_tx_hash) return;
@@ -354,13 +349,13 @@ export default function MyOrders() {
       });
 
       await supabase
-        .from('scenarios')
-        .update({ escrow_tx_hash: res.lockTxHash, status: 'agreed' })
-        .eq('id', s.id);
+        .from("scenarios")
+        .update({ escrow_tx_hash: res.lockTxHash, status: "agreed" })
+        .eq("id", s.id);
 
-      setLocal(s.id, { escrow_tx_hash: res.lockTxHash as any, status: 'agreed' });
+      setLocal(s.id, { escrow_tx_hash: res.lockTxHash as any, status: "agreed" });
     } catch (e: any) {
-      alert(e?.message || 'Не вдалося заблокувати кошти.');
+      alert(e?.message || "Не вдалося заблокувати кошти.");
     } finally {
       setLockBusy(p => ({ ...p, [s.id]: false }));
     }
@@ -372,22 +367,22 @@ export default function MyOrders() {
     try {
       const eth = await ensureProviderReady();
 
-      try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke4'); } catch {}
-      try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke5'); } catch {}
+      try { await withTimeout(eth.request({ method: "eth_chainId" }), 4000, "poke4"); } catch {}
+      try { await withTimeout(eth.request({ method: "eth_accounts" }), 4000, "poke5"); } catch {}
       try { await waitForReturn(15000); } catch {}
 
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
 
-      await supabase.from('scenarios').update({ is_completed_by_customer: true }).eq('id', s.id).eq('is_completed_by_customer', false);
+      await supabase.from("scenarios").update({ is_completed_by_customer: true }).eq("id", s.id).eq("is_completed_by_customer", false);
 
       const deal = await getDealOnChain(s.id);
       if (deal && Number((deal as any).status) === 3) {
-        await supabase.from('scenarios').update({ status: 'confirmed' }).eq('id', s.id);
+        await supabase.from("scenarios").update({ status: "confirmed" }).eq("id", s.id);
         setToast(true);
       }
     } catch (e: any) {
-      alert(e?.message || 'Помилка підтвердження.');
+      alert(e?.message || "Помилка підтвердження.");
     } finally {
       setConfirmBusy(p => ({ ...p, [s.id]: false }));
     }
@@ -396,16 +391,16 @@ export default function MyOrders() {
   const handleDispute = async (s: Scenario) => {
     try {
       const d = await initiateDispute(s.id);
-      setLocal(s.id, { status: 'disputed' } as any);
+      setLocal(s.id, { status: "disputed" } as any);
       setOpenDisputes(prev => ({ ...prev, [s.id]: d }));
     } catch (e: any) {
-      alert(e?.message || 'Не вдалося створити спір');
+      alert(e?.message || "Не вдалося створити спір");
     }
   };
 
   const openRateFor = (s: Scenario) => {
     setRateScore(10);
-    setRateComment('');
+    setRateComment("");
     setRateFor({ scenarioId: s.id, counterpartyId: s.executor_id });
     setRateOpen(true);
   };
@@ -422,10 +417,10 @@ export default function MyOrders() {
       });
       setRateOpen(false);
       setRatedOrders(prev => new Set([...Array.from(prev), rateFor.scenarioId]));
-      window.dispatchEvent(new CustomEvent('ratings:updated', { detail: { userId: rateFor.counterpartyId } }));
-      alert('Рейтинг збережено ✅');
+      window.dispatchEvent(new CustomEvent("ratings:updated", { detail: { userId: rateFor.counterpartyId } }));
+      alert("Рейтинг збережено ✅");
     } catch (e: any) {
-      alert(e?.message ?? 'Помилка під час збереження рейтингу');
+      alert(e?.message ?? "Помилка під час збереження рейтингу");
     } finally {
       setRateBusy(false);
     }
@@ -435,14 +430,14 @@ export default function MyOrders() {
     () => (
       <div className="scenario-status-panel">
         <span>
-          🔔 {permissionStatus === 'granted'
-            ? 'Увімкнено'
-            : permissionStatus === 'denied'
-              ? 'Не підключено'
-              : 'Не запитано'}
+          🔔 {permissionStatus === "granted"
+            ? "Увімкнено"
+            : permissionStatus === "denied"
+              ? "Не підключено"
+              : "Не запитано"}
         </span>
-        <span>📡 {rt.isListening ? `${rt.method} активний` : 'Не підключено'}</span>
-        {permissionStatus !== 'granted' && (
+        <span>📡 {rt.isListening ? `${rt.method} активний` : "Не підключено"}</span>
+        {permissionStatus !== "granted" && (
           <button className="notify-btn" onClick={requestPermission}>
             🔔 Дозволити
           </button>
@@ -478,22 +473,22 @@ export default function MyOrders() {
               onCommitDesc={async v => {
                 if (!fieldsEditable) return;
                 await supabase
-                  .from('scenarios')
-                  .update({ description: v, status: 'pending', is_agreed_by_customer: false, is_agreed_by_executor: false })
-                  .eq('id', s.id);
+                  .from("scenarios")
+                  .update({ description: v, status: "pending", is_agreed_by_customer: false, is_agreed_by_executor: false })
+                  .eq("id", s.id);
               }}
               onChangeAmount={v => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
               onCommitAmount={async v => {
                 if (!fieldsEditable) return;
                 if (v !== null && (!Number.isFinite(v) || v <= 0)) {
-                  alert('Сума має бути > 0');
+                  alert("Сума має бути > 0");
                   setLocal(s.id, { donation_amount_usdt: null });
                   return;
                 }
                 await supabase
-                  .from('scenarios')
-                  .update({ donation_amount_usdt: v, status: 'pending', is_agreed_by_customer: false, is_agreed_by_executor: false })
-                  .eq('id', s.id);
+                  .from("scenarios")
+                  .update({ donation_amount_usdt: v, status: "pending", is_agreed_by_customer: false, is_agreed_by_executor: false })
+                  .eq("id", s.id);
               }}
               onAgree={() => handleAgree(s)}
               onLock={() => handleLock(s)}
@@ -501,39 +496,39 @@ export default function MyOrders() {
               onDispute={() => handleDispute(s)}
               onOpenLocation={() => {
                 if (hasCoords(s)) {
-                  window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank');
+                  window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, "_blank");
                 } else {
-                  alert('Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію.');
+                  alert("Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію.");
                 }
               }}
               canAgree={canAgree(s)}
               canLock={bothAgreed && !s.escrow_tx_hash}
               canConfirm={canConfirm(s)}
-              canDispute={s.status !== 'confirmed' && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
+              canDispute={s.status !== "confirmed" && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
               hasCoords={true}
               isRated={rated}
               onOpenRate={() => openRateFor(s)}
             />
 
             {showBigRate && (
-              <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <div style={{ display: "flex", justifyContent: "center" }}>
                 <button
                   type="button"
                   onClick={() => openRateFor(s)}
                   style={{
-                    width: '100%',
+                    width: "100%",
                     maxWidth: 520,
                     marginTop: 10,
-                    padding: '12px 18px',
+                    padding: "12px 18px",
                     borderRadius: 999,
-                    background: '#ffd7e0',
-                    color: '#111',
+                    background: "#ffd7e0",
+                    color: "#111",
                     fontWeight: 800,
                     borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: '#f3c0ca',
-                    cursor: 'pointer',
-                    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.7)',
+                    borderStyle: "solid",
+                    borderColor: "#f3c0ca",
+                    cursor: "pointer",
+                    boxShadow: "inset 0 0 0 1px rgba(255,255,255,.7)",
                   }}
                 >
                   ⭐ Оцінити виконавця
