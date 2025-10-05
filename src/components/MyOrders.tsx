@@ -1,10 +1,6 @@
-// src/components/MyOrders.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import {
-  confirmCompletionOnChain,
-  getDealOnChain,
-} from '../lib/escrowContract';
+import { confirmCompletionOnChain, getDealOnChain } from '../lib/escrowContract';
 import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
 import { useRealtimeNotifications } from '../lib/realtimeNotifications';
 import CelebrationToast from './CelebrationToast';
@@ -36,7 +32,7 @@ async function ensureProviderReady() {
   return provider;
 }
 
-/* ─ helpers ─ */
+/* helpers */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
@@ -50,33 +46,18 @@ const getStage = (s: Scenario) => {
 function StatusStrip({ s }: { s: Scenario }) {
   const stage = getStage(s);
   const Dot = ({ active }: { active: boolean }) => (
-    <span
-      style={{
-        width: 10,
-        height: 10,
-        borderRadius: 9999,
-        display: 'inline-block',
-        margin: '0 6px',
-        background: active ? '#111' : '#e5e7eb',
-      }}
-    />
+    <span style={{
+      width: 10, height: 10, borderRadius: 9999, display: 'inline-block',
+      margin: '0 6px', background: active ? '#111' : '#e5e7eb',
+    }}/>
   );
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '6px 10px',
-        borderRadius: 10,
-        background: 'rgba(0,0,0,0.035)',
-        margin: '6px 0 10px',
-      }}
-    >
-      <Dot active={stage >= 0} />
-      <Dot active={stage >= 1} />
-      <Dot active={stage >= 2} />
-      <Dot active={stage >= 3} />
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px',
+      borderRadius: 10, background: 'rgba(0,0,0,0.035)', margin: '6px 0 10px',
+    }}>
+      <Dot active={stage >= 0} /><Dot active={stage >= 1} />
+      <Dot active={stage >= 2} /><Dot active={stage >= 3} />
       <div style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>
         {stage === 0 && '• Угоду погоджено → далі кошти в Escrow'}
         {stage === 1 && '• Погоджено → кошти ще не заблоковані'}
@@ -110,10 +91,8 @@ export default function MyOrders() {
     setList(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
   const hasCoords = (s: Scenario) =>
-    typeof s.latitude === 'number' &&
-    Number.isFinite(s.latitude) &&
-    typeof s.longitude === 'number' &&
-    Number.isFinite(s.longitude);
+    typeof s.latitude === 'number' && Number.isFinite(s.latitude) &&
+    typeof s.longitude === 'number' && Number.isFinite(s.longitude);
 
   const canAgree = (s: Scenario) => !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
 
@@ -257,38 +236,23 @@ export default function MyOrders() {
     }
   };
 
-  /** Витягнути адреси виконавця/реферала зі сценарію/профілю.
-   * Джерело істини: scenarios.executor_id -> profiles.user_id -> profiles.wallet
-   */
+  /** Джерело істини: scenarios.executor_id -> profiles.user_id -> profiles.wallet */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
-    // 0) якщо адреси вже лежать прямо у сценарії — використаємо
     let executor = (s as any).executor_wallet ?? null;
     let referrer = (s as any).referrer_wallet ?? null;
 
-    // 1) основний шлях: executor_id => profiles.wallet
     if (!executor) {
       const execId: string | null = (s as any).executor_id ?? null;
-      if (!execId) {
-        console.debug('[resolveWallets] Порожній executor_id у сценарію', s.id, s);
-        throw new Error('У сценарію відсутній виконавець (executor_id).');
-      }
+      if (!execId) throw new Error('У сценарію відсутній виконавець (executor_id).');
 
       const q = supabase.from('profiles').select('wallet').eq('user_id', execId).limit(1);
-      // maybeSingle для v2, fallback на single для v1
-      const { data, error } = ('maybeSingle' in q) ? await (q as any).maybeSingle() : await (q as any).single();
-      if (error) console.debug('[resolveWallets] Помилка читання profiles:', error);
-
+      const { data } = ('maybeSingle' in q) ? await (q as any).maybeSingle() : await (q as any).single();
       executor = data?.wallet ?? null;
     }
 
     if (!executor) {
-      console.debug('[resolveWallets] НЕ ЗНАЙШОВСЯ гаманець виконавця для сценарію:', {
-        scenarioId: s.id,
-        executor_id: (s as any).executor_id,
-        scenario: s,
-      });
       throw new Error('Не знайдено адресу гаманця виконавця для цієї угоди.');
     }
 
@@ -304,7 +268,7 @@ export default function MyOrders() {
       const t = new Date(`${(s as any).date}T${(s as any).time || '00:00'}`).getTime();
       if (!Number.isNaN(t)) return Math.floor(t / 1000);
     }
-    return Math.floor(Date.now() / 1000) + 3600; // +1 година
+    return Math.floor(Date.now() / 1000) + 3600;
   }
 
   const handleLock = async (s: Scenario) => {
@@ -321,6 +285,10 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
+      // ✅ спершу гарантовано підключаємо гаманець і мережу,
+      // щоб уникнути "reading 'request'" на мобільному
+      await ensureProviderReady();
+
       const { executor, referrer } = await resolveWallets(s);
       const execTime = deriveExecutionTimeSec(s);
 
@@ -334,8 +302,7 @@ export default function MyOrders() {
         waitConfirms: 1,
       });
 
-      await supabase
-        .from('scenarios')
+      await supabase.from('scenarios')
         .update({ escrow_tx_hash: res.lockTxHash, status: 'agreed' })
         .eq('id', s.id);
 
@@ -360,7 +327,10 @@ export default function MyOrders() {
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
 
-      await supabase.from('scenarios').update({ is_completed_by_customer: true }).eq('id', s.id).eq('is_completed_by_customer', false);
+      await supabase.from('scenarios')
+        .update({ is_completed_by_customer: true })
+        .eq('id', s.id)
+        .eq('is_completed_by_customer', false);
 
       const deal = await getDealOnChain(s.id);
       if (deal && Number((deal as any).status) === 3) {
@@ -424,9 +394,7 @@ export default function MyOrders() {
         </span>
         <span>📡 {rt.isListening ? `${rt.method} активний` : 'Не підключено'}</span>
         {permissionStatus !== 'granted' && (
-          <button className="notify-btn" onClick={requestPermission}>
-            🔔 Дозволити
-          </button>
+          <button className="notify-btn" onClick={requestPermission}>🔔 Дозволити</button>
         )}
       </div>
     ),
@@ -467,9 +435,7 @@ export default function MyOrders() {
               onCommitAmount={async v => {
                 if (!fieldsEditable) return;
                 if (v !== null && (!Number.isFinite(v) || v <= 0)) {
-                  alert('Сума має бути > 0');
-                  setLocal(s.id, { donation_amount_usdt: null });
-                  return;
+                  alert('Сума має бути > 0'); setLocal(s.id, { donation_amount_usdt: null }); return;
                 }
                 await supabase
                   .from('scenarios')
@@ -502,19 +468,10 @@ export default function MyOrders() {
                   type="button"
                   onClick={() => openRateFor(s)}
                   style={{
-                    width: '100%',
-                    maxWidth: 520,
-                    marginTop: 10,
-                    padding: '12px 18px',
-                    borderRadius: 999,
-                    background: '#ffd7e0',
-                    color: '#111',
-                    fontWeight: 800,
-                    borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: '#f3c0ca',
-                    cursor: 'pointer',
-                    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.7)',
+                    width: '100%', maxWidth: 520, marginTop: 10, padding: '12px 18px',
+                    borderRadius: 999, background: '#ffd7e0', color: '#111', fontWeight: 800,
+                    borderWidth: 1, borderStyle: 'solid', borderColor: '#f3c0ca',
+                    cursor: 'pointer', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.7)',
                   }}
                 >
                   ⭐ Оцінити виконавця

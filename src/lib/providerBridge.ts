@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { ethers } from 'ethers';
 
-// EIP-1193 types
 export type Eip1193Request = (args: {
   method: string;
   params?: any[] | Record<string, any>;
@@ -20,19 +20,21 @@ export interface Eip1193Provider {
 
 type ConnectResult = { provider: Eip1193Provider; accounts: string[]; chainId: string };
 
-// ENV
+// ── ENV
 const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38';
-const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
+const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x')
+  ? RAW_CHAIN_ID
+  : ('0x' + Number(RAW_CHAIN_ID).toString(16));
 const BSC_RPC  = (import.meta.env.VITE_BSC_RPC as string) || 'https://bsc-dataseed.binance.org';
 const APP_NAME = (import.meta.env.VITE_APP_NAME as string) || 'Buy My Behavior';
-const APP_URL  = (import.meta.env.VITE_PUBLIC_APP_URL as string) || (typeof window !== 'undefined' ? window.location.origin : 'https://buymybehavior.com');
+const APP_URL  = (import.meta.env.VITE_PUBLIC_APP_URL as string)
+  || (typeof window !== 'undefined' ? window.location.origin : 'https://buymybehavior.com');
 
-// internal state
 let connectInFlight: Promise<ConnectResult> | null = null;
 const inflightByKey = new Map<string, Promise<any>>();
 let globalMMSDK: any | null = null;
 
-// helpers
+// ── helpers
 function isMobileUA(): boolean {
   if (typeof navigator === 'undefined') return false;
   return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
@@ -71,7 +73,6 @@ async function requestWithConnect<T = any>(
       key,
       (async () => {
         try {
-          // Some SDK providers require connect() before request()
           if (args.method !== 'eth_requestAccounts' && typeof provider.connect === 'function') {
             const isConn =
               typeof provider.isConnected === 'function'
@@ -100,7 +101,7 @@ async function requestWithConnect<T = any>(
   return inflightByKey.get(key)!;
 }
 
-// MetaMask SDK (deep link flow for mobile browsers)
+// ── MetaMask SDK (app-switch)
 async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
   const { default: MetaMaskSDK } = await import('@metamask/sdk');
 
@@ -108,7 +109,8 @@ async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
     globalMMSDK = new MetaMaskSDK({
       dappMetadata: { name: APP_NAME, url: APP_URL },
       useDeeplink: true,
-      shouldShimWeb3: true, // makes window.ethereum visible
+      // важливо: шимаємо window.ethereum для бібліотек типу ethers
+      shouldShimWeb3: true,
       checkInstallationImmediately: false,
       logging: { developerMode: false },
       enableAnalytics: false,
@@ -117,7 +119,7 @@ async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
 
   const provider = globalMMSDK.getProvider() as Eip1193Provider;
 
-  // Ensure Ethers/other libs can see the provider
+  // підстрахуємось — прокинемо як injected
   (globalThis as any).ethereum = provider;
 
   const accounts: string[] = await requestWithConnect(provider, { method: 'eth_requestAccounts' }, 'sdk_eth_requestAccounts');
@@ -127,7 +129,7 @@ async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
   return { provider, accounts, chainId: String(chainId) };
 }
 
-// Injected (desktop & MetaMask in-app browser)
+// ── injected (desktop / MetaMask Browser)
 async function connectInjectedOnce(): Promise<ConnectResult> {
   const provider = getInjected();
   if (!provider) throw new Error('NO_INJECTED_PROVIDER');
@@ -143,26 +145,23 @@ async function connectInjectedOnce(): Promise<ConnectResult> {
   return { provider, accounts, chainId };
 }
 
-// Public entry
+// ── Публічний конектор
 export async function connectWallet(): Promise<ConnectResult> {
   if (!connectInFlight) {
     connectInFlight = (async () => {
       const injected = getInjected();
 
-      // Desktop / MetaMask Browser
-      if (injected && !isMobileUA()) {
-        return await connectInjectedOnce();
-      }
+      // Desktop / MetaMask Browser → injected
+      if (injected && !isMobileUA()) return await connectInjectedOnce();
+
+      // Якщо користувач уже всередині MetaMask Mobile (in-app browser) → injected
       if (injected && isMobileUA()) {
-        // If already in MetaMask in-app browser, still injected
         const ua = navigator.userAgent || '';
         if (/MetaMaskMobile/i.test(ua)) return await connectInjectedOnce();
       }
 
-      // Mobile external browser → SDK deep link
-      if (isMobileUA()) {
-        return await connectViaMetaMaskSDK();
-      }
+      // Mobile external browser → SDK app-switch
+      if (isMobileUA()) return await connectViaMetaMaskSDK();
 
       throw new Error('NO_WALLET_AVAILABLE');
     })().finally(() => setTimeout(() => { connectInFlight = null; }, 450));
@@ -170,8 +169,13 @@ export async function connectWallet(): Promise<ConnectResult> {
   return connectInFlight;
 }
 
-// Network helpers
+// ── мережа (з додатковим захистом)
 export async function ensureBSC(provider: Eip1193Provider): Promise<void> {
+  if (!provider || typeof (provider as any).request !== 'function') {
+    // зрозуміле повідомлення замість "cannot read 'request'"
+    throw new Error('Гаманець ще не під’єднаний. Відкрийте MetaMask і підтвердьте підключення.');
+  }
+
   let chainId: any = await requestWithConnect(provider, { method: 'eth_chainId' });
   if (typeof chainId === 'number') chainId = '0x' + chainId.toString(16);
   if (String(chainId).toLowerCase() === CHAIN_ID_HEX.toLowerCase()) return;
@@ -199,27 +203,26 @@ export async function ensureBSC(provider: Eip1193Provider): Promise<void> {
         },
         'wallet_addEthereumChain'
       );
-      return; // after add, MM usually switches automatically or prompts again
+      return;
     }
     throw err;
   }
 }
 
+// утиліта, яку використовуєш у компоненті
 export async function getChainId(provider: Eip1193Provider): Promise<string> {
   const id = await requestWithConnect<any>(provider, { method: 'eth_chainId' });
   return typeof id === 'number' ? '0x' + id.toString(16) : String(id);
 }
-
 export async function getAccounts(provider: Eip1193Provider): Promise<string[]> {
   return requestWithConnect(provider, { method: 'eth_accounts' });
 }
-
 export function hasInjectedMetaMask(): boolean {
   const p = getInjected();
   return Boolean(p && (p as any).isMetaMask);
 }
 
-// small utility used in MyOrders during confirm flow
-export async function waitForReturn(ms = 12000): Promise<void> {
+// зручно мати маленьку паузу після app-switch
+export async function waitForReturn(ms = 800): Promise<void> {
   await delay(ms);
 }
