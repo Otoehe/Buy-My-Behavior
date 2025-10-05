@@ -89,6 +89,15 @@ function StatusStrip({ s }: { s: Scenario }) {
   );
 }
 
+/** Взяти першу валідну 0x-адресу з переліку можливих ключів */
+function pickAddr(obj: any, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (typeof v === 'string' && /^0x[a-fA-F0-9]{40}$/.test(v)) return v;
+  }
+  return null;
+}
+
 export default function MyOrders() {
   const [userId, setUserId] = useState('');
   const [list, setList] = useState<Scenario[]>([]);
@@ -263,42 +272,47 @@ export default function MyOrders() {
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
+    // 1) Пробуємо прямо із запису сценарію
     let executor =
-      (s as any).executor_wallet ||
-      (s as any).executorAddress ||
-      (s as any).executor ||
+      pickAddr(s as any, ['executor_wallet', 'executorAddress', 'executor']) ||
       null;
 
     let referrer =
-      (s as any).referrer_wallet ||
-      (s as any).referrerAddress ||
-      (s as any).referrer ||
+      pickAddr(s as any, ['referrer_wallet', 'referrerAddress', 'referrer']) ||
       null;
 
+    // 2) Якщо нема — підтягнемо з профілю виконавця
     if (!executor && (s as any).executor_id) {
-      const { data: prof } = await supabase.from('profiles').select('*').eq('id', (s as any).executor_id).single();
+      const { data: prof, error } = await supabase
+        .from('profiles')
+        .select('id,wallet,wallet_address,metamask_wallet,bsc_wallet,eth_wallet,public_address,address,mm_address,referrer_wallet')
+        .eq('id', (s as any).executor_id)
+        .single();
+
+      if (error) console.warn('[resolveWallets] profiles fetch error:', error);
+
       if (prof) {
         executor =
-          (prof as any).wallet ||
-          (prof as any).wallet_address ||
-          (prof as any).metamask_wallet ||
-          (prof as any).bsc_wallet ||
-          (prof as any).eth_wallet ||
-          (prof as any).public_address ||
-          (prof as any).address ||
-          null;
+          pickAddr(prof, [
+            'wallet',
+            'wallet_address',
+            'metamask_wallet',
+            'bsc_wallet',
+            'eth_wallet',
+            'public_address',
+            'address',
+            'mm_address',
+          ]) || executor;
 
         if (!referrer) {
-          referrer =
-            (prof as any).referrer_wallet ||
-            null;
+          referrer = pickAddr(prof, ['referrer_wallet']) || referrer;
         }
       }
     }
 
-    referrer = (s as any).referrer_wallet ?? referrer ?? null;
-
+    // 3) Фінальна перевірка
     if (!executor) {
+      console.warn('[resolveWallets] no executor address for scenario:', { s });
       throw new Error('Не знайдено адресу гаманця виконавця для цієї угоди.');
     }
 
