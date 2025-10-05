@@ -2,8 +2,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import {
-  // quickOneClickSetup,            // ⟵ прибрано: не потрібно у новому мобільному флоу
-  // lockFunds,                      // ⟵ прибрано: замінено на lockFundsMobileFlow
+  // quickOneClickSetup, // не потрібно у новому флоу
+  // lockFunds,          // замінено на lockFundsMobileFlow
   confirmCompletionOnChain,
   getDealOnChain,
 } from '../lib/escrowContract';
@@ -19,9 +19,7 @@ import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 
-// ↓ наші містки до гаманця
 import { connectWallet, ensureBSC, waitForReturn } from '../lib/providerBridge';
-// ↓ новий єдиний мобільний флоу approve → lockFunds
 import { lockFundsMobileFlow } from '../lib/escrowMobile';
 
 const SOUND = new Audio('/notification.wav');
@@ -261,7 +259,7 @@ export default function MyOrders() {
     }
   };
 
-  /** Спроба знайти адреси гаманців виконавця/реферала з сценарію/профілю (без зламу схеми БД). */
+  /** Витягнути адреси виконавця/реферала зі сценарію або профілю. */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
@@ -277,7 +275,6 @@ export default function MyOrders() {
       (s as any).referrer ||
       null;
 
-    // якщо немає — пробуємо підтягнути з профілю виконавця
     if (!executor && (s as any).executor_id) {
       const { data: prof } = await supabase.from('profiles').select('*').eq('id', (s as any).executor_id).single();
       if (prof) {
@@ -291,7 +288,6 @@ export default function MyOrders() {
           (prof as any).address ||
           null;
 
-        // якщо у виконавця в профілі є referrer_wallet — спробуємо використати його за замовчуванням
         if (!referrer) {
           referrer =
             (prof as any).referrer_wallet ||
@@ -300,7 +296,6 @@ export default function MyOrders() {
       }
     }
 
-    // якщо у самого сценарію є referrer_wallet — це пріоритетніше
     referrer = (s as any).referrer_wallet ?? referrer ?? null;
 
     if (!executor) {
@@ -319,8 +314,7 @@ export default function MyOrders() {
       const t = new Date(`${(s as any).date}T${(s as any).time || '00:00'}`).getTime();
       if (!Number.isNaN(t)) return Math.floor(t / 1000);
     }
-    // запасний варіант: +1 год
-    return Math.floor(Date.now() / 1000) + 3600;
+    return Math.floor(Date.now() / 1000) + 3600; // +1 година
   }
 
   const handleLock = async (s: Scenario) => {
@@ -337,7 +331,6 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // мінімум кроків: клік → MetaMask → підтвердження → назад
       const { executor, referrer } = await resolveWallets(s);
       const execTime = deriveExecutionTimeSec(s);
 
@@ -347,10 +340,7 @@ export default function MyOrders() {
         referrer,
         amount: Number(s.donation_amount_usdt),
         executionTime: execTime,
-        onStatus: (st) => {
-          // Можна повісити індикатор якщо потрібно
-          // console.log('lock status:', st);
-        },
+        onStatus: () => {},
         waitConfirms: 1,
       });
 
@@ -530,7 +520,10 @@ export default function MyOrders() {
                     background: '#ffd7e0',
                     color: '#111',
                     fontWeight: 800,
-                    border: '1px solid #f3c0ca',
+                    // ✅ безпечний варіант замість "border: '1px solid #f3c0ca'"
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: '#f3c0ca',
                     cursor: 'pointer',
                     boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.7)',
                   }}
