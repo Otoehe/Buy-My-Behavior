@@ -1,3 +1,4 @@
+// src/components/MyOrders.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import {
@@ -256,56 +257,38 @@ export default function MyOrders() {
     }
   };
 
-  /** Витягнути адреси виконавця/реферала зі сценарію або профілю. */
+  /** Витягнути адреси виконавця/реферала зі сценарію/профілю.
+   * Джерело істини: scenarios.executor_id -> profiles.user_id -> profiles.wallet
+   */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
-    let executor =
-      (s as any).executor_wallet ||
-      (s as any).executorAddress ||
-      (s as any).executor ||
-      null;
+    // 0) якщо адреси вже лежать прямо у сценарії — використаємо
+    let executor = (s as any).executor_wallet ?? null;
+    let referrer = (s as any).referrer_wallet ?? null;
 
-    let referrer =
-      (s as any).referrer_wallet ||
-      (s as any).referrerAddress ||
-      (s as any).referrer ||
-      null;
-
-    const execId = (s as any).executor_id;
-
-    // 🔧 ВАЖЛИВО: в таблиці "profiles" ключ — user_id (не id)
-    if (!executor && execId) {
-      const { data: prof, error } = await supabase
-        .from('profiles')
-        .select('wallet,wallet_address,metamask_wallet,bsc_wallet,eth_wallet,public_address,address,referrer_wallet')
-        .eq('user_id', execId)
-        .single();
-
-      if (error && error.code !== 'PGRST116') {
-        console.warn('profiles lookup error:', error);
+    // 1) основний шлях: executor_id => profiles.wallet
+    if (!executor) {
+      const execId: string | null = (s as any).executor_id ?? null;
+      if (!execId) {
+        console.debug('[resolveWallets] Порожній executor_id у сценарію', s.id, s);
+        throw new Error('У сценарію відсутній виконавець (executor_id).');
       }
 
-      if (prof) {
-        executor =
-          (prof as any).wallet ||
-          (prof as any).wallet_address ||
-          (prof as any).metamask_wallet ||
-          (prof as any).bsc_wallet ||
-          (prof as any).eth_wallet ||
-          (prof as any).public_address ||
-          (prof as any).address ||
-          null;
+      const q = supabase.from('profiles').select('wallet').eq('user_id', execId).limit(1);
+      // maybeSingle для v2, fallback на single для v1
+      const { data, error } = ('maybeSingle' in q) ? await (q as any).maybeSingle() : await (q as any).single();
+      if (error) console.debug('[resolveWallets] Помилка читання profiles:', error);
 
-        if (!referrer) {
-          referrer = (prof as any).referrer_wallet || null;
-        }
-      }
+      executor = data?.wallet ?? null;
     }
 
-    referrer = (s as any).referrer_wallet ?? referrer ?? null;
-
     if (!executor) {
+      console.debug('[resolveWallets] НЕ ЗНАЙШОВСЯ гаманець виконавця для сценарію:', {
+        scenarioId: s.id,
+        executor_id: (s as any).executor_id,
+        scenario: s,
+      });
       throw new Error('Не знайдено адресу гаманця виконавця для цієї угоди.');
     }
 
