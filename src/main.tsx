@@ -1,3 +1,4 @@
+// src/main.tsx
 import './lib/metamaskGuard';
 
 import React from 'react';
@@ -5,17 +6,21 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 
-import { registerServiceWorker } from './lib/sw-guard';
+import { registerServiceWorker, applyServiceWorkerUpdate } from './lib/sw-guard';
 import UpdateToast from './components/UpdateToast';
 
 // DEV: чистимо старі SW/кеші
 if (import.meta.env.DEV && 'serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
-  if ('caches' in window) caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+  navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister()));
+  if ('caches' in window) caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)));
 }
 
-window.addEventListener('error', e => console.error('[GlobalError]', (e as any).error || e.message));
-window.addEventListener('unhandledrejection', e => console.error('[UnhandledRejection]', (e as any).reason));
+window.addEventListener('error', (e) =>
+  console.error('[GlobalError]', (e as any).error ?? (e as any).message)
+);
+window.addEventListener('unhandledrejection', (e) =>
+  console.error('[UnhandledRejection]', (e as any).reason)
+);
 
 console.log(import.meta.env.PROD ? 'BMB boot production' : 'BMB boot dev');
 
@@ -40,17 +45,23 @@ if (import.meta.env.PROD && HOST_OK) {
   registerServiceWorker(`/sw.js?v=${ver}`);
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistrations().then(rs => {
-      rs.forEach(r => {
+    navigator.serviceWorker.getRegistrations().then((rs) => {
+      rs.forEach((r) => {
         if (!r.active?.scriptURL.includes('sw.js')) r.unregister();
       });
     });
   }
 } else {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
+    navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister()));
   }
   if ('caches' in window) {
-    caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+    caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)));
   }
 }
+
+// Прив’язка кнопки «Оновити» (у твоєму UpdateToast зроби атрибут data-bmb-update)
+window.addEventListener('bmb:sw-update', () => {
+  const btn = document.querySelector('[data-bmb-update]') as HTMLButtonElement | null;
+  if (btn) btn.onclick = () => applyServiceWorkerUpdate();
+});
