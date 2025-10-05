@@ -1,6 +1,10 @@
+// src/components/MyOrders.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { confirmCompletionOnChain, getDealOnChain } from '../lib/escrowContract';
+import {
+  confirmCompletionOnChain,
+  getDealOnChain,
+} from '../lib/escrowContract';
 import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
 import { useRealtimeNotifications } from '../lib/realtimeNotifications';
 import CelebrationToast from './CelebrationToast';
@@ -19,6 +23,8 @@ import { lockFundsMobileFlow } from '../lib/escrowMobile';
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
+// ──────────────────────────────────────────────────────────────
+// small helper
 async function withTimeout<T>(p: Promise<T>, ms = 8000, label = 'op'): Promise<T> {
   return await Promise.race([
     p,
@@ -26,13 +32,20 @@ async function withTimeout<T>(p: Promise<T>, ms = 8000, label = 'op'): Promise<T
   ]);
 }
 
+// Надійно дістаємо провайдера і мережу (BSC)
 async function ensureProviderReady() {
   const { provider } = await connectWallet();
+
+  if (!provider || typeof (provider as any).request !== 'function') {
+    // зрозуміле повідомлення замість "cannot read 'request'"
+    throw new Error('Гаманець ще не під’єднаний. Відкрийте MetaMask і підтвердіть підключення.');
+  }
+
   await ensureBSC(provider);
   return provider;
 }
 
-/* helpers */
+/* ─ helpers ─ */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
@@ -46,18 +59,33 @@ const getStage = (s: Scenario) => {
 function StatusStrip({ s }: { s: Scenario }) {
   const stage = getStage(s);
   const Dot = ({ active }: { active: boolean }) => (
-    <span style={{
-      width: 10, height: 10, borderRadius: 9999, display: 'inline-block',
-      margin: '0 6px', background: active ? '#111' : '#e5e7eb',
-    }}/>
+    <span
+      style={{
+        width: 10,
+        height: 10,
+        borderRadius: 9999,
+        display: 'inline-block',
+        margin: '0 6px',
+        background: active ? '#111' : '#e5e7eb',
+      }}
+    />
   );
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px',
-      borderRadius: 10, background: 'rgba(0,0,0,0.035)', margin: '6px 0 10px',
-    }}>
-      <Dot active={stage >= 0} /><Dot active={stage >= 1} />
-      <Dot active={stage >= 2} /><Dot active={stage >= 3} />
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '6px 10px',
+        borderRadius: 10,
+        background: 'rgba(0,0,0,0.035)',
+        margin: '6px 0 10px',
+      }}
+    >
+      <Dot active={stage >= 0} />
+      <Dot active={stage >= 1} />
+      <Dot active={stage >= 2} />
+      <Dot active={stage >= 3} />
       <div style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>
         {stage === 0 && '• Угоду погоджено → далі кошти в Escrow'}
         {stage === 1 && '• Погоджено → кошти ще не заблоковані'}
@@ -91,8 +119,10 @@ export default function MyOrders() {
     setList(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
   const hasCoords = (s: Scenario) =>
-    typeof s.latitude === 'number' && Number.isFinite(s.latitude) &&
-    typeof s.longitude === 'number' && Number.isFinite(s.longitude);
+    typeof s.latitude === 'number' &&
+    Number.isFinite(s.latitude) &&
+    typeof s.longitude === 'number' &&
+    Number.isFinite(s.longitude);
 
   const canAgree = (s: Scenario) => !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
 
@@ -236,21 +266,46 @@ export default function MyOrders() {
     }
   };
 
-  /** Джерело істини: scenarios.executor_id -> profiles.user_id -> profiles.wallet */
+  /** Витягнути адреси виконавця/реферала зі сценарію або профілю. */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
-    let executor = (s as any).executor_wallet ?? null;
-    let referrer = (s as any).referrer_wallet ?? null;
+    // 1) якщо раптом адреси вже збережені у сценарії
+    let executor =
+      (s as any).executor_wallet ||
+      (s as any).executorAddress ||
+      (s as any).executor ||
+      null;
 
-    if (!executor) {
-      const execId: string | null = (s as any).executor_id ?? null;
-      if (!execId) throw new Error('У сценарію відсутній виконавець (executor_id).');
+    let referrer =
+      (s as any).referrer_wallet ||
+      (s as any).referrerAddress ||
+      (s as any).referrer ||
+      null;
 
-      const q = supabase.from('profiles').select('wallet').eq('user_id', execId).limit(1);
-      const { data } = ('maybeSingle' in q) ? await (q as any).maybeSingle() : await (q as any).single();
-      executor = data?.wallet ?? null;
+    // 2) інакше — беремо з профілю за executor_id
+    if (!executor && (s as any).executor_id) {
+      const { data: prof } = await supabase.from('profiles').select('*').eq('id', (s as any).executor_id).single();
+      if (prof) {
+        executor =
+          (prof as any).wallet ||
+          (prof as any).wallet_address ||
+          (prof as any).metamask_wallet ||
+          (prof as any).bsc_wallet ||
+          (prof as any).eth_wallet ||
+          (prof as any).public_address ||
+          (prof as any).address ||
+          null;
+
+        if (!referrer) {
+          referrer =
+            (prof as any).referrer_wallet ||
+            null;
+        }
+      }
     }
+
+    referrer = (s as any).referrer_wallet ?? referrer ?? null;
 
     if (!executor) {
       throw new Error('Не знайдено адресу гаманця виконавця для цієї угоди.');
@@ -268,7 +323,7 @@ export default function MyOrders() {
       const t = new Date(`${(s as any).date}T${(s as any).time || '00:00'}`).getTime();
       if (!Number.isNaN(t)) return Math.floor(t / 1000);
     }
-    return Math.floor(Date.now() / 1000) + 3600;
+    return Math.floor(Date.now() / 1000) + 3600; // +1 година
   }
 
   const handleLock = async (s: Scenario) => {
@@ -285,10 +340,6 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // ✅ спершу гарантовано підключаємо гаманець і мережу,
-      // щоб уникнути "reading 'request'" на мобільному
-      await ensureProviderReady();
-
       const { executor, referrer } = await resolveWallets(s);
       const execTime = deriveExecutionTimeSec(s);
 
@@ -302,7 +353,8 @@ export default function MyOrders() {
         waitConfirms: 1,
       });
 
-      await supabase.from('scenarios')
+      await supabase
+        .from('scenarios')
         .update({ escrow_tx_hash: res.lockTxHash, status: 'agreed' })
         .eq('id', s.id);
 
@@ -327,10 +379,7 @@ export default function MyOrders() {
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
 
-      await supabase.from('scenarios')
-        .update({ is_completed_by_customer: true })
-        .eq('id', s.id)
-        .eq('is_completed_by_customer', false);
+      await supabase.from('scenarios').update({ is_completed_by_customer: true }).eq('id', s.id).eq('is_completed_by_customer', false);
 
       const deal = await getDealOnChain(s.id);
       if (deal && Number((deal as any).status) === 3) {
@@ -394,7 +443,9 @@ export default function MyOrders() {
         </span>
         <span>📡 {rt.isListening ? `${rt.method} активний` : 'Не підключено'}</span>
         {permissionStatus !== 'granted' && (
-          <button className="notify-btn" onClick={requestPermission}>🔔 Дозволити</button>
+          <button className="notify-btn" onClick={requestPermission}>
+            🔔 Дозволити
+          </button>
         )}
       </div>
     ),
@@ -435,7 +486,9 @@ export default function MyOrders() {
               onCommitAmount={async v => {
                 if (!fieldsEditable) return;
                 if (v !== null && (!Number.isFinite(v) || v <= 0)) {
-                  alert('Сума має бути > 0'); setLocal(s.id, { donation_amount_usdt: null }); return;
+                  alert('Сума має бути > 0');
+                  setLocal(s.id, { donation_amount_usdt: null });
+                  return;
                 }
                 await supabase
                   .from('scenarios')
@@ -468,10 +521,19 @@ export default function MyOrders() {
                   type="button"
                   onClick={() => openRateFor(s)}
                   style={{
-                    width: '100%', maxWidth: 520, marginTop: 10, padding: '12px 18px',
-                    borderRadius: 999, background: '#ffd7e0', color: '#111', fontWeight: 800,
-                    borderWidth: 1, borderStyle: 'solid', borderColor: '#f3c0ca',
-                    cursor: 'pointer', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.7)',
+                    width: '100%',
+                    maxWidth: 520,
+                    marginTop: 10,
+                    padding: '12px 18px',
+                    borderRadius: 999,
+                    background: '#ffd7e0',
+                    color: '#111',
+                    fontWeight: 800,
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: '#f3c0ca',
+                    cursor: 'pointer',
+                    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.7)',
                   }}
                 >
                   ⭐ Оцінити виконавця
