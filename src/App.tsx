@@ -16,15 +16,7 @@ import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 import BmbModalHost         from './components/BmbModalHost';
 
-// 👇 NEW: глобальний shim, що робить connect() перед будь-яким request()
-import { installProviderConnectShim } from './lib/providerConnectShim';
-
-// ── одноразова ініціалізація шима (захист від повторів при HMR)
-declare global { interface Window { __bmbShimInstalled?: boolean } }
-if (!window.__bmbShimInstalled) {
-  window.__bmbShimInstalled = true;
-  void installProviderConnectShim({ chainIdHex: '0x38', autoEnsureBSC: true });
-}
+// ⛔️ старий shim прибрано; новий мобільний флоу через metamaskSdk/providerBridge
 
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
