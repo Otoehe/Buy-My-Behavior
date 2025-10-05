@@ -57,7 +57,7 @@ async function pollAccounts(provider: Eip1193Provider, timeoutMs = 30000, stepMs
   return [];
 }
 
-// Головний гард, щоб не було "reading 'request'"
+// Захист від “Cannot read ... request”
 function assertProvider(p: any): asserts p is Eip1193Provider {
   if (!p || typeof p.request !== 'function') {
     throw new Error('Гаманець не готовий. Відкрийте MetaMask, поверніться у браузер і спробуйте ще раз.');
@@ -77,9 +77,10 @@ async function requestWithConnect<T = any>(
       key,
       (async () => {
         try {
-          // Деякі SDK вимагають connect() перед request(), якщо ще немає сесії
           if (args.method !== 'eth_requestAccounts' && typeof provider!.connect === 'function') {
-            const isConn = typeof provider!.isConnected === 'function' ? provider!.isConnected() : Boolean((provider as any).session);
+            const isConn = typeof provider!.isConnected === 'function'
+              ? provider!.isConnected()
+              : Boolean((provider as any).session);
             if (!isConn) { try { await provider!.connect!(); } catch {} }
           }
           return await provider!.request(args);
@@ -105,20 +106,19 @@ async function requestWithConnect<T = any>(
 
 // ── MetaMask SDK (app-switch)
 async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
-  const { default: MetaMaskSDK } = await import('@metamask/sdk');
+  const { MetaMaskSDK } = await import('@metamask/sdk');
 
   if (!globalMMSDK) {
     globalMMSDK = new MetaMaskSDK({
       dappMetadata: { name: APP_NAME, url: APP_URL },
       useDeeplink: true,
-      shouldShimWeb3: true, // дає window.ethereum
+      shouldShimWeb3: true,
       checkInstallationImmediately: false,
       logging: { developerMode: false },
       enableAnalytics: false,
     });
   }
 
-  // Деякі WebView вимагають connect() один раз перед getProvider().request(...)
   try { await (globalMMSDK as any)?.connect?.(); } catch {}
 
   let provider = globalMMSDK.getProvider() as Eip1193Provider | null;
@@ -159,18 +159,18 @@ export async function connectWallet(): Promise<ConnectResult> {
     connectInFlight = (async () => {
       const injected = getInjected();
 
-      // Desktop: браузер з інжектом
-      if (injected && typeof (injected as any).request === 'function' && !isMobileUA()) {
+      // Desktop / MetaMask Browser → injected
+      if (injected && !isMobileUA()) {
         return await connectInjectedOnce();
       }
 
-      // Mobile: якщо ми всередині MetaMask Browser — теж injected
+      // Mobile, але вже всередині MetaMask Browser → injected
       if (injected && isMobileUA()) {
         const ua = navigator.userAgent || '';
         if (/MetaMaskMobile/i.test(ua)) return await connectInjectedOnce();
       }
 
-      // Mobile зовнішній браузер → SDK
+      // Зовнішній мобільний браузер → SDK deeplink
       if (isMobileUA()) {
         const res = await connectViaMetaMaskSDK();
         assertProvider(res.provider);

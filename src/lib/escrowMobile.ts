@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { BigNumber, ethers } from 'ethers';
-import { connectWallet, ensureBSC, type Eip1193Provider } from './providerBridge';
+import { connectWallet, ensureBSC } from './providerBridge';
 import { ensureAllowance, fetchTokenDecimals, toUnits } from './erc20';
 
 // === ENV ===
@@ -12,52 +12,46 @@ export const ESCROW_ADDRESS = (import.meta as any).env?.VITE_ESCROW_ADDRESS as s
 if (!USDT_ADDRESS)  console.warn('[BMB] VITE_USDT_ADDRESS is empty');
 if (!ESCROW_ADDRESS) console.warn('[BMB] VITE_ESCROW_ADDRESS is empty');
 
-// Мінімальний ABI згідно з вашою підтвердженою сигнатурою
-// lockFunds(bytes32 scenarioId,address executor,address referrer,uint256 amount,uint256 executionTime)
+// lockFunds(bytes32 scenarioId,address executor,address referrer,uint256 amount,uint256 executionTime) payable
 const ESCROW_ABI = [
   'function lockFunds(bytes32 scenarioId,address executor,address referrer,uint256 amount,uint256 executionTime) payable',
 ];
 
-/** Нормалізація scenarioId до bytes32:
- * - Якщо вже hex 0x...64 символи — лишаємо як є
- * - Інакше — робимо keccak256 від вхідного рядка (стабільна 32-байтна ідентифікація)
+/** Перетворення scenarioId → bytes32:
+ * - якщо вже 0x...64 — лишаємо
+ * - інакше keccak256(utf8)
  */
 function normalizeScenarioId(input: string): string {
   const hex32 = /^0x[0-9a-fA-F]{64}$/;
   if (hex32.test(input)) return input;
-  return ethers.utils.id(input); // keccak256(utf8)
+  return ethers.utils.id(input);
 }
 
 export type LockFundsParams = {
-  /** bytes32 або довільний рядок, який ми перетворимо на bytes32 */
-  scenarioId: string;
-  /** Адреса виконавця */
-  executor: string;
-  /** Адреса реферала або null/undefined, якщо немає */
-  referrer?: string | null;
-  /** Сума в USDT (людський вигляд: "10.5" або number) */
-  amount: string | number;
-  /** Unix-час (секунди) коли настане момент "можна підтверджувати виконання" */
-  executionTime: number;
-  /** onStatus — необов’язковий колбек для оновлення UI статусів */
-  onStatus?: (status:
-    | 'connecting'
-    | 'ensuring_chain'
-    | 'checking_allowance'
-    | 'approving'
-    | 'locking'
-    | 'done'
-  , payload?: any) => void;
-  /** Скільки конфірмів чекати для approve/lock (1 за замовчуванням) */
-  waitConfirms?: number;
+  scenarioId: string;          // bytes32 або рядок — буде перетворено
+  executor: string;            // адреса виконавця
+  referrer?: string | null;    // 0x0 якщо немає
+  amount: string | number;     // людський USDT (наприклад "10.5")
+  executionTime: number;       // unix seconds
+  onStatus?: (
+    status:
+      | 'connecting'
+      | 'ensuring_chain'
+      | 'checking_allowance'
+      | 'approving'
+      | 'locking'
+      | 'done',
+    payload?: any
+  ) => void;
+  waitConfirms?: number;       // 1 за замовчуванням
 };
 
 export type LockFundsResult = {
-  address: string;                 // адреса платника (замовника)
-  approveTxHash?: string;          // хеш approve, якщо був
-  lockTxHash: string;              // хеш lockFunds
+  address: string;                 // платник (замовник)
+  approveTxHash?: string;          // якщо було approve
+  lockTxHash: string;              // tx hash lockFunds
   lockReceipt: ethers.providers.TransactionReceipt;
-  amountUnits: BigNumber;          // сума у найменших одиницях USDT
+  amountUnits: BigNumber;          // у найменших одиницях
   decimals: number;                // десятковість USDT
 };
 
@@ -76,18 +70,26 @@ export async function lockFundsMobileFlow(params: LockFundsParams): Promise<Lock
     throw new Error('Missing USDT/ESCROW address in env');
   }
 
-  // 1) Конектимо гаманець і гарантуємо правильну мережу
+  // 1) Конектимо гаманець (MetaMask only) і гарантуємо правильну мережу
   onStatus?.('connecting');
-  const { signer, address, ethersProvider } = await connectWallet();
+  const { provider, accounts } = await connectWallet();
+  if (!provider || typeof (provider as any).request !== 'function') {
+    throw new Error('Гаманець не готовий. Відкрийте MetaMask, підтвердіть підключення і спробуйте ще раз.');
+  }
 
   onStatus?.('ensuring_chain');
-  await ensureBSC(); // використовує той самий провайдер з connectWallet()
+  await ensureBSC(provider); // ✅ важливо: передаємо provider у ensureBSC
 
-  // 2) Рахуємо десятковість та amount у найменших одиницях
+  // 2) Будуємо ethers обгортку і signer
+  const ethersProvider = new ethers.providers.Web3Provider(provider as any, 'any');
+  const signer = ethersProvider.getSigner();
+  const address = (accounts?.[0] ?? (await signer.getAddress())).toLowerCase();
+
+  // 3) Десятковість та amount у найменших одиницях
   const decimals = await fetchTokenDecimals(USDT_ADDRESS, ethersProvider);
   const amountUnits = toUnits(amount as any, decimals);
 
-  // 3) Перевіряємо/забезпечуємо allowance (approve за потреби)
+  // 4) allowance → approve (за потреби рівно на суму)
   onStatus?.('checking_allowance');
   const allowanceRes = await ensureAllowance({
     token: USDT_ADDRESS,
@@ -95,22 +97,21 @@ export async function lockFundsMobileFlow(params: LockFundsParams): Promise<Lock
     owner: address,
     amount: amountUnits,
     signer,
-    approveMax: false,       // схвалюємо рівно потрібну суму
+    approveMax: false,
     waitConfirms,
   });
 
-  let approveTxHash: string | undefined = undefined;
+  let approveTxHash: string | undefined;
   if (allowanceRes.didApprove) {
     onStatus?.('approving', { txHash: allowanceRes.txHash });
     approveTxHash = allowanceRes.txHash;
   }
 
-  // 4) Викликаємо lockFunds на EscrowBMB
+  // 5) Викликаємо lockFunds(...)
   const escrow = new ethers.Contract(ESCROW_ADDRESS, ESCROW_ABI, signer);
   const scenarioIdBytes32 = normalizeScenarioId(scenarioId);
-  const ref = (referrer && referrer !== '0x0000000000000000000000000000000000000000')
-    ? referrer
-    : '0x0000000000000000000000000000000000000000';
+  const ZERO = '0x0000000000000000000000000000000000000000';
+  const ref  = referrer && referrer !== ZERO ? referrer : ZERO;
 
   onStatus?.('locking');
   const tx = await escrow.lockFunds(
@@ -118,8 +119,8 @@ export async function lockFundsMobileFlow(params: LockFundsParams): Promise<Lock
     executor,
     ref,
     amountUnits,
-    Math.floor(executionTime), // у секундах
-    { value: 0 }               // USDT — без нативного value
+    Math.floor(executionTime),
+    { value: 0 } // USDT — без нативного value
   );
   const receipt = await tx.wait(waitConfirms);
 
