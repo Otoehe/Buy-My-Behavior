@@ -1,9 +1,6 @@
-// src/components/MyOrders.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import {
-  // quickOneClickSetup, // не потрібно у новому флоу
-  // lockFunds,          // замінено на lockFundsMobileFlow
   confirmCompletionOnChain,
   getDealOnChain,
 } from '../lib/escrowContract';
@@ -87,15 +84,6 @@ function StatusStrip({ s }: { s: Scenario }) {
       </div>
     </div>
   );
-}
-
-/** Взяти першу валідну 0x-адресу з переліку можливих ключів */
-function pickAddr(obj: any, keys: string[]): string | null {
-  for (const k of keys) {
-    const v = obj?.[k];
-    if (typeof v === 'string' && /^0x[a-fA-F0-9]{40}$/.test(v)) return v;
-  }
-  return null;
 }
 
 export default function MyOrders() {
@@ -272,47 +260,52 @@ export default function MyOrders() {
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
-    // 1) Пробуємо прямо із запису сценарію
     let executor =
-      pickAddr(s as any, ['executor_wallet', 'executorAddress', 'executor']) ||
+      (s as any).executor_wallet ||
+      (s as any).executorAddress ||
+      (s as any).executor ||
       null;
 
     let referrer =
-      pickAddr(s as any, ['referrer_wallet', 'referrerAddress', 'referrer']) ||
+      (s as any).referrer_wallet ||
+      (s as any).referrerAddress ||
+      (s as any).referrer ||
       null;
 
-    // 2) Якщо нема — підтягнемо з профілю виконавця
-    if (!executor && (s as any).executor_id) {
+    const execId = (s as any).executor_id;
+
+    // 🔧 ВАЖЛИВО: в таблиці "profiles" ключ — user_id (не id)
+    if (!executor && execId) {
       const { data: prof, error } = await supabase
         .from('profiles')
-        .select('id,wallet,wallet_address,metamask_wallet,bsc_wallet,eth_wallet,public_address,address,mm_address,referrer_wallet')
-        .eq('id', (s as any).executor_id)
+        .select('wallet,wallet_address,metamask_wallet,bsc_wallet,eth_wallet,public_address,address,referrer_wallet')
+        .eq('user_id', execId)
         .single();
 
-      if (error) console.warn('[resolveWallets] profiles fetch error:', error);
+      if (error && error.code !== 'PGRST116') {
+        console.warn('profiles lookup error:', error);
+      }
 
       if (prof) {
         executor =
-          pickAddr(prof, [
-            'wallet',
-            'wallet_address',
-            'metamask_wallet',
-            'bsc_wallet',
-            'eth_wallet',
-            'public_address',
-            'address',
-            'mm_address',
-          ]) || executor;
+          (prof as any).wallet ||
+          (prof as any).wallet_address ||
+          (prof as any).metamask_wallet ||
+          (prof as any).bsc_wallet ||
+          (prof as any).eth_wallet ||
+          (prof as any).public_address ||
+          (prof as any).address ||
+          null;
 
         if (!referrer) {
-          referrer = pickAddr(prof, ['referrer_wallet']) || referrer;
+          referrer = (prof as any).referrer_wallet || null;
         }
       }
     }
 
-    // 3) Фінальна перевірка
+    referrer = (s as any).referrer_wallet ?? referrer ?? null;
+
     if (!executor) {
-      console.warn('[resolveWallets] no executor address for scenario:', { s });
       throw new Error('Не знайдено адресу гаманця виконавця для цієї угоди.');
     }
 
@@ -534,7 +527,6 @@ export default function MyOrders() {
                     background: '#ffd7e0',
                     color: '#111',
                     fontWeight: 800,
-                    // ✅ безпечний варіант замість "border: '1px solid #f3c0ca'"
                     borderWidth: 1,
                     borderStyle: 'solid',
                     borderColor: '#f3c0ca',

@@ -1,80 +1,6 @@
-// src/lib/providerBridge.ts
-import { ethers } from 'ethers';
-
-// ───────────────────────────────────────────────────────────────────────────────
-// Простий хелпер для інжектованого провайдера (MetaMask у десктоп-браузері)
-// ───────────────────────────────────────────────────────────────────────────────
-function getEthereum(): any {
-  const w = window as any;
-  const eth = w.ethereum?.providers?.find((p: any) => p && p.isMetaMask) || w.ethereum;
-  return eth ?? null;
-}
-
-export async function ensureConnectedAndChain(chainIdHex = '0x38') {
-  const eth = getEthereum();
-  if (!eth) throw new Error('MetaMask не знайдено');
-
-  // 1) Під’єднати акаунт
-  try {
-    await eth.request({ method: 'eth_requestAccounts' });
-  } catch (err: any) {
-    // -32002 => "request already pending"
-    if (err?.code === -32002) {
-      // ✅ виправлення: подвійні лапки, щоб апостроф у "під'єднання" не закрив рядок
-      throw new Error("Відкрий MetaMask і заверши активний запит під'єднання");
-    }
-    throw err;
-  }
-
-  // 2) Перемкнутись на BSC (0x38), додати якщо нема
-  const cur = await eth.request({ method: 'eth_chainId' });
-  if (cur !== chainIdHex) {
-    try {
-      await eth.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: chainIdHex }],
-      });
-    } catch (e: any) {
-      if (e?.code === 4902) {
-        // ланцюг не доданий – додаємо і ще раз свічимо
-        await eth.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: chainIdHex,
-            chainName: 'BNB Smart Chain',
-            nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
-            rpcUrls: ['https://bsc-dataseed.binance.org/'],
-            blockExplorerUrls: ['https://bscscan.com'],
-          }],
-        });
-        await eth.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: chainIdHex }],
-        });
-      } else {
-        throw e;
-      }
-    }
-  }
-
-  // 3) Повертаємо signer
-  const provider = new ethers.providers.Web3Provider(eth, 'any');
-  return provider.getSigner();
-}
-
-// Невеликий «sleep», який ти імпортуєш як waitForReturn у MyOrders
-export async function waitForReturn(ms = 1000): Promise<void> {
-  await new Promise((r) => setTimeout(r, ms));
-}
-
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-// ───────────────────────────────────────────────────────────────────────────────
-// BMB wallet helper — SDK-only
-// Desktop/MetaMask Browser → injected
-// Mobile Chrome/Safari → MetaMask SDK (app-switch) → назад у ваш браузер
-// ───────────────────────────────────────────────────────────────────────────────
-
+// EIP-1193 types
 export type Eip1193Request = (args: {
   method: string;
   params?: any[] | Record<string, any>;
@@ -94,18 +20,19 @@ export interface Eip1193Provider {
 
 type ConnectResult = { provider: Eip1193Provider; accounts: string[]; chainId: string };
 
-// ── ENV
+// ENV
 const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38';
 const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
 const BSC_RPC  = (import.meta.env.VITE_BSC_RPC as string) || 'https://bsc-dataseed.binance.org';
 const APP_NAME = (import.meta.env.VITE_APP_NAME as string) || 'Buy My Behavior';
 const APP_URL  = (import.meta.env.VITE_PUBLIC_APP_URL as string) || (typeof window !== 'undefined' ? window.location.origin : 'https://buymybehavior.com');
 
+// internal state
 let connectInFlight: Promise<ConnectResult> | null = null;
 const inflightByKey = new Map<string, Promise<any>>();
 let globalMMSDK: any | null = null;
 
-// ── helpers
+// helpers
 function isMobileUA(): boolean {
   if (typeof navigator === 'undefined') return false;
   return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
@@ -144,6 +71,7 @@ async function requestWithConnect<T = any>(
       key,
       (async () => {
         try {
+          // Some SDK providers require connect() before request()
           if (args.method !== 'eth_requestAccounts' && typeof provider.connect === 'function') {
             const isConn =
               typeof provider.isConnected === 'function'
@@ -172,7 +100,7 @@ async function requestWithConnect<T = any>(
   return inflightByKey.get(key)!;
 }
 
-// ── MetaMask SDK (app-switch)
+// MetaMask SDK (deep link flow for mobile browsers)
 async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
   const { default: MetaMaskSDK } = await import('@metamask/sdk');
 
@@ -180,8 +108,7 @@ async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
     globalMMSDK = new MetaMaskSDK({
       dappMetadata: { name: APP_NAME, url: APP_URL },
       useDeeplink: true,
-      // ⬇⬇⬇ ГОЛОВНЕ: увімкнути shim, щоб ethers бачив window.ethereum
-      shouldShimWeb3: true,
+      shouldShimWeb3: true, // makes window.ethereum visible
       checkInstallationImmediately: false,
       logging: { developerMode: false },
       enableAnalytics: false,
@@ -190,7 +117,7 @@ async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
 
   const provider = globalMMSDK.getProvider() as Eip1193Provider;
 
-  // Додатково підстрахуємось і вручну проставимо:
+  // Ensure Ethers/other libs can see the provider
   (globalThis as any).ethereum = provider;
 
   const accounts: string[] = await requestWithConnect(provider, { method: 'eth_requestAccounts' }, 'sdk_eth_requestAccounts');
@@ -200,7 +127,7 @@ async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
   return { provider, accounts, chainId: String(chainId) };
 }
 
-// ── injected (desktop / MetaMask Browser)
+// Injected (desktop & MetaMask in-app browser)
 async function connectInjectedOnce(): Promise<ConnectResult> {
   const provider = getInjected();
   if (!provider) throw new Error('NO_INJECTED_PROVIDER');
@@ -216,23 +143,23 @@ async function connectInjectedOnce(): Promise<ConnectResult> {
   return { provider, accounts, chainId };
 }
 
-// ── Публічний конектор
+// Public entry
 export async function connectWallet(): Promise<ConnectResult> {
   if (!connectInFlight) {
     connectInFlight = (async () => {
       const injected = getInjected();
 
-      // Desktop / MetaMask Browser → injected
+      // Desktop / MetaMask Browser
       if (injected && !isMobileUA()) {
         return await connectInjectedOnce();
       }
       if (injected && isMobileUA()) {
-        // Якщо користувач ВЖЕ у MetaMask Browser — теж injected
+        // If already in MetaMask in-app browser, still injected
         const ua = navigator.userAgent || '';
         if (/MetaMaskMobile/i.test(ua)) return await connectInjectedOnce();
       }
 
-      // Mobile external browser → SDK app-switch
+      // Mobile external browser → SDK deep link
       if (isMobileUA()) {
         return await connectViaMetaMaskSDK();
       }
@@ -243,7 +170,7 @@ export async function connectWallet(): Promise<ConnectResult> {
   return connectInFlight;
 }
 
-// ── мережа
+// Network helpers
 export async function ensureBSC(provider: Eip1193Provider): Promise<void> {
   let chainId: any = await requestWithConnect(provider, { method: 'eth_chainId' });
   if (typeof chainId === 'number') chainId = '0x' + chainId.toString(16);
@@ -272,7 +199,7 @@ export async function ensureBSC(provider: Eip1193Provider): Promise<void> {
         },
         'wallet_addEthereumChain'
       );
-      return;
+      return; // after add, MM usually switches automatically or prompts again
     }
     throw err;
   }
@@ -282,10 +209,17 @@ export async function getChainId(provider: Eip1193Provider): Promise<string> {
   const id = await requestWithConnect<any>(provider, { method: 'eth_chainId' });
   return typeof id === 'number' ? '0x' + id.toString(16) : String(id);
 }
+
 export async function getAccounts(provider: Eip1193Provider): Promise<string[]> {
   return requestWithConnect(provider, { method: 'eth_accounts' });
 }
+
 export function hasInjectedMetaMask(): boolean {
   const p = getInjected();
   return Boolean(p && (p as any).isMetaMask);
+}
+
+// small utility used in MyOrders during confirm flow
+export async function waitForReturn(ms = 12000): Promise<void> {
+  await delay(ms);
 }
