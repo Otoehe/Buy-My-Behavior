@@ -530,7 +530,7 @@ export default function MyOrders() {
                     background: '#ffd7e0',
                     color: '#111',
                     fontWeight: 800,
-                    border: '1px solid '#f3c0ca',
+                    border: '1px solid #f3c0ca',
                     cursor: 'pointer',
                     boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.7)',
                   }}
