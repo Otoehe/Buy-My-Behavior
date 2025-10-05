@@ -1,7 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { ethers } from "ethers";
+// src/lib/providerBridge.ts
 
-/** ---- EIP-1193 types ---- */
+// ───────────────────────────────────────────────────────────────────────────────
+// EIP-1193 типи
+// ───────────────────────────────────────────────────────────────────────────────
 export type Eip1193Request = (args: {
   method: string;
   params?: any[] | Record<string, any>;
@@ -21,23 +23,35 @@ export interface Eip1193Provider {
 
 type ConnectResult = { provider: Eip1193Provider; accounts: string[]; chainId: string };
 
-/** ---- ENV ---- */
-const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? "0x38"; // BSC mainnet
-const CHAIN_ID_HEX = RAW_CHAIN_ID.startsWith("0x")
-  ? RAW_CHAIN_ID
-  : ("0x" + Number(RAW_CHAIN_ID).toString(16));
-const BSC_RPC  = (import.meta.env.VITE_BSC_RPC as string) || "https://bsc-dataseed.binance.org";
-const APP_NAME = (import.meta.env.VITE_APP_NAME as string) || "Buy My Behavior";
-const APP_URL  = (import.meta.env.VITE_PUBLIC_APP_URL as string)
-  || (typeof window !== "undefined" ? window.location.origin : "https://buymybehavior.com");
+// ───────────────────────────────────────────────────────────────────────────────
+// ENV
+// ───────────────────────────────────────────────────────────────────────────────
+const RAW_CHAIN_ID = (import.meta.env.VITE_CHAIN_ID as string) ?? '0x38';
+const CHAIN_ID_HEX =
+  RAW_CHAIN_ID.startsWith('0x') ? RAW_CHAIN_ID : ('0x' + Number(RAW_CHAIN_ID).toString(16));
 
+const BSC_RPC  = (import.meta.env.VITE_BSC_RPC as string) || 'https://bsc-dataseed.binance.org';
+const APP_NAME = (import.meta.env.VITE_APP_NAME as string) || 'Buy My Behavior';
+const APP_URL  =
+  (import.meta.env.VITE_PUBLIC_APP_URL as string) ||
+  (typeof window !== 'undefined' ? window.location.origin : 'https://buymybehavior.com');
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Внутрішні стани
+// ───────────────────────────────────────────────────────────────────────────────
 let connectInFlight: Promise<ConnectResult> | null = null;
 const inflightByKey = new Map<string, Promise<any>>();
 let globalMMSDK: any | null = null;
 
-/** ---- helpers ---- */
+// ───────────────────────────────────────────────────────────────────────────────
+// Утіліти
+// ───────────────────────────────────────────────────────────────────────────────
+export function waitForReturn(ms = 1000): Promise<void> {
+  return new Promise(res => setTimeout(res, ms));
+}
+
 function isMobileUA(): boolean {
-  if (typeof navigator === "undefined") return false;
+  if (typeof navigator === 'undefined') return false;
   return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
 }
 
@@ -61,49 +75,43 @@ async function pollAccounts(
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     try {
-      const accs: string[] = await provider.request({ method: "eth_accounts" });
+      const accs: string[] = await provider.request({ method: 'eth_accounts' });
       if (accs?.length) return accs;
-    } catch { /* noop */ }
+    } catch {}
     await delay(stepMs);
   }
   return [];
 }
 
-/** Single-flight wrapper around provider.request(), gently handling connect() */
 async function requestWithConnect<T = any>(
-  provider: Eip1193Provider | undefined | null,
+  provider: Eip1193Provider,
   args: { method: string; params?: any[] | Record<string, any> },
   keyHint?: string
 ): Promise<T> {
-  if (!provider || typeof (provider as any).request !== "function") {
-    throw new Error("Wallet provider is not available yet. Open MetaMask and approve connection.");
-  }
-
   const key = keyHint ?? args.method;
+
   if (!inflightByKey.has(key)) {
     inflightByKey.set(
       key,
       (async () => {
         try {
-          if (args.method !== "eth_requestAccounts" && typeof provider.connect === "function") {
+          if (args.method !== 'eth_requestAccounts' && typeof provider.connect === 'function') {
             const isConn =
-              typeof provider.isConnected === "function"
+              typeof provider.isConnected === 'function'
                 ? provider.isConnected()
                 : Boolean((provider as any).session);
-            if (!isConn) {
-              try { await provider.connect!(); } catch { /* ignore */ }
-            }
+            if (!isConn) { try { await provider.connect!(); } catch {} }
           }
           return await provider.request(args);
         } catch (err: any) {
-          const msg = String(err?.message || "");
+          const msg = String(err?.message || '');
           if (/connect\(\)\s*before\s*request\(\)/i.test(msg)) {
-            try { await provider.connect?.(); } catch { /* ignore */ }
+            try { await provider.connect?.(); } catch {}
             return await provider.request(args);
           }
           if (err?.code === -32002 || /already pending/i.test(msg)) {
             const res = await pollAccounts(provider, 30000, 500);
-            if (args.method === "eth_requestAccounts" && res.length) return res as any;
+            if (args.method === 'eth_requestAccounts' && res.length) return res as any;
           }
           throw err;
         } finally {
@@ -115,15 +123,18 @@ async function requestWithConnect<T = any>(
   return inflightByKey.get(key)!;
 }
 
-/** ---- MetaMask SDK (mobile app-switch) ---- */
+// ───────────────────────────────────────────────────────────────────────────────
+// MetaMask SDK (mobile app-switch)
+// ───────────────────────────────────────────────────────────────────────────────
 async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
-  const { default: MetaMaskSDK } = await import("@metamask/sdk");
+  const { default: MetaMaskSDK } = await import('@metamask/sdk');
 
   if (!globalMMSDK) {
     globalMMSDK = new MetaMaskSDK({
       dappMetadata: { name: APP_NAME, url: APP_URL },
       useDeeplink: true,
-      shouldShimWeb3: true,               // IMPORTANT: exposes window.ethereum
+      // важливо: шімуємо window.ethereum, щоб бібліотеки його «бачили»
+      shouldShimWeb3: true,
       checkInstallationImmediately: false,
       logging: { developerMode: false },
       enableAnalytics: false,
@@ -131,87 +142,92 @@ async function connectViaMetaMaskSDK(): Promise<ConnectResult> {
   }
 
   const provider = globalMMSDK.getProvider() as Eip1193Provider;
+  (globalThis as any).ethereum = provider; // підстраховка
 
-  // Make sure ethers sees it, too
-  (globalThis as any).ethereum = provider;
-
-  const accounts: string[] = await requestWithConnect(provider, { method: "eth_requestAccounts" }, "sdk_eth_requestAccounts");
-  let chainId: any = await requestWithConnect(provider, { method: "eth_chainId" }, "sdk_eth_chainId");
-  if (typeof chainId === "number") chainId = "0x" + chainId.toString(16);
+  const accounts: string[] = await requestWithConnect(provider, { method: 'eth_requestAccounts' }, 'sdk_eth_requestAccounts');
+  let chainId: any = await requestWithConnect(provider, { method: 'eth_chainId' }, 'sdk_eth_chainId');
+  if (typeof chainId === 'number') chainId = '0x' + chainId.toString(16);
 
   return { provider, accounts, chainId: String(chainId) };
 }
 
-/** ---- Injected (desktop / MetaMask browser) ---- */
+// ───────────────────────────────────────────────────────────────────────────────
+// Injected (desktop + MetaMask встроєний браузер)
+// ───────────────────────────────────────────────────────────────────────────────
 async function connectInjectedOnce(): Promise<ConnectResult> {
   const provider = getInjected();
-  if (!provider) throw new Error("NO_INJECTED_PROVIDER");
+  if (!provider) throw new Error('NO_INJECTED_PROVIDER');
 
   try {
-    const accs: string[] = await requestWithConnect(provider, { method: "eth_accounts" });
-    const chainId: string = await requestWithConnect(provider, { method: "eth_chainId" });
+    const accs: string[] = await requestWithConnect(provider, { method: 'eth_accounts' });
+    const chainId: string = await requestWithConnect(provider, { method: 'eth_chainId' });
     if (accs?.length) return { provider, accounts: accs, chainId };
-  } catch { /* fall back to requestAccounts */ }
+  } catch {}
 
-  const accounts: string[] = await requestWithConnect(provider, { method: "eth_requestAccounts" });
-  const chainId: string = await requestWithConnect(provider, { method: "eth_chainId" });
+  const accounts: string[] = await requestWithConnect(provider, { method: 'eth_requestAccounts' });
+  const chainId: string = await requestWithConnect(provider, { method: 'eth_chainId' });
   return { provider, accounts, chainId };
 }
 
-/** ---- Public connector ---- */
+// ───────────────────────────────────────────────────────────────────────────────
+// Публічний конектор
+// ───────────────────────────────────────────────────────────────────────────────
 export async function connectWallet(): Promise<ConnectResult> {
   if (!connectInFlight) {
     connectInFlight = (async () => {
       const injected = getInjected();
 
-      // Desktop or MetaMask internal browser
+      // Desktop / MetaMask Browser → injected
       if (injected && !isMobileUA()) {
         return await connectInjectedOnce();
       }
       if (injected && isMobileUA()) {
-        const ua = navigator.userAgent || "";
+        // Якщо користувач у браузері MetaMask на мобільному — теж injected
+        const ua = navigator.userAgent || '';
         if (/MetaMaskMobile/i.test(ua)) return await connectInjectedOnce();
       }
 
-      // External mobile browser → MetaMask SDK deep link
+      // Mobile зовнішній браузер → SDK app-switch
       if (isMobileUA()) {
         return await connectViaMetaMaskSDK();
       }
 
-      throw new Error("NO_WALLET_AVAILABLE");
+      throw new Error('NO_WALLET_AVAILABLE');
     })().finally(() => setTimeout(() => { connectInFlight = null; }, 450));
   }
   return connectInFlight;
 }
 
-/** ---- Network helpers ---- */
+// ───────────────────────────────────────────────────────────────────────────────
+// Перемикання мережі на BSC
+// ───────────────────────────────────────────────────────────────────────────────
 export async function ensureBSC(provider: Eip1193Provider): Promise<void> {
-  let chainId: any = await requestWithConnect<any>(provider, { method: "eth_chainId" });
-  if (typeof chainId === "number") chainId = "0x" + chainId.toString(16);
+  let chainId: any = await requestWithConnect(provider, { method: 'eth_chainId' });
+  if (typeof chainId === 'number') chainId = '0x' + chainId.toString(16);
   if (String(chainId).toLowerCase() === CHAIN_ID_HEX.toLowerCase()) return;
 
   try {
     await requestWithConnect(
       provider,
-      { method: "wallet_switchEthereumChain", params: [{ chainId: CHAIN_ID_HEX }] },
-      "wallet_switchEthereumChain"
+      { method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID_HEX }] },
+      'wallet_switchEthereumChain'
     );
   } catch (err: any) {
-    const msg = String(err?.message || "");
+    const msg = String(err?.message || '');
     if (err?.code === 4902 || /Unrecognized chain|not added/i.test(msg)) {
       await requestWithConnect(
         provider,
         {
-          method: "wallet_addEthereumChain",
+          method: 'wallet_addEthereumChain',
           params: [{
             chainId: CHAIN_ID_HEX,
-            chainName: "Binance Smart Chain",
-            nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
+            chainName: 'Binance Smart Chain',
+            nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
             rpcUrls: [BSC_RPC],
-            blockExplorerUrls: ["https://bscscan.com"],
+            blockExplorerUrls: ['https://bscscan.com'],
           }],
         },
-        "wallet_addEthereumChain"
+        'wallet_addEthereumChain'
       );
       return;
     }
@@ -219,57 +235,19 @@ export async function ensureBSC(provider: Eip1193Provider): Promise<void> {
   }
 }
 
+// ───────────────────────────────────────────────────────────────────────────────
+// Хелпери
+// ───────────────────────────────────────────────────────────────────────────────
 export async function getChainId(provider: Eip1193Provider): Promise<string> {
-  const id = await requestWithConnect<any>(provider, { method: "eth_chainId" });
-  return typeof id === "number" ? "0x" + id.toString(16) : String(id);
+  const id = await requestWithConnect<any>(provider, { method: 'eth_chainId' });
+  return typeof id === 'number' ? '0x' + id.toString(16) : String(id);
 }
 
 export async function getAccounts(provider: Eip1193Provider): Promise<string[]> {
-  return requestWithConnect(provider, { method: "eth_accounts" });
+  return requestWithConnect(provider, { method: 'eth_accounts' });
 }
 
 export function hasInjectedMetaMask(): boolean {
   const p = getInjected();
   return Boolean(p && (p as any).isMetaMask);
-}
-
-/** ---- Simple helper kept for older call sites (desktop only) ---- */
-export async function ensureConnectedAndChain(chainIdHex = "0x38") {
-  const eth = (globalThis as any).ethereum;
-  if (!eth) throw new Error("MetaMask not found");
-
-  try {
-    await eth.request({ method: "eth_requestAccounts" });
-  } catch (err: any) {
-    if (err?.code === -32002) {
-      throw new Error("Open MetaMask and finish the pending connection request.");
-    }
-    throw err;
-  }
-
-  const cur = await eth.request({ method: "eth_chainId" });
-  if (cur !== chainIdHex) {
-    try {
-      await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chainIdHex }] });
-    } catch (e: any) {
-      if (e?.code === 4902) {
-        await eth.request({
-          method: "wallet_addEthereumChain",
-          params: [{
-            chainId: chainIdHex,
-            chainName: "BNB Smart Chain",
-            nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
-            rpcUrls: ["https://bsc-dataseed.binance.org/"],
-            blockExplorerUrls: ["https://bscscan.com"],
-          }],
-        });
-        await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chainIdHex }] });
-      } else {
-        throw e;
-      }
-    }
-  }
-
-  const provider = new ethers.providers.Web3Provider(eth, "any");
-  return provider.getSigner();
 }
