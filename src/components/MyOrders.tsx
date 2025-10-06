@@ -1,4 +1,3 @@
-// src/components/MyOrders.tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import {
@@ -17,7 +16,7 @@ import ScenarioCard, { Scenario, Status } from "./ScenarioCard";
 import RateModal from "./RateModal";
 import { upsertRating } from "../lib/ratings";
 
-import { connectWallet, ensureBSC, waitForReturn } from "../lib/providerBridge";
+import { ensureInMetaMaskDapp, connectWallet, ensureBSC, waitForReturn, isMobileUA, isMetaMaskInApp } from "../lib/providerBridge";
 import { lockFundsMobileFlow } from "../lib/escrowMobile";
 
 const SOUND = new Audio("/notification.wav");
@@ -39,7 +38,6 @@ async function ensureProviderReady() {
   return provider;
 }
 
-/* ─ helpers ─ */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== "confirmed";
 
@@ -113,10 +111,8 @@ export default function MyOrders() {
     setList(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
   const hasCoords = (s: Scenario) =>
-    typeof s.latitude === "number" &&
-    Number.isFinite(s.latitude) &&
-    typeof s.longitude === "number" &&
-    Number.isFinite(s.longitude);
+    typeof s.latitude === "number" && Number.isFinite(s.latitude) &&
+    typeof s.longitude === "number" && Number.isFinite(s.longitude);
 
   const canAgree = (s: Scenario) => !s.escrow_tx_hash && s.status !== "confirmed" && !s.is_agreed_by_customer;
 
@@ -260,7 +256,6 @@ export default function MyOrders() {
     }
   };
 
-  /** Витягнути адреси виконавця/реферала з цього сценарію або з профілю */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = "0x0000000000000000000000000000000000000000";
 
@@ -311,7 +306,7 @@ export default function MyOrders() {
       const t = new Date(`${(s as any).date}T${(s as any).time || "00:00"}`).getTime();
       if (!Number.isNaN(t)) return Math.floor(t / 1000);
     }
-    return Math.floor(Date.now() / 1000) + 3600; // +1 година
+    return Math.floor(Date.now() / 1000) + 3600;
   }
 
   const handleLock = async (s: Scenario) => {
@@ -326,6 +321,12 @@ export default function MyOrders() {
     }
     if (s.escrow_tx_hash) return;
 
+    // 🟣 ДОДАНО: якщо мобільний зовнішній браузер — відкриваємо сторінку всередині MetaMask
+    if (isMobileUA() && !isMetaMaskInApp()) {
+      // плавно переведемо користувача у MetaMask Browser перед початком флоу
+      await ensureInMetaMaskDapp();
+    }
+
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
       const { executor, referrer } = await resolveWallets(s);
@@ -338,13 +339,12 @@ export default function MyOrders() {
         amount: Number(s.donation_amount_usdt),
         executionTime: execTime,
         onStatus: (st, payload) => {
-          // лише логи, без апострофів у рядках
-          if (st === "connecting")        console.log("[BMB] Connecting wallet...");
-          if (st === "ensuring_chain")    console.log("[BMB] Switching/ensuring BSC...");
+          if (st === "connecting")         console.log("[BMB] Connecting wallet...");
+          if (st === "ensuring_chain")     console.log("[BMB] Ensuring BSC...");
           if (st === "checking_allowance") console.log("[BMB] Checking allowance...");
-          if (st === "approving")         console.log("[BMB] Approving USDT...", payload);
-          if (st === "locking")           console.log("[BMB] Locking funds...");
-          if (st === "done")              console.log("[BMB] Lock done:", payload);
+          if (st === "approving")          console.log("[BMB] Approving USDT...", payload);
+          if (st === "locking")            console.log("[BMB] Locking funds...");
+          if (st === "done")               console.log("[BMB] Lock done:", payload);
         },
         waitConfirms: 1,
       });
