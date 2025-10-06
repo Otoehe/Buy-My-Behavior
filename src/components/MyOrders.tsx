@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { confirmCompletionOnChain, getDealOnChain } from "../lib/escrowContract";
+import {
+  confirmCompletionOnChain,
+  getDealOnChain,
+} from "../lib/escrowContract";
 import { pushNotificationManager, useNotifications } from "../lib/pushNotifications";
 import { useRealtimeNotifications } from "../lib/realtimeNotifications";
 import CelebrationToast from "./CelebrationToast";
@@ -28,7 +31,10 @@ async function withTimeout<T>(p: Promise<T>, ms = 8000, label = "op"): Promise<T
 
 async function ensureProviderReady() {
   const { provider } = await connectWallet();
-  await ensureBSC(provider);
+  if (!provider || typeof (provider as any).request !== "function") {
+    throw new Error("Гаманець ще не під’єднаний. Відкрийте MetaMask і підтвердіть підключення.");
+  }
+  await ensureBSC(provider as any);
   return provider;
 }
 
@@ -46,13 +52,33 @@ const getStage = (s: Scenario) => {
 function StatusStrip({ s }: { s: Scenario }) {
   const stage = getStage(s);
   const Dot = ({ active }: { active: boolean }) => (
-    <span style={{ width: 10, height: 10, borderRadius: 9999, display: "inline-block", margin: "0 6px",
-      background: active ? "#111" : "#e5e7eb" }} />
+    <span
+      style={{
+        width: 10,
+        height: 10,
+        borderRadius: 9999,
+        display: "inline-block",
+        margin: "0 6px",
+        background: active ? "#111" : "#e5e7eb",
+      }}
+    />
   );
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", borderRadius: 10,
-      background: "rgba(0,0,0,0.035)", margin: "6px 0 10px" }}>
-      <Dot active={stage >= 0} /><Dot active={stage >= 1} /><Dot active={stage >= 2} /><Dot active={stage >= 3} />
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "6px 10px",
+        borderRadius: 10,
+        background: "rgba(0,0,0,0.035)",
+        margin: "6px 0 10px",
+      }}
+    >
+      <Dot active={stage >= 0} />
+      <Dot active={stage >= 1} />
+      <Dot active={stage >= 2} />
+      <Dot active={stage >= 3} />
       <div style={{ fontSize: 12, color: "#6b7280", marginLeft: 8 }}>
         {stage === 0 && "• Угоду погоджено → далі кошти в Escrow"}
         {stage === 1 && "• Погоджено → кошти ще не заблоковані"}
@@ -86,8 +112,10 @@ export default function MyOrders() {
     setList(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
   const hasCoords = (s: Scenario) =>
-    typeof s.latitude === "number" && Number.isFinite(s.latitude) &&
-    typeof s.longitude === "number" && Number.isFinite(s.longitude);
+    typeof s.latitude === "number" &&
+    Number.isFinite(s.latitude) &&
+    typeof s.longitude === "number" &&
+    Number.isFinite(s.longitude);
 
   const canAgree = (s: Scenario) => !s.escrow_tx_hash && s.status !== "confirmed" && !s.is_agreed_by_customer;
 
@@ -106,13 +134,20 @@ export default function MyOrders() {
   }, []);
 
   const load = useCallback(async (uid: string) => {
-    const { data, error } = await supabase.from("scenarios").select("*").eq("creator_id", uid).order("created_at", { ascending: false });
+    const { data, error } = await supabase
+      .from("scenarios")
+      .select("*")
+      .eq("creator_id", uid)
+      .order("created_at", { ascending: false });
     if (error) console.error(error);
     setList(((data || []) as Scenario[]).filter(s => s.creator_id === uid));
   }, []);
 
   const refreshRated = useCallback(async (uid: string, items: Scenario[]) => {
-    if (!uid || items.length === 0) { setRatedOrders(new Set()); return; }
+    if (!uid || items.length === 0) {
+      setRatedOrders(new Set());
+      return;
+    }
     const ids = items.map(s => s.id);
     const { data } = await supabase.from("ratings").select("order_id").eq("rater_id", uid).in("order_id", ids);
     setRatedOrders(new Set((data || []).map((r: any) => r.order_id)));
@@ -136,12 +171,15 @@ export default function MyOrders() {
           setList(prev => {
             if (ev === "DELETE" && oldId) return prev.filter(x => x.id !== oldId);
             if (!s) return prev;
+
             if (s.creator_id !== uid) return prev.filter(x => x.id !== s.id);
 
             const i = prev.findIndex(x => x.id === s.id);
             if (ev === "INSERT") {
               if (i === -1) return [s, ...prev];
-              const cp = [...prev]; cp[i] = { ...cp[i], ...s }; return cp;
+              const cp = [...prev];
+              cp[i] = { ...cp[i], ...s };
+              return cp;
             }
             if (ev === "UPDATE") {
               if (i === -1) return prev;
@@ -164,14 +202,14 @@ export default function MyOrders() {
               const bothAgreed = !!after.is_agreed_by_customer && !!after.is_agreed_by_executor;
               const needLock = bothAgreed && !after.escrow_tx_hash && after.creator_id === uid;
 
-              const cp = [...prev]; cp[i] = after;
+              const cp = [...prev];
+              cp[i] = after;
 
               if (needLock && !(window as any).__locking) {
                 (window as any).__locking = true;
-                setTimeout(() =>
-                  handleLock(after).finally(() => { (window as any).__locking = false; }),
-                0);
+                setTimeout(() => handleLock(after).finally(() => { (window as any).__locking = false; }), 0);
               }
+
               return cp;
             }
             return prev;
@@ -221,7 +259,9 @@ export default function MyOrders() {
     }
   };
 
-  /** Спочатку беремо з рядка scenarios, далі — профіль виконавця. */
+  /** 1) пробуємо з рядка scenarios (executor_wallet / referrer_wallet),
+   *   2) якщо порожньо — беремо з profiles за user_id виконавця
+   */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = "0x0000000000000000000000000000000000000000";
 
@@ -237,7 +277,6 @@ export default function MyOrders() {
       (s as any).referrer ||
       null;
 
-    // fallback у профіль (колонка user_id в profiles)
     if (!executor && (s as any).executor_id) {
       const { data: prof } = await supabase.from("profiles").select("*").eq("user_id", (s as any).executor_id).single();
       if (prof) {
@@ -259,7 +298,10 @@ export default function MyOrders() {
 
     referrer = (s as any).referrer_wallet ?? referrer ?? null;
 
-    if (!executor) throw new Error("Не знайдено адресу гаманця виконавця для цієї угоди.");
+    if (!executor) {
+      throw new Error("Не знайдено адресу гаманця виконавця для цієї угоди.");
+    }
+
     return { executor, referrer: referrer ?? ZERO };
   }
 
@@ -277,8 +319,14 @@ export default function MyOrders() {
 
   const handleLock = async (s: Scenario) => {
     if (lockBusy[s.id]) return;
-    if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) { alert("Сума має бути > 0"); return; }
-    if (!isBothAgreed(s)) { alert("Спершу потрібні дві згоди."); return; }
+    if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) {
+      alert("Сума має бути > 0");
+      return;
+    }
+    if (!isBothAgreed(s)) {
+      alert("Спершу потрібні дві згоди.");
+      return;
+    }
     if (s.escrow_tx_hash) return;
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
@@ -293,18 +341,22 @@ export default function MyOrders() {
         amount: Number(s.donation_amount_usdt),
         executionTime: execTime,
         onStatus: (st) => {
-          // за бажанням: показувати toast/лоадер
-          if (st === 'connecting') console.log('🔌 Під’єднання гаманця…');
-          if (st === 'ensuring_chain') console.log('⛓ Перемикаємо мережу на BSC…');
-          if (st === 'checking_allowance') console.log('🔎 Перевірка allowance…');
-          if (st === 'approving') console.log('✍️ Підтвердіть approve у MetaMask…');
-          if (st === 'locking') console.log('🔒 Підтвердіть lock у MetaMask…');
-          if (st === 'done') console.log('✅ Заблоковано!');
+          // ✅ безпечні рядки (подвійні лапки)
+          if (st === "connecting") console.log("🔌 Під'єднання гаманця…");
+          if (st === "ensuring_chain") console.log("🔁 Перемикаємо мережу на BSC…");
+          if (st === "checking_allowance") console.log("🔍 Перевірка allowance…");
+          if (st === "approving") console.log("✅ Підтверджено approve (spending cap) — чекаємо блокування коштів");
+          if (st === "locking") console.log("🔐 Відправляємо lockFunds…");
+          if (st === "done") console.log("🎉 Кошти заблоковано");
         },
         waitConfirms: 1,
       });
 
-      await supabase.from("scenarios").update({ escrow_tx_hash: res.lockTxHash, status: "agreed" }).eq("id", s.id);
+      await supabase
+        .from("scenarios")
+        .update({ escrow_tx_hash: res.lockTxHash, status: "agreed" })
+        .eq("id", s.id);
+
       setLocal(s.id, { escrow_tx_hash: res.lockTxHash as any, status: "agreed" });
     } catch (e: any) {
       alert(e?.message || "Не вдалося заблокувати кошти.");
@@ -361,7 +413,12 @@ export default function MyOrders() {
     if (!rateFor) return;
     setRateBusy(true);
     try {
-      await upsertRating({ scenarioId: rateFor.scenarioId, rateeId: rateFor.counterpartyId, score: rateScore, comment: rateComment });
+      await upsertRating({
+        scenarioId: rateFor.scenarioId,
+        rateeId: rateFor.counterpartyId,
+        score: rateScore,
+        comment: rateComment,
+      });
       setRateOpen(false);
       setRatedOrders(prev => new Set([...Array.from(prev), rateFor.scenarioId]));
       window.dispatchEvent(new CustomEvent("ratings:updated", { detail: { userId: rateFor.counterpartyId } }));
@@ -373,15 +430,26 @@ export default function MyOrders() {
     }
   };
 
-  const headerRight = useMemo(() => (
-    <div className="scenario-status-panel">
-      <span>🔔 {permissionStatus === "granted" ? "Увімкнено" : permissionStatus === "denied" ? "Не підключено" : "Не запитано"}</span>
-      <span>📡 {rt.isListening ? `${rt.method} активний` : "Не підключено"}</span>
-      {permissionStatus !== "granted" && (
-        <button className="notify-btn" onClick={requestPermission}>🔔 Дозволити</button>
-      )}
-    </div>
-  ), [permissionStatus, requestPermission, rt.isListening, rt.method]);
+  const headerRight = useMemo(
+    () => (
+      <div className="scenario-status-panel">
+        <span>
+          🔔 {permissionStatus === "granted"
+            ? "Увімкнено"
+            : permissionStatus === "denied"
+              ? "Не підключено"
+              : "Не запитано"}
+        </span>
+        <span>📡 {rt.isListening ? `${rt.method} активний` : "Не підключено"}</span>
+        {permissionStatus !== "granted" && (
+          <button className="notify-btn" onClick={requestPermission}>
+            🔔 Дозволити
+          </button>
+        )}
+      </div>
+    ),
+    [permissionStatus, requestPermission, rt.isListening, rt.method]
+  );
 
   return (
     <div className="scenario-list">
@@ -408,7 +476,8 @@ export default function MyOrders() {
               onChangeDesc={v => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async v => {
                 if (!fieldsEditable) return;
-                await supabase.from("scenarios")
+                await supabase
+                  .from("scenarios")
                   .update({ description: v, status: "pending", is_agreed_by_customer: false, is_agreed_by_executor: false })
                   .eq("id", s.id);
               }}
@@ -420,7 +489,8 @@ export default function MyOrders() {
                   setLocal(s.id, { donation_amount_usdt: null });
                   return;
                 }
-                await supabase.from("scenarios")
+                await supabase
+                  .from("scenarios")
                   .update({ donation_amount_usdt: v, status: "pending", is_agreed_by_customer: false, is_agreed_by_executor: false })
                   .eq("id", s.id);
               }}
@@ -429,8 +499,11 @@ export default function MyOrders() {
               onConfirm={() => handleConfirm(s)}
               onDispute={() => handleDispute(s)}
               onOpenLocation={() => {
-                if (hasCoords(s)) window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, "_blank");
-                else alert("Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію.");
+                if (hasCoords(s)) {
+                  window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, "_blank");
+                } else {
+                  alert("Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію.");
+                }
               }}
               canAgree={canAgree(s)}
               canLock={bothAgreed && !s.escrow_tx_hash}
@@ -447,10 +520,19 @@ export default function MyOrders() {
                   type="button"
                   onClick={() => openRateFor(s)}
                   style={{
-                    width: "100%", maxWidth: 520, marginTop: 10, padding: "12px 18px", borderRadius: 999,
-                    background: "#ffd7e0", color: "#111", fontWeight: 800,
-                    borderWidth: 1, borderStyle: "solid", borderColor: "#f3c0ca",
-                    cursor: "pointer", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.7)",
+                    width: "100%",
+                    maxWidth: 520,
+                    marginTop: 10,
+                    padding: "12px 18px",
+                    borderRadius: 999,
+                    background: "#ffd7e0",
+                    color: "#111",
+                    fontWeight: 800,
+                    borderWidth: 1,
+                    borderStyle: "solid",
+                    borderColor: "#f3c0ca",
+                    cursor: "pointer",
+                    boxShadow: "inset 0 0 0 1px rgba(255,255,255,.7)",
                   }}
                 >
                   ⭐ Оцінити виконавця
