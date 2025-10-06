@@ -1,9 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
-import {
-  confirmCompletionOnChain,
-  getDealOnChain,
-} from "../lib/escrowContract";
+import { confirmCompletionOnChain, getDealOnChain } from "../lib/escrowContract";
 import { pushNotificationManager, useNotifications } from "../lib/pushNotifications";
 import { useRealtimeNotifications } from "../lib/realtimeNotifications";
 import CelebrationToast from "./CelebrationToast";
@@ -16,7 +13,14 @@ import ScenarioCard, { Scenario, Status } from "./ScenarioCard";
 import RateModal from "./RateModal";
 import { upsertRating } from "../lib/ratings";
 
-import { ensureInMetaMaskDapp, connectWallet, ensureBSC, waitForReturn, isMobileUA, isMetaMaskInApp } from "../lib/providerBridge";
+import {
+  ensureInMetaMaskDapp,
+  connectWallet,
+  ensureBSC,
+  waitForReturn,
+  isMobileUA,
+  isMetaMaskInApp,
+} from "../lib/providerBridge";
 import { lockFundsMobileFlow } from "../lib/escrowMobile";
 
 const SOUND = new Audio("/notification.wav");
@@ -29,24 +33,14 @@ async function withTimeout<T>(p: Promise<T>, ms = 8000, label = "op"): Promise<T
   ]);
 }
 
-async function ensureProviderReady() {
-  const { provider } = await connectWallet();
-  if (!provider || typeof (provider as any).request !== "function") {
-    throw new Error("Wallet is not connected. Open MetaMask and confirm connection.");
-  }
-  await ensureBSC(provider);
-  return provider;
-}
-
-const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
-const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== "confirmed";
-
-const getStage = (s: Scenario) => {
+function isBothAgreed(s: Scenario) { return !!s.is_agreed_by_customer && !!s.is_agreed_by_executor; }
+function canEditFields(s: Scenario) { return !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== "confirmed"; }
+function getStage(s: Scenario) {
   if (s.status === "confirmed") return 3;
   if (s.escrow_tx_hash) return 2;
   if (isBothAgreed(s)) return 1;
   return 0;
-};
+}
 
 function StatusStrip({ s }: { s: Scenario }) {
   const stage = getStage(s);
@@ -63,17 +57,7 @@ function StatusStrip({ s }: { s: Scenario }) {
     />
   );
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "6px 10px",
-        borderRadius: 10,
-        background: "rgba(0,0,0,0.035)",
-        margin: "6px 0 10px",
-      }}
-    >
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", borderRadius: 10, background: "rgba(0,0,0,0.035)", margin: "6px 0 10px" }}>
       <Dot active={stage >= 0} />
       <Dot active={stage >= 1} />
       <Dot active={stage >= 2} />
@@ -258,7 +242,6 @@ export default function MyOrders() {
 
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = "0x0000000000000000000000000000000000000000";
-
     let executor =
       (s as any).executor_wallet ||
       (s as any).executorAddress ||
@@ -292,9 +275,11 @@ export default function MyOrders() {
 
     referrer = (s as any).referrer_wallet ?? referrer ?? null;
 
-    if (!executor) throw new Error("Не знайдено адресу гаманця виконавця для цієї угоди.");
+    if (!executor) {
+      throw new Error("Не знайдено адресу гаманця виконавця для цієї угоди.");
+    }
 
-    return { executor, referrer: referrer ?? ZERO };
+    return { executor, referrer: referrer ?? "0x0000000000000000000000000000000000000000" };
   }
 
   function deriveExecutionTimeSec(s: Scenario): number {
@@ -306,7 +291,7 @@ export default function MyOrders() {
       const t = new Date(`${(s as any).date}T${(s as any).time || "00:00"}`).getTime();
       if (!Number.isNaN(t)) return Math.floor(t / 1000);
     }
-    return Math.floor(Date.now() / 1000) + 3600;
+    return Math.floor(Date.now() / 1000) + 3600; // +1 година
   }
 
   const handleLock = async (s: Scenario) => {
@@ -321,14 +306,13 @@ export default function MyOrders() {
     }
     if (s.escrow_tx_hash) return;
 
-    // 🟣 ДОДАНО: якщо мобільний зовнішній браузер — відкриваємо сторінку всередині MetaMask
-    if (isMobileUA() && !isMetaMaskInApp()) {
-      // плавно переведемо користувача у MetaMask Browser перед початком флоу
-      await ensureInMetaMaskDapp();
-    }
-
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
+      // На мобільних, якщо НЕ всередині MetaMask — ініціюємо SDK-deeplink
+      if (isMobileUA() && !isMetaMaskInApp()) {
+        await ensureInMetaMaskDapp();
+      }
+
       const { executor, referrer } = await resolveWallets(s);
       const execTime = deriveExecutionTimeSec(s);
 
@@ -339,12 +323,8 @@ export default function MyOrders() {
         amount: Number(s.donation_amount_usdt),
         executionTime: execTime,
         onStatus: (st, payload) => {
-          if (st === "connecting")         console.log("[BMB] Connecting wallet...");
-          if (st === "ensuring_chain")     console.log("[BMB] Ensuring BSC...");
-          if (st === "checking_allowance") console.log("[BMB] Checking allowance...");
-          if (st === "approving")          console.log("[BMB] Approving USDT...", payload);
-          if (st === "locking")            console.log("[BMB] Locking funds...");
-          if (st === "done")               console.log("[BMB] Lock done:", payload);
+          // можна замінити на ваші тости/лоадери
+          console.log("🟡 EscrowMobile:", st, payload || "");
         },
         waitConfirms: 1,
       });
@@ -366,7 +346,7 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
-      const eth = await ensureProviderReady();
+      const eth = (await connectWallet()).provider;
 
       try { await withTimeout(eth.request({ method: "eth_chainId" }), 4000, "poke4"); } catch {}
       try { await withTimeout(eth.request({ method: "eth_accounts" }), 4000, "poke5"); } catch {}
