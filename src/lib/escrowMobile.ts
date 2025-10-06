@@ -1,21 +1,22 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { BigNumber, ethers } from "ethers";
 import { connectWallet, ensureBSC, waitForReturn, type Eip1193Provider } from "./providerBridge";
 import { ensureAllowance, fetchTokenDecimals, toUnits } from "./erc20";
 
-/* === ENV === */
+// === ENV ===
 export const USDT_ADDRESS   = (import.meta as any).env?.VITE_USDT_ADDRESS as string;
 export const ESCROW_ADDRESS = (import.meta as any).env?.VITE_ESCROW_ADDRESS as string;
 
 if (!USDT_ADDRESS)  console.warn("[BMB] VITE_USDT_ADDRESS is empty");
 if (!ESCROW_ADDRESS) console.warn("[BMB] VITE_ESCROW_ADDRESS is empty");
 
-/** Мінімальний ABI: lockFunds(bytes32,address,address,uint256,uint256) */
+// lockFunds(bytes32 scenarioId,address executor,address referrer,uint256 amount,uint256 executionTime)
 const ESCROW_ABI = [
   "function lockFunds(bytes32 scenarioId,address executor,address referrer,uint256 amount,uint256 executionTime) payable",
 ];
 
-/** Нормалізація до bytes32 */
+/** Якщо scenarioId не bytes32 — робимо keccak256(utf8) */
 function normalizeScenarioId(input: string): string {
   const hex32 = /^0x[0-9a-fA-F]{64}$/;
   if (hex32.test(input)) return input;
@@ -23,47 +24,95 @@ function normalizeScenarioId(input: string): string {
 }
 
 export type LockFundsParams = {
-  scenarioId: string;
-  executor: string;
-  referrer?: string | null;
-  amount: string | number;
-  executionTime: number;
+  scenarioId: string;              // bytes32 або звичайний рядок
+  executor: string;                // адреса виконавця
+  referrer?: string | null;        // адреса реферала або null
+  amount: string | number;         // сума в USDT (людське значення)
+  executionTime: number;           // unix time у секундах
   onStatus?: (
-    status: "connecting" | "ensuring_chain" | "checking_allowance" | "approving" | "locking" | "done",
+    status:
+      | "connecting"
+      | "ensuring_chain"
+      | "checking_allowance"
+      | "approving"
+      | "locking"
+      | "done",
     payload?: any
   ) => void;
-  waitConfirms?: number;
+  waitConfirms?: number;           // кількість підтверджень
 };
 
 export type LockFundsResult = {
-  address: string;
-  approveTxHash?: string;
-  lockTxHash: string;
+  address: string;                 // адреса платника (замовника)
+  approveTxHash?: string;          // хеш approve, якщо був
+  lockTxHash: string;              // хеш lockFunds
   lockReceipt: ethers.providers.TransactionReceipt;
-  amountUnits: BigNumber;
-  decimals: number;
+  amountUnits: BigNumber;          // сума у найменших одиницях USDT
+  decimals: number;                // десятковість USDT
 };
 
+/** Невеличкий "пінг", щоб після повернення з MetaMask мобільний провайдер прокинувся */
+async function pokeProvider(p: Eip1193Provider) {
+  try { await p.request({ method: "eth_chainId" }); } catch {}
+  try { await p.request({ method: "eth_accounts" }); } catch {}
+}
+
+/** Очікування, поки провайдер не буде готовим приймати наступний запит (після deeplink) */
+async function waitWalletForeground(p: Eip1193Provider, ms = 12000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    try {
+      await p.request({ method: "eth_chainId" });
+      return;
+    } catch (e: any) {
+      // request already pending → почекаємо й повторимо
+      const msg = String(e?.message || "");
+      if (e?.code === -32002 || /already pending/i.test(msg)) {
+        await waitForReturn(600);
+      } else {
+        await waitForReturn(350);
+      }
+    }
+  }
+}
+
+/** Головний флоу блокування коштів, адаптований під мобільний MetaMask */
 export async function lockFundsMobileFlow(params: LockFundsParams): Promise<LockFundsResult> {
-  const { scenarioId, executor, referrer, amount, executionTime, onStatus, waitConfirms = 1 } = params;
+  const {
+    scenarioId,
+    executor,
+    referrer,
+    amount,
+    executionTime,
+    onStatus,
+    waitConfirms = 1,
+  } = params;
 
-  if (!USDT_ADDRESS || !ESCROW_ADDRESS) throw new Error("Missing USDT/ESCROW address in env");
+  if (!USDT_ADDRESS || !ESCROW_ADDRESS) {
+    throw new Error("Missing USDT/ESCROW address in env");
+  }
 
-  /* 1) connect + ensure BSC */
+  // 1) Конектимо гаманець (SDK на мобілці) і гарантуємо BSC
   onStatus?.("connecting");
-  const { provider, signer, address, ethersProvider } = await connectWallet();
-  await waitForReturn(800); // важливо для мобільного SDK
+  const { provider } = await connectWallet();
+  if (!provider || typeof (provider as any).request !== "function") {
+    throw new Error("Wallet provider is not ready. Open MetaMask and try again.");
+  }
+
+  const ethersProvider = new ethers.providers.Web3Provider(provider as any);
+  const signer = ethersProvider.getSigner();
+  const address = await signer.getAddress();
 
   onStatus?.("ensuring_chain");
-  await ensureBSC(provider as unknown as Eip1193Provider);
-  await waitForReturn(800);
+  await ensureBSC(provider);
 
-  /* 2) decimals + amount */
+  // 2) Десятковість та кількість у найменших одиницях
   const decimals = await fetchTokenDecimals(USDT_ADDRESS, ethersProvider);
   const amountUnits = toUnits(amount as any, decimals);
 
-  /* 3) allowance (approve якщо треба) */
+  // 3) Перевіряємо / робимо approve
   onStatus?.("checking_allowance");
+
   const allowanceRes = await ensureAllowance({
     token: USDT_ADDRESS,
     spender: ESCROW_ADDRESS,
@@ -76,21 +125,54 @@ export async function lockFundsMobileFlow(params: LockFundsParams): Promise<Lock
 
   let approveTxHash: string | undefined;
   if (allowanceRes.didApprove) {
-    onStatus?.("approving", { txHash: allowanceRes.txHash });
     approveTxHash = allowanceRes.txHash;
-    await waitForReturn(1000); // після approve користувача повертає у браузер
+    onStatus?.("approving", { txHash: approveTxHash });
+
+    // Після approve MetaMask часто показує "Return to app".
+    // Дамо юзеру повернутись у браузер і "розбудимо" провайдер.
+    await waitForReturn(1200);
+    await pokeProvider(provider);
+    await waitWalletForeground(provider, 12000);
   }
 
-  /* 4) lockFunds */
+  // 4) Викликаємо lockFunds
   const escrow = new ethers.Contract(ESCROW_ADDRESS, ESCROW_ABI, signer);
   const scenarioIdBytes32 = normalizeScenarioId(scenarioId);
-  const ZERO = "0x0000000000000000000000000000000000000000";
-  const ref = referrer && referrer !== ZERO ? referrer : ZERO;
+  const ref = referrer && referrer !== "0x0000000000000000000000000000000000000000"
+    ? referrer
+    : "0x0000000000000000000000000000000000000000";
 
   onStatus?.("locking");
-  const tx = await escrow.lockFunds(scenarioIdBytes32, executor, ref, amountUnits, Math.floor(executionTime), { value: 0 });
-  const receipt = await tx.wait(waitConfirms);
+  let tx;
+  try {
+    tx = await escrow.lockFunds(
+      scenarioIdBytes32,
+      executor,
+      ref,
+      amountUnits,
+      Math.floor(executionTime),
+      { value: 0 }
+    );
+  } catch (e: any) {
+    // Якщо юзер був у MM і ми ще не повернулися — дочекаємось і повторимо 1 раз
+    const msg = String(e?.message || "");
+    if (e?.code === -32002 || /already pending|request.*pending/i.test(msg)) {
+      await waitForReturn(1500);
+      await waitWalletForeground(provider, 12000);
+      tx = await escrow.lockFunds(
+        scenarioIdBytes32,
+        executor,
+        ref,
+        amountUnits,
+        Math.floor(executionTime),
+        { value: 0 }
+      );
+    } else {
+      throw e;
+    }
+  }
 
+  const receipt = await tx.wait(waitConfirms);
   onStatus?.("done", { txHash: receipt.transactionHash });
 
   return {
