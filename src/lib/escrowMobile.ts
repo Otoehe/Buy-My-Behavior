@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { BigNumber, ethers } from "ethers";
-import { connectWallet, ensureBSC } from "./providerBridge";
+import { connectWallet, ensureBSC, type Eip1193Provider } from "./providerBridge";
 import { ensureAllowance, fetchTokenDecimals, toUnits } from "./erc20";
 
 // === ENV ===
@@ -10,26 +10,20 @@ export const ESCROW_ADDRESS = (import.meta as any).env?.VITE_ESCROW_ADDRESS as s
 if (!USDT_ADDRESS)  console.warn("[BMB] VITE_USDT_ADDRESS is empty");
 if (!ESCROW_ADDRESS) console.warn("[BMB] VITE_ESCROW_ADDRESS is empty");
 
-// Escrow ABI: lockFunds(bytes32,address,address,uint256,uint256)
+// Escrow ABI
 const ESCROW_ABI = [
   "function lockFunds(bytes32 scenarioId,address executor,address referrer,uint256 amount,uint256 executionTime) payable",
 ];
 
 function keccakString(s: string): string {
   const anyE = ethers as any;
-  try {
-    if (anyE.utils?.id) return anyE.utils.id(s); // v5
-    if (anyE.id) return anyE.id(s);              // v6
-  } catch {}
-  // дуже рідко, але на крайній випадок:
+  if (anyE.utils?.id) return anyE.utils.id(s); // v5
+  if (anyE.id) return anyE.id(s);              // v6
   return ("0x" + Buffer.from(s, "utf8").toString("hex")).slice(0, 66).padEnd(66, "0");
 }
-
-/** Нормалізація scenarioId до bytes32 */
 function normalizeScenarioId(input: string): string {
   const hex32 = /^0x[0-9a-fA-F]{64}$/;
-  if (hex32.test(input)) return input;
-  return keccakString(input);
+  return hex32.test(input) ? input : keccakString(input);
 }
 
 export type LockFundsParams = {
@@ -62,10 +56,13 @@ export async function lockFundsMobileFlow(params: LockFundsParams): Promise<Lock
   }
 
   onStatus?.("connecting");
-  const { signer, address, ethersProvider } = await connectWallet();
+  const { signer, address, ethersProvider, provider } = await connectWallet();
 
   onStatus?.("ensuring_chain");
-  await ensureBSC(); // використовує активний провайдер
+  await ensureBSC(provider as unknown as Eip1193Provider);
+
+  // трішки дати гаманцю “видихнути” перед читаннями
+  await new Promise(r => setTimeout(r, 250));
 
   const decimals = await fetchTokenDecimals(USDT_ADDRESS, ethersProvider);
   const amountUnits = toUnits(amount as any, decimals);
