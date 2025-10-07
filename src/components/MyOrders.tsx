@@ -3,9 +3,15 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
-import { confirmCompletionOnChain } from '../lib/escrowContract';
+import {
+  confirmCompletionOnChain,
+  getDealOnChain,
+} from '../lib/escrowContract';
 
-import { useNotifications } from '../lib/pushNotifications';
+import {
+  pushNotificationManager as NotificationManager,
+  useNotifications,
+} from '../lib/pushNotifications';
 import { useRealtimeNotifications } from '../lib/realtimeNotifications';
 
 import CelebrationToast from './CelebrationToast';
@@ -20,6 +26,8 @@ import { upsertRating } from '../lib/ratings';
 
 import { connectWallet, ensureBSC, waitForReturn } from '../lib/providerBridge';
 import { lockFundsMobileFlow } from '../lib/escrowMobile';
+
+// ---- локальні утиліти -------------------------------------------------------
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
@@ -36,9 +44,11 @@ function openGMaps(lat?: number | null, lng?: number | null) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
+// ---- основний компонент -----------------------------------------------------
+
 export default function MyOrders() {
   const location = useLocation();
-  void location;
+  void location; // позбавляємось warning, не впливає на логіку
 
   const { notify } = useNotifications();
   useRealtimeNotifications();
@@ -52,6 +62,7 @@ export default function MyOrders() {
   const [statusMsg, setStatusMsg] = useState<string>('');
   const [celebrate, setCelebrate] = useState<boolean>(false);
 
+  // — Ініціалізація користувача
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -60,6 +71,7 @@ export default function MyOrders() {
     })();
   }, []);
 
+  // — Завантаження сценаріїв поточного користувача (Замовника)
   const fetchScenarios = useCallback(async () => {
     if (!userId) return;
     setLoading(true);
@@ -81,6 +93,7 @@ export default function MyOrders() {
     fetchScenarios();
   }, [fetchScenarios]);
 
+  // — Realtime підписка по scenarios
   useEffect(() => {
     const channel = supabase
       .channel('realtime:scenarios:my-orders')
@@ -97,6 +110,8 @@ export default function MyOrders() {
       supabase.removeChannel(channel);
     };
   }, [userId, fetchScenarios]);
+
+  // — Хендлери ---------------------------------------------------------------
 
   const handleAgree = useCallback(
     async (s: Scenario) => {
@@ -123,12 +138,13 @@ export default function MyOrders() {
       try {
         setStatusMsg('Підготовка до блокування коштів…');
 
+        // (не обов’язково) ensureBSC для стабільності й адреси
         try {
           const { provider, address } = await connectWallet();
           await ensureBSC(provider);
           setAddress(address);
         } catch {
-          /* поза MetaMask — deeplink відпрацює всередині lockFundsMobileFlow */
+          // Якщо поза MetaMask → у lockFundsMobileFlow відпрацює deeplink
         }
 
         const amount = toNumberSafe((s as any).donation_amount_usdt, 0);
@@ -148,6 +164,7 @@ export default function MyOrders() {
 
         const referrer = (s as any).referrer_wallet || null;
 
+        // Основний мобільний потік escrow
         const txHash = await lockFundsMobileFlow({
           scenarioId: String(s.id),
           amount,
@@ -161,6 +178,7 @@ export default function MyOrders() {
           },
         });
 
+        // freeze edits / залишаємо статус agreed
         await supabase.from('scenarios').update({ status: 'agreed' as Status }).eq('id', s.id);
 
         notify('Кошти заблоковано в ескроу');
@@ -259,6 +277,8 @@ export default function MyOrders() {
 
   const items = useMemo(() => scenarios, [scenarios]);
 
+  // ---- UI -------------------------------------------------------------------
+
   return (
     <div className="my-orders">
       <header className="my-orders__header">
@@ -282,6 +302,7 @@ export default function MyOrders() {
             onConfirm={() => handleConfirm(s)}
             onDispute={() => handleDispute(s)}
             onOpenLocation={() => handleOpenLocation(s)}
+            // onRate={() => openRate(String(s.id))}
           />
         ))}
       </div>
