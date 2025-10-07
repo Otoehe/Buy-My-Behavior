@@ -1,6 +1,7 @@
+// src/lib/escrowMobile.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { BigNumber, ethers } from "ethers";
-import { connectWallet, ensureBSC, type Eip1193Provider } from "./providerBridge";
+import { connectWallet, ensureBSC } from "./providerBridge";
 import { ensureAllowance, fetchTokenDecimals, toUnits } from "./erc20";
 
 // === ENV ===
@@ -10,20 +11,15 @@ export const ESCROW_ADDRESS = (import.meta as any).env?.VITE_ESCROW_ADDRESS as s
 if (!USDT_ADDRESS)  console.warn("[BMB] VITE_USDT_ADDRESS is empty");
 if (!ESCROW_ADDRESS) console.warn("[BMB] VITE_ESCROW_ADDRESS is empty");
 
-// Escrow ABI
+// lockFunds(bytes32 scenarioId,address executor,address referrer,uint256 amount,uint256 executionTime)
 const ESCROW_ABI = [
   "function lockFunds(bytes32 scenarioId,address executor,address referrer,uint256 amount,uint256 executionTime) payable",
 ];
 
-function keccakString(s: string): string {
-  const anyE = ethers as any;
-  if (anyE.utils?.id) return anyE.utils.id(s); // v5
-  if (anyE.id) return anyE.id(s);              // v6
-  return ("0x" + Buffer.from(s, "utf8").toString("hex")).slice(0, 66).padEnd(66, "0");
-}
 function normalizeScenarioId(input: string): string {
   const hex32 = /^0x[0-9a-fA-F]{64}$/;
-  return hex32.test(input) ? input : keccakString(input);
+  if (hex32.test(input)) return input;
+  return ethers.utils.id(input); // keccak256(utf8)
 }
 
 export type LockFundsParams = {
@@ -31,7 +27,7 @@ export type LockFundsParams = {
   executor: string;
   referrer?: string | null;
   amount: string | number;
-  executionTime: number;
+  executionTime: number; // unix seconds
   onStatus?: (
     status: "connecting" | "ensuring_chain" | "checking_allowance" | "approving" | "locking" | "done",
     payload?: any
@@ -43,7 +39,7 @@ export type LockFundsResult = {
   address: string;
   approveTxHash?: string;
   lockTxHash: string;
-  lockReceipt: any;
+  lockReceipt: ethers.providers.TransactionReceipt;
   amountUnits: BigNumber;
   decimals: number;
 };
@@ -55,18 +51,18 @@ export async function lockFundsMobileFlow(params: LockFundsParams): Promise<Lock
     throw new Error("Missing USDT/ESCROW address in env");
   }
 
+  // 1) connect + chain
   onStatus?.("connecting");
-  const { signer, address, ethersProvider, provider } = await connectWallet();
+  const { signer, address, ethersProvider } = await connectWallet();
 
   onStatus?.("ensuring_chain");
-  await ensureBSC(provider as unknown as Eip1193Provider);
+  await ensureBSC(); // використовує той самий провайдер
 
-  // трішки дати гаманцю “видихнути” перед читаннями
-  await new Promise(r => setTimeout(r, 250));
-
+  // 2) decimals + units
   const decimals = await fetchTokenDecimals(USDT_ADDRESS, ethersProvider);
   const amountUnits = toUnits(amount as any, decimals);
 
+  // 3) allowance
   onStatus?.("checking_allowance");
   const allowanceRes = await ensureAllowance({
     token: USDT_ADDRESS,
@@ -80,11 +76,12 @@ export async function lockFundsMobileFlow(params: LockFundsParams): Promise<Lock
 
   let approveTxHash: string | undefined = undefined;
   if (allowanceRes.didApprove) {
+    onStatus?.("approving", { txHash: allowanceRes.txHash });
     approveTxHash = allowanceRes.txHash;
-    onStatus?.("approving", { txHash: approveTxHash });
   }
 
-  const escrow = new (ethers as any).Contract(ESCROW_ADDRESS, ESCROW_ABI, signer);
+  // 4) lockFunds
+  const escrow = new ethers.Contract(ESCROW_ADDRESS, ESCROW_ABI, signer);
   const scenarioIdBytes32 = normalizeScenarioId(scenarioId);
   const ref = (referrer && referrer !== "0x0000000000000000000000000000000000000000")
     ? referrer

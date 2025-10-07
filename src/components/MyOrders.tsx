@@ -1,3 +1,4 @@
+// src/components/MyOrders.tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { confirmCompletionOnChain, getDealOnChain } from "../lib/escrowContract";
@@ -14,7 +15,6 @@ import RateModal from "./RateModal";
 import { upsertRating } from "../lib/ratings";
 
 import {
-  ensureInMetaMaskDapp,
   connectWallet,
   ensureBSC,
   waitForReturn,
@@ -22,6 +22,9 @@ import {
   isMetaMaskInApp,
 } from "../lib/providerBridge";
 import { lockFundsMobileFlow } from "../lib/escrowMobile";
+
+import { openInMetaMask } from "../lib/mmDeeplink";
+import { packSbSessionParam, restoreSbSessionFromQuery } from "../lib/supabaseSessionBridge";
 
 const SOUND = new Audio("/notification.wav");
 SOUND.volume = 0.8;
@@ -33,14 +36,25 @@ async function withTimeout<T>(p: Promise<T>, ms = 8000, label = "op"): Promise<T
   ]);
 }
 
-function isBothAgreed(s: Scenario) { return !!s.is_agreed_by_customer && !!s.is_agreed_by_executor; }
-function canEditFields(s: Scenario) { return !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== "confirmed"; }
-function getStage(s: Scenario) {
+async function ensureProviderReady() {
+  const { provider } = await connectWallet();
+  if (!provider || typeof (provider as any).request !== "function") {
+    throw new Error("Гаманець ще не під'єднаний. Відкрийте MetaMask і підтвердіть підключення.");
+  }
+  await ensureBSC(provider as any);
+  return provider;
+}
+
+/* ─ helpers ─ */
+const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
+const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== "confirmed";
+
+const getStage = (s: Scenario) => {
   if (s.status === "confirmed") return 3;
   if (s.escrow_tx_hash) return 2;
   if (isBothAgreed(s)) return 1;
   return 0;
-}
+};
 
 function StatusStrip({ s }: { s: Scenario }) {
   const stage = getStage(s);
@@ -57,7 +71,17 @@ function StatusStrip({ s }: { s: Scenario }) {
     />
   );
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", borderRadius: 10, background: "rgba(0,0,0,0.035)", margin: "6px 0 10px" }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "6px 10px",
+        borderRadius: 10,
+        background: "rgba(0,0,0,0.035)",
+        margin: "6px 0 10px",
+      }}
+    >
       <Dot active={stage >= 0} />
       <Dot active={stage >= 1} />
       <Dot active={stage >= 2} />
@@ -95,8 +119,10 @@ export default function MyOrders() {
     setList(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
   const hasCoords = (s: Scenario) =>
-    typeof s.latitude === "number" && Number.isFinite(s.latitude) &&
-    typeof s.longitude === "number" && Number.isFinite(s.longitude);
+    typeof s.latitude === "number" &&
+    Number.isFinite(s.latitude) &&
+    typeof s.longitude === "number" &&
+    Number.isFinite(s.longitude);
 
   const canAgree = (s: Scenario) => !s.escrow_tx_hash && s.status !== "confirmed" && !s.is_agreed_by_customer;
 
@@ -134,13 +160,28 @@ export default function MyOrders() {
     setRatedOrders(new Set((data || []).map((r: any) => r.order_id)));
   }, []);
 
+  // 0) Відновлюємо сесію Supabase з ?sb=...
+  useEffect(() => {
+    restoreSbSessionFromQuery().catch(() => {});
+  }, []);
+
+  // 1) Початкове завантаження
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
       const uid = data?.user?.id;
-      if (!uid) return;
-      setUserId(uid);
-      await load(uid);
+      if (!uid) {
+        const { data: again } = await supabase.auth.getUser();
+        if (!again?.user?.id) {
+          // без авторизації — працюємо з тим що є
+        } else {
+          setUserId(again.user.id);
+          await load(again.user.id);
+        }
+      } else {
+        setUserId(uid);
+        await load(uid);
+      }
 
       const ch = supabase
         .channel("realtime:myorders")
@@ -152,8 +193,6 @@ export default function MyOrders() {
           setList(prev => {
             if (ev === "DELETE" && oldId) return prev.filter(x => x.id !== oldId);
             if (!s) return prev;
-
-            if (s.creator_id !== uid) return prev.filter(x => x.id !== s.id);
 
             const i = prev.findIndex(x => x.id === s.id);
             if (ev === "INSERT") {
@@ -181,7 +220,7 @@ export default function MyOrders() {
               }
 
               const bothAgreed = !!after.is_agreed_by_customer && !!after.is_agreed_by_executor;
-              const needLock = bothAgreed && !after.escrow_tx_hash && after.creator_id === uid;
+              const needLock = bothAgreed && !after.escrow_tx_hash && after.creator_id === (data?.user?.id || userId);
 
               const cp = [...prev];
               cp[i] = after;
@@ -196,14 +235,14 @@ export default function MyOrders() {
             return prev;
           });
 
-          setTimeout(() => refreshRated(uid, s ? [s] : []), 0);
+          setTimeout(() => refreshRated(userId || "", s ? [s] : []), 0);
         })
         .subscribe();
 
       const chRatings = supabase
-        .channel(`ratings:my:${uid}`)
-        .on("postgres_changes", { event: "*", schema: "public", table: "ratings", filter: `rater_id=eq.${uid}` }, async () => {
-          await refreshRated(uid, list);
+        .channel(`ratings:my:${userId || "me"}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "ratings", filter: userId ? `rater_id=eq.${userId}` : undefined }, async () => {
+          await refreshRated(userId, list);
         })
         .subscribe();
 
@@ -212,6 +251,7 @@ export default function MyOrders() {
         try { supabase.removeChannel(chRatings); } catch {}
       };
     })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load, list, refreshRated]);
 
   useEffect(() => {
@@ -219,6 +259,24 @@ export default function MyOrders() {
     refreshRated(userId, list);
     list.forEach(s => { if (s?.id) loadOpenDispute(s.id); });
   }, [userId, list, loadOpenDispute, refreshRated]);
+
+  // ── мобільний автозапуск: /my-orders?autolock=1&sid=<id>&return=<url>&sb=<...>
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const autolock = q.get("autolock") === "1";
+    const sid = q.get("sid");
+    if (!autolock || !sid) return;
+
+    const t = setInterval(() => {
+      const s = list.find(x => x.id === sid);
+      if (!s) return;
+      clearInterval(t);
+      if (!s.escrow_tx_hash && isBothAgreed(s)) {
+        handleLock(s, /*fromAutolock*/ true).catch(() => {});
+      }
+    }, 400);
+    return () => clearInterval(t);
+  }, [list]);
 
   const handleAgree = async (s: Scenario) => {
     if (agreeBusy[s.id] || !canAgree(s)) return;
@@ -272,14 +330,12 @@ export default function MyOrders() {
         }
       }
     }
-
     referrer = (s as any).referrer_wallet ?? referrer ?? null;
 
     if (!executor) {
       throw new Error("Не знайдено адресу гаманця виконавця для цієї угоди.");
     }
-
-    return { executor, referrer: referrer ?? "0x0000000000000000000000000000000000000000" };
+    return { executor, referrer: referrer ?? ZERO };
   }
 
   function deriveExecutionTimeSec(s: Scenario): number {
@@ -294,7 +350,7 @@ export default function MyOrders() {
     return Math.floor(Date.now() / 1000) + 3600; // +1 година
   }
 
-  const handleLock = async (s: Scenario) => {
+  const handleLock = async (s: Scenario, fromAutolock = false) => {
     if (lockBusy[s.id]) return;
     if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) {
       alert("Сума має бути > 0");
@@ -306,13 +362,17 @@ export default function MyOrders() {
     }
     if (s.escrow_tx_hash) return;
 
+    // Мобільний зовнішній браузер → переносимо в MetaMask Browser
+    if (isMobileUA() && !isMetaMaskInApp() && !fromAutolock) {
+      const sessionParam = await packSbSessionParam();
+      const returnUrl = encodeURIComponent(window.location.href);
+      const path = `/my-orders?autolock=1&sid=${encodeURIComponent(s.id)}${sessionParam ? `&sb=${sessionParam}` : ""}&return=${returnUrl}`;
+      openInMetaMask(path);
+      return;
+    }
+
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // На мобільних, якщо НЕ всередині MetaMask — ініціюємо SDK-deeplink
-      if (isMobileUA() && !isMetaMaskInApp()) {
-        await ensureInMetaMaskDapp();
-      }
-
       const { executor, referrer } = await resolveWallets(s);
       const execTime = deriveExecutionTimeSec(s);
 
@@ -322,10 +382,7 @@ export default function MyOrders() {
         referrer,
         amount: Number(s.donation_amount_usdt),
         executionTime: execTime,
-        onStatus: (st, payload) => {
-          // можна замінити на ваші тости/лоадери
-          console.log("🟡 EscrowMobile:", st, payload || "");
-        },
+        onStatus: () => {},
         waitConfirms: 1,
       });
 
@@ -335,6 +392,13 @@ export default function MyOrders() {
         .eq("id", s.id);
 
       setLocal(s.id, { escrow_tx_hash: res.lockTxHash as any, status: "agreed" });
+
+      // якщо прийшли із ?return=... → повертаємо користувача назад
+      try {
+        const q = new URLSearchParams(window.location.search);
+        const ret = q.get("return");
+        if (ret) window.location.href = decodeURIComponent(ret);
+      } catch {}
     } catch (e: any) {
       alert(e?.message || "Не вдалося заблокувати кошти.");
     } finally {
@@ -346,7 +410,7 @@ export default function MyOrders() {
     if (confirmBusy[s.id] || !canConfirm(s)) return;
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
-      const eth = (await connectWallet()).provider;
+      const eth = await ensureProviderReady();
 
       try { await withTimeout(eth.request({ method: "eth_chainId" }), 4000, "poke4"); } catch {}
       try { await withTimeout(eth.request({ method: "eth_accounts" }), 4000, "poke5"); } catch {}
@@ -418,9 +482,20 @@ export default function MyOrders() {
               : "Не запитано"}
         </span>
         <span>📡 {rt.isListening ? `${rt.method} активний` : "Не підключено"}</span>
-        {permissionStatus !== "granted" && (
-          <button className="notify-btn" onClick={requestPermission}>
-            🔔 Дозволити
+
+        {/* підказка відкрити у MetaMask Browser */}
+        {isMobileUA() && !isMetaMaskInApp() && (
+          <button
+            className="notify-btn"
+            onClick={async () => {
+              const sb = await packSbSessionParam();
+              const returnUrl = encodeURIComponent(window.location.href);
+              const path = `/my-orders?return=${returnUrl}${sb ? `&sb=${sb}` : ""}`;
+              openInMetaMask(path);
+            }}
+            title="Відкрити цю сторінку в браузері MetaMask"
+          >
+            🦊 Відкрити в MetaMask
           </button>
         )}
       </div>
