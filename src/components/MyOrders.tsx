@@ -27,8 +27,6 @@ import { upsertRating } from '../lib/ratings';
 import { connectWallet, ensureBSC, waitForReturn } from '../lib/providerBridge';
 import { lockFundsMobileFlow } from '../lib/escrowMobile';
 
-// ---- локальні утиліти -------------------------------------------------------
-
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
@@ -44,11 +42,10 @@ function openGMaps(lat?: number | null, lng?: number | null) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
-// ---- основний компонент -----------------------------------------------------
-
 export default function MyOrders() {
+  // залишаємо, щоб не ламати існуючу логіку маршрутів
   const location = useLocation();
-  void location; // позбавляємось warning, не впливає на логіку
+  void location;
 
   const { notify } = useNotifications();
   useRealtimeNotifications();
@@ -62,18 +59,25 @@ export default function MyOrders() {
   const [statusMsg, setStatusMsg] = useState<string>('');
   const [celebrate, setCelebrate] = useState<boolean>(false);
 
-  // — Ініціалізація користувача
+  // 1) Поточний користувач
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.auth.getUser();
+      const { data, error } = await supabase.auth.getUser();
+      if (error) {
+        console.error('auth.getUser error', error);
+      }
       const uid = data.user?.id ?? null;
       setUserId(uid || null);
     })();
   }, []);
 
-  // — Завантаження сценаріїв поточного користувача (Замовника)
+  // 2) Завантаження сценаріїв замовника
   const fetchScenarios = useCallback(async () => {
-    if (!userId) return;
+    if (!userId) {
+      setScenarios([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const { data, error } = await supabase
       .from('scenarios')
@@ -83,6 +87,7 @@ export default function MyOrders() {
 
     if (error) {
       console.error('fetchScenarios error', error);
+      setScenarios([]);
     } else {
       setScenarios((data || []) as unknown as Scenario[]);
     }
@@ -93,25 +98,22 @@ export default function MyOrders() {
     fetchScenarios();
   }, [fetchScenarios]);
 
-  // — Realtime підписка по scenarios
+  // 3) Realtime оновлення (дзеркальна синхронізація)
   useEffect(() => {
     const channel = supabase
       .channel('realtime:scenarios:my-orders')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'scenarios', filter: userId ? `customer_id=eq.${userId}` : undefined },
-        () => {
-          fetchScenarios();
-        }
+        () => fetchScenarios()
       )
       .subscribe();
-
     return () => {
       supabase.removeChannel(channel);
     };
   }, [userId, fetchScenarios]);
 
-  // — Хендлери ---------------------------------------------------------------
+  // 4) Хендлери дій
 
   const handleAgree = useCallback(
     async (s: Scenario) => {
@@ -138,13 +140,13 @@ export default function MyOrders() {
       try {
         setStatusMsg('Підготовка до блокування коштів…');
 
-        // (не обов’язково) ensureBSC для стабільності й адреси
+        // додатково намагаємось підтягнути адресу/мережу (safe)
         try {
           const { provider, address } = await connectWallet();
           await ensureBSC(provider);
           setAddress(address);
         } catch {
-          // Якщо поза MetaMask → у lockFundsMobileFlow відпрацює deeplink
+          // якщо поза MetaMask — deeplink відпрацює всередині lockFundsMobileFlow
         }
 
         const amount = toNumberSafe((s as any).donation_amount_usdt, 0);
@@ -164,7 +166,6 @@ export default function MyOrders() {
 
         const referrer = (s as any).referrer_wallet || null;
 
-        // Основний мобільний потік escrow
         const txHash = await lockFundsMobileFlow({
           scenarioId: String(s.id),
           amount,
@@ -178,7 +179,6 @@ export default function MyOrders() {
           },
         });
 
-        // freeze edits / залишаємо статус agreed
         await supabase.from('scenarios').update({ status: 'agreed' as Status }).eq('id', s.id);
 
         notify('Кошти заблоковано в ескроу');
@@ -202,6 +202,7 @@ export default function MyOrders() {
     async (s: Scenario) => {
       try {
         setStatusMsg('Очікуємо підтвердження виконання на ланцюгу…');
+
         const tx = await confirmCompletionOnChain(String(s.id));
         await tx.wait?.(1);
 
@@ -245,16 +246,15 @@ export default function MyOrders() {
     );
   }, []);
 
+  // Рейтинг
   const openRate = useCallback((scenarioId: string) => {
     setRateScenarioId(scenarioId);
     setRateOpen(true);
   }, []);
-
   const closeRate = useCallback(() => {
     setRateOpen(false);
     setRateScenarioId(null);
   }, []);
-
   const handleRateSubmit = useCallback(
     async (stars: number, comment?: string) => {
       if (!rateScenarioId || !userId) return;
@@ -275,9 +275,8 @@ export default function MyOrders() {
     [rateScenarioId, userId, notify, closeRate]
   );
 
+  // Відображення
   const items = useMemo(() => scenarios, [scenarios]);
-
-  // ---- UI -------------------------------------------------------------------
 
   return (
     <div className="my-orders">
@@ -302,6 +301,7 @@ export default function MyOrders() {
             onConfirm={() => handleConfirm(s)}
             onDispute={() => handleDispute(s)}
             onOpenLocation={() => handleOpenLocation(s)}
+            // якщо в твоєму ScenarioCard є onRate — розкоментуй:
             // onRate={() => openRate(String(s.id))}
           />
         ))}
