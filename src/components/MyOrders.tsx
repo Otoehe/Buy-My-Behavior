@@ -6,10 +6,12 @@ import { supabase } from '../lib/supabase';
 import {
   confirmCompletionOnChain,
   getDealOnChain,
-  // quickOneClickSetup, // лишив на випадок, якщо є у вашій обгортці
 } from '../lib/escrowContract';
 
-import { pushNotificationManager as NotificationManager, useNotifications } from '../lib/pushNotifications';
+import {
+  pushNotificationManager as NotificationManager,
+  useNotifications,
+} from '../lib/pushNotifications';
 import { useRealtimeNotifications } from '../lib/realtimeNotifications';
 
 import CelebrationToast from './CelebrationToast';
@@ -25,7 +27,7 @@ import { upsertRating } from '../lib/ratings';
 import { connectWallet, ensureBSC, waitForReturn } from '../lib/providerBridge';
 import { lockFundsMobileFlow } from '../lib/escrowMobile';
 
-// —— локальні утиліти ————————————————————————————————————————————————
+// ---- локальні утиліти -------------------------------------------------------
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
@@ -42,10 +44,12 @@ function openGMaps(lat?: number | null, lng?: number | null) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
-// —— основний компонент ————————————————————————————————————————————————
+// ---- основний компонент -----------------------------------------------------
 
 export default function MyOrders() {
   const location = useLocation();
+  void location; // позбавляємось warning, не впливає на логіку
+
   const { notify } = useNotifications();
   useRealtimeNotifications();
 
@@ -89,15 +93,14 @@ export default function MyOrders() {
     fetchScenarios();
   }, [fetchScenarios]);
 
-  // — Realtime оновлення по таблиці scenarios (дзеркальна синхронізація)
+  // — Realtime підписка по scenarios
   useEffect(() => {
     const channel = supabase
       .channel('realtime:scenarios:my-orders')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'scenarios', filter: userId ? `customer_id=eq.${userId}` : undefined },
-        (payload) => {
-          // Просте оновлення списку
+        () => {
           fetchScenarios();
         }
       )
@@ -108,12 +111,11 @@ export default function MyOrders() {
     };
   }, [userId, fetchScenarios]);
 
-  // — Хендлери ————————————————————————————————————————————————
+  // — Хендлери ---------------------------------------------------------------
 
   const handleAgree = useCallback(
     async (s: Scenario) => {
       try {
-        // Перехід у стан "agreed": кнопка видалення зникає, редагування блокується (канонічна логіка)
         const { error } = await supabase
           .from('scenarios')
           .update({ status: 'agreed' as Status })
@@ -138,7 +140,7 @@ export default function MyOrders() {
 
         // (не обов’язково) ensureBSC для стабільності й адреси
         try {
-          const { provider, signer, address } = await connectWallet();
+          const { provider, address } = await connectWallet();
           await ensureBSC(provider);
           setAddress(address);
         } catch {
@@ -151,7 +153,10 @@ export default function MyOrders() {
           return;
         }
 
-        const executor = (s as any).executor_wallet || (s as any).executor_address || (s as any).executor;
+        const executor =
+          (s as any).executor_wallet ||
+          (s as any).executor_address ||
+          (s as any).executor;
         if (!executor) {
           notify('Не вказано гаманець виконавця');
           return;
@@ -159,7 +164,7 @@ export default function MyOrders() {
 
         const referrer = (s as any).referrer_wallet || null;
 
-        // Основний мобільний потік escrow: deeplink → ensureBSC → approve USDT → lockFunds
+        // Основний мобільний потік escrow
         const txHash = await lockFundsMobileFlow({
           scenarioId: String(s.id),
           amount,
@@ -173,18 +178,16 @@ export default function MyOrders() {
           },
         });
 
-        // freeze edits / відобразити зміни статусу в БД (залишаємо статус як agreed; логіка freeze — на фронті)
+        // freeze edits / залишаємо статус agreed
         await supabase.from('scenarios').update({ status: 'agreed' as Status }).eq('id', s.id);
 
         notify('Кошти заблоковано в ескроу');
         SOUND.play().catch(() => {});
         setCelebrate(true);
 
-        // Повернення з MetaMask у ваш PWA
         await waitForReturn(120000, 700);
       } catch (e: any) {
         if (e?.code === 'DEEPLINKED') {
-          // відкрився MetaMask — користувач продовжить там; повторний клік потім резюмує
           setStatusMsg('Відкрито MetaMask. Продовжіть всередині додатку.');
           return;
         }
@@ -199,7 +202,6 @@ export default function MyOrders() {
     async (s: Scenario) => {
       try {
         setStatusMsg('Очікуємо підтвердження виконання на ланцюгу…');
-        // Підтвердження на смартконтракті (ваша існуюча обгортка)
         const tx = await confirmCompletionOnChain(String(s.id));
         await tx.wait?.(1);
 
@@ -223,7 +225,7 @@ export default function MyOrders() {
           notify('Спір уже створено');
           return;
         }
-        const row = await initiateDispute(String(s.id));
+        await initiateDispute(String(s.id));
         await supabase.from('scenarios').update({ status: 'disputed' as Status }).eq('id', s.id);
         notify('Створено спір. Комʼюніті розпочинає голосування.');
       } catch (e) {
@@ -237,7 +239,10 @@ export default function MyOrders() {
   const handleOpenLocation = useCallback((s: Scenario) => {
     const lat = (s as any).lat ?? (s as any).latitude;
     const lng = (s as any).lng ?? (s as any).longitude;
-    openGMaps(typeof lat === 'string' ? Number(lat) : lat, typeof lng === 'string' ? Number(lng) : lng);
+    openGMaps(
+      typeof lat === 'string' ? Number(lat) : lat,
+      typeof lng === 'string' ? Number(lng) : lng
+    );
   }, []);
 
   const openRate = useCallback((scenarioId: string) => {
@@ -270,12 +275,9 @@ export default function MyOrders() {
     [rateScenarioId, userId, notify, closeRate]
   );
 
-  // — відфільтрований список/групування (якщо потрібно)
-  const items = useMemo(() => {
-    return scenarios;
-  }, [scenarios]);
+  const items = useMemo(() => scenarios, [scenarios]);
 
-  // —— UI ————————————————————————————————————————————————
+  // ---- UI -------------------------------------------------------------------
 
   return (
     <div className="my-orders">
@@ -300,21 +302,14 @@ export default function MyOrders() {
             onConfirm={() => handleConfirm(s)}
             onDispute={() => handleDispute(s)}
             onOpenLocation={() => handleOpenLocation(s)}
-            // За потреби: onRate={() => openRate(String(s.id))}
+            // onRate={() => openRate(String(s.id))}
           />
         ))}
       </div>
 
-      <RateModal
-        open={rateOpen}
-        onClose={closeRate}
-        onSubmit={handleRateSubmit}
-      />
+      <RateModal open={rateOpen} onClose={closeRate} onSubmit={handleRateSubmit} />
 
-      <CelebrationToast
-        open={celebrate}
-        onClose={() => setCelebrate(false)}
-      />
+      <CelebrationToast open={celebrate} onClose={() => setCelebrate(false)} />
     </div>
   );
 }
