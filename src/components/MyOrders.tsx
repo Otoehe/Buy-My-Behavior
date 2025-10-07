@@ -2,8 +2,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import {
-  // quickOneClickSetup,            // ⟵ прибрано: не потрібно у новому мобільному флоу
-  // lockFunds,                      // ⟵ прибрано: замінено на lockFundsMobileFlow
   confirmCompletionOnChain,
   getDealOnChain,
 } from '../lib/escrowContract';
@@ -19,9 +17,7 @@ import ScenarioCard, { Scenario, Status } from './ScenarioCard';
 import RateModal from './RateModal';
 import { upsertRating } from '../lib/ratings';
 
-// ↓ наші містки до гаманця
 import { connectWallet, ensureBSC, waitForReturn } from '../lib/providerBridge';
-// ↓ новий єдиний мобільний флоу approve → lockFunds
 import { lockFundsMobileFlow } from '../lib/escrowMobile';
 
 const SOUND = new Audio('/notification.wav');
@@ -40,7 +36,7 @@ async function ensureProviderReady() {
   return provider;
 }
 
-/* ─ helpers ─ */
+/* helpers */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
@@ -261,7 +257,7 @@ export default function MyOrders() {
     }
   };
 
-  /** Спроба знайти адреси гаманців виконавця/реферала з сценарію/профілю (без зламу схеми БД). */
+  /** Витягнути гаманці виконавця/реферала: scenarios.executor_id -> profiles.user_id */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
@@ -277,26 +273,18 @@ export default function MyOrders() {
       (s as any).referrer ||
       null;
 
-    // якщо немає — пробуємо підтягнути з профілю виконавця
+    // якщо немає в самому сценарії — тягнемо з профілю виконавця
     if (!executor && (s as any).executor_id) {
-      const { data: prof } = await supabase.from('profiles').select('*').eq('id', (s as any).executor_id).single();
-      if (prof) {
-        executor =
-          (prof as any).wallet ||
-          (prof as any).wallet_address ||
-          (prof as any).metamask_wallet ||
-          (prof as any).bsc_wallet ||
-          (prof as any).eth_wallet ||
-          (prof as any).public_address ||
-          (prof as any).address ||
-          null;
+      // ВАЖЛИВО: у тебе ключ у профілях — user_id (не id)
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('wallet, referrer_wallet')
+        .eq('user_id', (s as any).executor_id)
+        .single();
 
-        // якщо у виконавця в профілі є referrer_wallet — спробуємо використати його за замовчуванням
-        if (!referrer) {
-          referrer =
-            (prof as any).referrer_wallet ||
-            null;
-        }
+      if (prof) {
+        executor = (prof as any).wallet || null;
+        if (!referrer) referrer = (prof as any).referrer_wallet || null;
       }
     }
 
@@ -319,7 +307,6 @@ export default function MyOrders() {
       const t = new Date(`${(s as any).date}T${(s as any).time || '00:00'}`).getTime();
       if (!Number.isNaN(t)) return Math.floor(t / 1000);
     }
-    // запасний варіант: +1 год
     return Math.floor(Date.now() / 1000) + 3600;
   }
 
@@ -337,10 +324,8 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      // мінімум кроків: клік → MetaMask → підтвердження → назад
       const { executor, referrer } = await resolveWallets(s);
-      // залишаю deriveExecutionTimeSec для сумісності майбутніх кроків (не потрібний контракту)
-      void deriveExecutionTimeSec(s);
+      void deriveExecutionTimeSec(s); // залишено для сумісності, контракту не потрібно
 
       const txHash = await lockFundsMobileFlow({
         scenarioId: s.id,
