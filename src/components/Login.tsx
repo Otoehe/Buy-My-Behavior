@@ -1,5 +1,5 @@
 // src/components/Login.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { ethers } from 'ethers';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
@@ -16,10 +16,6 @@ function openBmb(payload: {
 export default function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    loginWithWallet();
-  }, []);
 
   const loginWithWallet = async () => {
     try {
@@ -62,9 +58,9 @@ export default function Login() {
 
       if (!existing) {
         const { error: insertError } = await supabase.from('profiles').insert({
-          wallet_address: address,
-          created_at: new Date().toISOString(),
+          wallet_address: address
         });
+
         if (insertError) {
           openBmb({
             kind: 'error',
@@ -77,7 +73,6 @@ export default function Login() {
       }
 
       localStorage.setItem('wallet_address', address);
-
       navigate('/map');
     } catch (err: any) {
       openBmb({
@@ -95,7 +90,9 @@ export default function Login() {
     <div style={wrapper}>
       <div style={card}>
         <h1 style={title}>Вхід через MetaMask</h1>
-        <p style={text}>{loading ? 'Зачекайте... Підключення до гаманця' : 'Готово для підключення'}</p>
+        <button onClick={loginWithWallet} style={btnOval} disabled={loading}>
+          {loading ? 'Зачекайте…' : '🦊 Увійти через MetaMask'}
+        </button>
       </div>
     </div>
   );
@@ -120,10 +117,19 @@ const card: React.CSSProperties = {
 const title: React.CSSProperties = {
   fontSize: 24,
   fontWeight: 700,
-  marginBottom: 12,
+  marginBottom: 20,
 };
 
-const text: React.CSSProperties = {
+const btnOval: React.CSSProperties = {
+  backgroundColor: '#000',
+  color: '#fff',
+  padding: '14px 32px',
   fontSize: 16,
-  color: '#111',
+  fontWeight: 600,
+  borderRadius: 999,
+  border: 'none',
+  cursor: 'pointer',
+  width: '100%',
+  maxWidth: 280,
+  margin: '0 auto',
 };
