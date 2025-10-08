@@ -17,6 +17,10 @@ import { upsertRating } from '../lib/ratings';
 import { connectWallet, ensureBSC, waitForReturn } from '../lib/providerBridge';
 import { lockFundsMobileFlow } from '../lib/escrowMobile';
 
+// ⬇⬇⬇ НОВЕ: для хенд-оффу сесії у MetaMask Browser
+import { openInMMWithSession } from '../lib/sessionHandoff';
+import { isMobileUA, isMetaMaskInApp } from '../lib/mobileEnv';
+
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
@@ -361,6 +365,18 @@ export default function MyOrders() {
     }
   };
 
+  // ⬇⬇⬇ НОВЕ: розумний вхід у флоу блокування
+  const handleLockEntry = (s: Scenario) => {
+    // Зовнішній мобільний браузер → відкриваємо MetaMask Browser і переносимо сесію
+    if (isMobileUA() && !isMetaMaskInApp()) {
+      const target = `/my-orders?scenario=${encodeURIComponent(s.id)}`;
+      void openInMMWithSession(target);
+      return;
+    }
+    // Десктоп або вже всередині MetaMask Browser → одразу флоу
+    void handleLock(s);
+  };
+
   const handleConfirm = async (s: Scenario) => {
     if (confirmBusy[s.id]) return;
     // додатковий ґейт: перевірити що реально Locked на ланцюгу
@@ -513,7 +529,7 @@ export default function MyOrders() {
                   .eq('id', s.id);
               }}
               onAgree={() => handleAgree(s)}
-              onLock={() => handleLock(s)}
+              onLock={() => handleLockEntry(s)}   {/* ← ← ← ВАЖЛИВО */}
               onConfirm={() => handleConfirm(s)}
               onDispute={() => handleDispute(s)}
               onOpenLocation={() => {

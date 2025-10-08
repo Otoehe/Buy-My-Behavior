@@ -16,8 +16,6 @@ import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 import BmbModalHost         from './components/BmbModalHost';
 
-// ⛔️ старий shim прибрано; новий мобільний флоу через metamaskSdk/providerBridge
-
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
 const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
@@ -25,6 +23,7 @@ const Manifest          = lazy(() => import('./components/Manifest'));
 const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
 const ScenarioLocation  = lazy(() => import('./components/ScenarioLocation'));
 const BmbModalsDemo     = lazy(() => import('./components/BmbModalsDemo'));
+const AuthHandoff       = lazy(() => import('./pages/AuthHandoff'));
 
 function RequireAuth({ user, children }: { user: User | null | undefined; children: React.ReactElement; }) {
   const location = useLocation();
@@ -57,11 +56,9 @@ export default function App() {
 
   if (user === undefined) return null;
 
-  // ⬇️ Режим “чиста карта”: де не показуємо навбар та A2HS
   const HIDE_UI_ROUTES = new Set<string>(['/map/select']);
   const pathname = location.pathname;
   const hideNavAndA2HS = HIDE_UI_ROUTES.has(pathname);
-
   const showGlobalA2HS = !hideNavAndA2HS && pathname !== '/profile';
 
   return (
@@ -78,11 +75,12 @@ export default function App() {
 
           {/* Публічні */}
           <Route path="/auth/callback" element={<AuthCallback />} />
-          <Route path="/map"          element={<MapView />} />
-          <Route path="/map/select"   element={<ScenarioLocation />} />
-          <Route path="/behaviors"    element={<BehaviorsFeed />} />
-          <Route path="/manifest"     element={<Manifest />} />
-          <Route path="/modals"       element={<BmbModalsDemo />} />
+          <Route path="/auth/handoff"  element={<AuthHandoff />} />
+          <Route path="/map"           element={<MapView />} />
+          <Route path="/map/select"    element={<ScenarioLocation />} />
+          <Route path="/behaviors"     element={<BehaviorsFeed />} />
+          <Route path="/manifest"      element={<Manifest />} />
+          <Route path="/modals"        element={<BmbModalsDemo />} />
 
           {/* Реєстрація */}
           <Route
@@ -97,35 +95,19 @@ export default function App() {
           {/* Приватні */}
           <Route
             path="/profile"
-            element={
-              <RequireAuth user={user}>
-                <Profile />
-              </RequireAuth>
-            }
+            element={<RequireAuth user={user}><Profile /></RequireAuth>}
           />
           <Route
             path="/my-orders"
-            element={
-              <RequireAuth user={user}>
-                <MyOrders />
-              </RequireAuth>
-            }
+            element={<RequireAuth user={user}><MyOrders /></RequireAuth>}
           />
           <Route
             path="/received"
-            element={
-              <RequireAuth user={user}>
-                <ReceivedScenarios />
-              </RequireAuth>
-            }
+            element={<RequireAuth user={user}><ReceivedScenarios /></RequireAuth>}
           />
           <Route
             path="/scenario/new"
-            element={
-              <RequireAuth user={user}>
-                <ScenarioForm />
-              </RequireAuth>
-            }
+            element={<RequireAuth user={user}><ScenarioForm /></RequireAuth>}
           />
 
           <Route path="*" element={<Navigate to="/" replace />} />
