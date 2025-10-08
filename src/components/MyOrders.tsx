@@ -37,39 +37,44 @@ async function ensureProviderReady() {
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
-const getStage = (s: Scenario) => {
-  if (s.status === 'confirmed') return 3;
-  if (s.escrow_tx_hash) return 2;
-  if (isBothAgreed(s)) return 1;
-  return 0;
-};
+/** 0:None/Init, 1:Agreed, 2:Locked, 3:Confirmed — як у твоєму контракті */
+function asStatusNum(x: any): number {
+  const n = Number((x ?? {}).status);
+  return Number.isFinite(n) ? n : -1;
+}
+
+/** Очікуємо поки угода стане у заданий статус на ланцюгу (polling) */
+async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 120_000, stepMs = 3_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const deal = await getDealOnChain(scenarioId);
+      if (asStatusNum(deal) === target) return true;
+    } catch {}
+    await new Promise(r => setTimeout(r, stepMs));
+  }
+  return false;
+}
 
 function StatusStrip({ s }: { s: Scenario }) {
-  const stage = getStage(s);
+  const stage =
+    s.status === 'confirmed' ? 3 :
+    s.escrow_tx_hash           ? 2 :
+    isBothAgreed(s)            ? 1 : 0;
+
   const Dot = ({ active }: { active: boolean }) => (
     <span
       style={{
-        width: 10,
-        height: 10,
-        borderRadius: 9999,
-        display: 'inline-block',
-        margin: '0 6px',
-        background: active ? '#111' : '#e5e7eb',
+        width: 10, height: 10, borderRadius: 9999, display: 'inline-block',
+        margin: '0 6px', background: active ? '#111' : '#e5e7eb',
       }}
     />
   );
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '6px 10px',
-        borderRadius: 10,
-        background: 'rgba(0,0,0,0.035)',
-        margin: '6px 0 10px',
-      }}
-    >
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '6px 10px', borderRadius: 10, background: 'rgba(0,0,0,0.035)', margin: '6px 0 10px',
+    }}>
       <Dot active={stage >= 0} />
       <Dot active={stage >= 1} />
       <Dot active={stage >= 2} />
@@ -94,6 +99,9 @@ export default function MyOrders() {
   const [openDisputes, setOpenDisputes] = useState<Record<string, DisputeRow | null>>({});
   const [ratedOrders, setRatedOrders] = useState<Set<string>>(new Set());
 
+  // локально тримаємо факт, що escrow реально Locked на ланцюгу
+  const [lockedOnChain, setLockedOnChain] = useState<Record<string, boolean>>({});
+
   const [rateOpen, setRateOpen] = useState(false);
   const [rateFor, setRateFor] = useState<{ scenarioId: string; counterpartyId: string } | null>(null);
   const [rateScore, setRateScore] = useState(10);
@@ -113,13 +121,26 @@ export default function MyOrders() {
   const canAgree = (s: Scenario) => !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
 
   const canConfirm = (s: Scenario) => {
-    if (!s.escrow_tx_hash) return false;
+    if (!s.escrow_tx_hash) return false;                    // без txHash — точно ні
+    if (!lockedOnChain[s.id]) return false;                 // поки ончейн не Locked — не дозволяємо
     if (s.is_completed_by_customer) return false;
     const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
     return !Number.isNaN(dt.getTime()) && new Date() >= dt;
   };
 
   const canCustomerRate = (s: Scenario, rated: boolean) => !!(s as any).is_completed_by_executor && !rated;
+
+  const markLockedLocal = (id: string, v: boolean) =>
+    setLockedOnChain(prev => ({ ...prev, [id]: v }));
+
+  const refreshLocked = useCallback(async (id: string) => {
+    try {
+      const deal = await getDealOnChain(id);
+      markLockedLocal(id, asStatusNum(deal) === 2);
+    } catch {
+      markLockedLocal(id, false);
+    }
+  }, []);
 
   const loadOpenDispute = useCallback(async (scenarioId: string) => {
     const d = await getLatestDisputeByScenario(scenarioId);
@@ -133,8 +154,11 @@ export default function MyOrders() {
       .eq('creator_id', uid)
       .order('created_at', { ascending: false });
     if (error) console.error(error);
-    setList(((data || []) as Scenario[]).filter(s => s.creator_id === uid));
-  }, []);
+    const items = ((data || []) as Scenario[]).filter(s => s.creator_id === uid);
+    setList(items);
+    // одразу оновимо фактичний ончейн-стан
+    items.forEach(s => { if (s.escrow_tx_hash) refreshLocked(s.id); });
+  }, [refreshLocked]);
 
   const refreshRated = useCallback(async (uid: string, items: Scenario[]) => {
     if (!uid || items.length === 0) {
@@ -170,9 +194,7 @@ export default function MyOrders() {
             const i = prev.findIndex(x => x.id === s.id);
             if (ev === 'INSERT') {
               if (i === -1) return [s, ...prev];
-              const cp = [...prev];
-              cp[i] = { ...cp[i], ...s };
-              return cp;
+              const cp = [...prev]; cp[i] = { ...cp[i], ...s }; return cp;
             }
             if (ev === 'UPDATE') {
               if (i === -1) return prev;
@@ -197,6 +219,8 @@ export default function MyOrders() {
 
               const cp = [...prev];
               cp[i] = after;
+
+              if (after.escrow_tx_hash) refreshLocked(after.id);
 
               if (needLock && !(window as any).__locking) {
                 (window as any).__locking = true;
@@ -224,7 +248,7 @@ export default function MyOrders() {
         try { supabase.removeChannel(chRatings); } catch {}
       };
     })();
-  }, [load, list, refreshRated]);
+  }, [load, list, refreshRated, refreshLocked]);
 
   useEffect(() => {
     if (!userId) return;
@@ -252,31 +276,23 @@ export default function MyOrders() {
     }
   };
 
-  /** Резолвер гаманця: profiles.wallet за ключем profiles.user_id = scenarios.executor_id */
+  /** Резолвер гаманця виконавця: profiles.wallet по ключу profiles.user_id = scenarios.executor_id */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
-    // 1) пряма адреса з самого сценарію (якщо раптом є)
     let executor =
       (s as any).executor_wallet ||
       (s as any).executorAddress ||
       (s as any).executor ||
       null;
 
-    // 2) якщо немає — тягнемо профіль виконавця
     if (!executor && (s as any).executor_id) {
       const execId = (s as any).executor_id as string;
-
-      const { data: prof, error } = await supabase
+      const { data: prof } = await supabase
         .from('profiles')
         .select('wallet')
         .eq('user_id', execId)
         .single();
-
-      if (error) {
-        console.error('profiles query error', error);
-      }
-
       executor = prof?.wallet ?? null;
     }
 
@@ -284,9 +300,7 @@ export default function MyOrders() {
       throw new Error('Не знайдено адресу гаманця виконавця для цієї угоди.');
     }
 
-    // 3) реферал: тільки зі сценарію (у profiles його немає)
     const referrer = (s as any).referrer_wallet ?? ZERO;
-
     return { executor, referrer };
   }
 
@@ -305,19 +319,17 @@ export default function MyOrders() {
   const handleLock = async (s: Scenario) => {
     if (lockBusy[s.id]) return;
     if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) {
-      alert('Сума має бути > 0');
-      return;
+      alert('Сума має бути > 0'); return;
     }
     if (!isBothAgreed(s)) {
-      alert('Спершу потрібні дві згоди.');
-      return;
+      alert('Спершу потрібні дві згоди.'); return;
     }
-    if (s.escrow_tx_hash) return;
+    if (s.escrow_tx_hash) { refreshLocked(s.id); return; }
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
       const { executor, referrer } = await resolveWallets(s);
-      void deriveExecutionTimeSec(s); // залишено для сумісності, контракту не потрібно
+      void deriveExecutionTimeSec(s); // лишено для сумісності
 
       const txHash = await lockFundsMobileFlow({
         scenarioId: s.id,
@@ -327,12 +339,21 @@ export default function MyOrders() {
         onStatus: () => {},
       });
 
+      // ЧЕКАЄМО ПОКИ СТАН НА ЛАНЦЮГУ СТАНЕ LOCKED (2)
+      const ok = await waitDealStatus(s.id, 2, 120_000, 3_000);
+      if (!ok) {
+        alert('Транзакція ще не зафіксована як Locked. Спробуйте оновити сторінку трохи пізніше.');
+        // не записуємо tx у БД, щоб не розблокувати кнопку підтвердження зарано
+        return;
+      }
+
       await supabase
         .from('scenarios')
         .update({ escrow_tx_hash: txHash, status: 'agreed' as Status })
         .eq('id', s.id);
 
       setLocal(s.id, { escrow_tx_hash: txHash as any, status: 'agreed' });
+      markLockedLocal(s.id, true);
     } catch (e: any) {
       alert(e?.message || 'Не вдалося заблокувати кошти.');
     } finally {
@@ -341,7 +362,22 @@ export default function MyOrders() {
   };
 
   const handleConfirm = async (s: Scenario) => {
-    if (confirmBusy[s.id] || !canConfirm(s)) return;
+    if (confirmBusy[s.id]) return;
+    // додатковий ґейт: перевірити що реально Locked на ланцюгу
+    try {
+      const deal = await getDealOnChain(s.id);
+      if (asStatusNum(deal) !== 2) {
+        alert('Escrow ще не у статусі Locked. Дочекайтесь підтвердження блокування коштів замовником.');
+        await refreshLocked(s.id);
+        return;
+      }
+    } catch {
+      alert('Не вдалося прочитати стан escrow. Перевірте підключення до мережі BSC.');
+      return;
+    }
+
+    if (!canConfirm(s)) return;
+
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
       const eth = await ensureProviderReady();
@@ -353,10 +389,14 @@ export default function MyOrders() {
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
 
-      await supabase.from('scenarios').update({ is_completed_by_customer: true }).eq('id', s.id).eq('is_completed_by_customer', false);
+      await supabase
+        .from('scenarios')
+        .update({ is_completed_by_customer: true })
+        .eq('id', s.id)
+        .eq('is_completed_by_customer', false);
 
-      const deal = await getDealOnChain(s.id);
-      if (deal && Number((deal as any).status) === 3) {
+      const deal2 = await getDealOnChain(s.id);
+      if (asStatusNum(deal2) === 3) {
         await supabase.from('scenarios').update({ status: 'confirmed' }).eq('id', s.id);
         setToast(true);
       }
@@ -378,8 +418,7 @@ export default function MyOrders() {
   };
 
   const openRateFor = (s: Scenario) => {
-    setRateScore(10);
-    setRateComment('');
+    setRateScore(10); setRateComment('');
     setRateFor({ scenarioId: s.id, counterpartyId: s.executor_id });
     setRateOpen(true);
   };
@@ -453,20 +492,24 @@ export default function MyOrders() {
                 if (!fieldsEditable) return;
                 await supabase
                   .from('scenarios')
-                  .update({ description: v, status: 'pending', is_agreed_by_customer: false, is_agreed_by_executor: false })
+                  .update({
+                    description: v, status: 'pending',
+                    is_agreed_by_customer: false, is_agreed_by_executor: false,
+                  })
                   .eq('id', s.id);
               }}
               onChangeAmount={v => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
               onCommitAmount={async v => {
                 if (!fieldsEditable) return;
                 if (v !== null && (!Number.isFinite(v) || v <= 0)) {
-                  alert('Сума має бути > 0');
-                  setLocal(s.id, { donation_amount_usdt: null });
-                  return;
+                  alert('Сума має бути > 0'); setLocal(s.id, { donation_amount_usdt: null }); return;
                 }
                 await supabase
                   .from('scenarios')
-                  .update({ donation_amount_usdt: v, status: 'pending', is_agreed_by_customer: false, is_agreed_by_executor: false })
+                  .update({
+                    donation_amount_usdt: v, status: 'pending',
+                    is_agreed_by_customer: false, is_agreed_by_executor: false,
+                  })
                   .eq('id', s.id);
               }}
               onAgree={() => handleAgree(s)}
@@ -495,16 +538,9 @@ export default function MyOrders() {
                   type="button"
                   onClick={() => openRateFor(s)}
                   style={{
-                    width: '100%',
-                    maxWidth: 520,
-                    marginTop: 10,
-                    padding: '12px 18px',
-                    borderRadius: 999,
-                    background: '#ffd7e0',
-                    color: '#111',
-                    fontWeight: 800,
-                    border: '1px solid #f3c0ca',
-                    cursor: 'pointer',
+                    width: '100%', maxWidth: 520, marginTop: 10, padding: '12px 18px',
+                    borderRadius: 999, background: '#ffd7e0', color: '#111', fontWeight: 800,
+                    border: '1px solid #f3c0ca', cursor: 'pointer',
                     boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.7)',
                   }}
                 >
@@ -531,4 +567,3 @@ export default function MyOrders() {
     </div>
   );
 }
-
