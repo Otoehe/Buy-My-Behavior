@@ -1,23 +1,36 @@
-function buildAbsoluteUrl(pathOrAbs?: string) {
-  const base =
-    (import.meta.env.VITE_PUBLIC_APP_URL as string) ||
-    (typeof window !== "undefined" ? window.location.origin : "https://www.buymybehavior.com");
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { supabase } from "./supabase";
 
-  const u = new URL(pathOrAbs || "/", base);
-  return { abs: u.toString(), host: u.host, path: u.pathname + u.search + u.hash };
+/** Чи ми вже всередині вбудованого браузера MetaMask */
+export function isMetaMaskInApp(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /MetaMaskMobile/i.test(navigator.userAgent);
 }
 
-export function openInMetaMaskDapp(pathOrAbs?: string) {
-  const { abs, host, path } = buildAbsoluteUrl(pathOrAbs);
-  const mm1 = `https://metamask.app.link/dapp/${host}${path}`;
-  const mm2 = `https://metamask.app.link/open_url?url=${encodeURIComponent(abs)}`;
-  const mm3 = `metamask://dapp/${host}${path}`;
+/**
+ * Відкрити наш сайт у MetaMask-браузері і передати туди чинну сесію Supabase.
+ * nextPath — куди повернути користувача після відкриття (у межах нашого сайту).
+ */
+export async function openInMetaMaskDapp(nextPath = "/my-orders"): Promise<void> {
+  // 1) забираємо поточну сесію (якщо користувач уже залогінений у звичайному браузері)
+  const { data } = await supabase.auth.getSession();
+  const at = data.session?.access_token || null;
+  const rt = data.session?.refresh_token || null;
 
-  try {
-    location.href = mm1;
-    setTimeout(() => { if (document.visibilityState === "visible") location.href = mm2; }, 1200);
-    setTimeout(() => { if (document.visibilityState === "visible") location.href = mm3; }, 2400);
-  } catch {
-    location.href = abs;
-  }
+  // 2) формуємо payload і кладемо його в #hash, щоб НЕ потрапляло у логи/реферери
+  const payload = {
+    ver: 1,
+    ts: Date.now(),
+    next: nextPath,
+    at,
+    rt,
+  };
+  const frag = "#bmbSess=" + encodeURIComponent(btoa(JSON.stringify(payload)));
+
+  // 3) диплінк у MetaMask (офіційний формат app.link)
+  const host = location.host; // www.buymybehavior.com
+  const dappUrl = `https://metamask.app.link/dapp/${host}/auth/handoff${frag}`;
+
+  // 4) запускаємо app-switch
+  window.location.href = dappUrl;
 }

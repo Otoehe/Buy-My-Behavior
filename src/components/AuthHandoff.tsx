@@ -1,27 +1,27 @@
-// src/components/AuthHandoff.tsx
-import React, { useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import React, { useEffect } from "react";
+import { useLocation } from "react-router-dom";
 
+/**
+ * Технічна сторінка, на яку веде диплінк.
+ * Сама сесія підхоплюється у bootstrapSessionHandoff().
+ * Тут лише показуємо короткий текст/fallback.
+ */
 export default function AuthHandoff() {
-  const navigate = useNavigate();
-  const location = useLocation();
-
+  const loc = useLocation();
   useEffect(() => {
-    // Після відкриття в MetaMask Browser підхоплюємо чинну сесію
-    // і повертаємо користувача на потрібну сторінку (за замовчанням — /my-orders).
-    const sp = new URLSearchParams(location.search);
-    const next = sp.get('next') || '/my-orders';
-
-    supabase.auth.getSession().finally(() => {
-      navigate(next, { replace: true });
-    });
-  }, [location.search, navigate]);
+    // якщо користувач сюди потрапив напряму — спробуємо повернути на /my-orders
+    const t = setTimeout(() => {
+      if (location.pathname.includes("/auth/handoff")) {
+        location.replace("/my-orders");
+      }
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [loc]);
 
   return (
     <div style={{ padding: 24 }}>
-      <h2>Відкриття у MetaMask…</h2>
-      <p>Зачекайте, виконуємо перенаправлення. Якщо нічого не відбувається — поверніться «Назад».</p>
+      <h2>Відкриваємо у MetaMask…</h2>
+      <p>Якщо ця сторінка зависла — натисніть «Назад» або оновіть вкладку.</p>
     </div>
   );
 }
