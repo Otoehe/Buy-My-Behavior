@@ -3,14 +3,18 @@ import { useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
 /**
- * Піднімає сесію Supabase у MetaMask Browser і редіректить на ціль.
- * Прихід сюди: /auth/handoff#at=...&rt=...&to=/my-orders?scenario=...
+ * Підхоплює access/refresh токени з #hash, піднімає сесію Supabase
+ * у MetaMask Browser і одразу редіректить на цільову сторінку.
+ *
+ * Приклад входу:
+ *   https://www.buymybehavior.com/auth/handoff#at=<...>&rt=<...>&to=/my-orders?scenario=...
  */
 export default function AuthHandoff() {
   const loc = useLocation();
 
   useEffect(() => {
     const run = async () => {
+      // беремо параметри з HASH (не відправляється на сервер)
       const params = new URLSearchParams((loc.hash || "").replace(/^#/, ""));
       const at = params.get("at") || "";
       const rt = params.get("rt") || "";
@@ -18,13 +22,19 @@ export default function AuthHandoff() {
 
       try {
         if (at && rt) {
-          await supabase.auth.setSession({ access_token: at, refresh_token: rt });
+          await supabase.auth.setSession({
+            access_token: at,
+            refresh_token: rt,
+          });
         }
       } catch (err) {
         console.error("AuthHandoff setSession error:", err);
       } finally {
+        // Прибираємо hash і переходимо на ціль
         const target = to.startsWith("/") ? to : "/";
-        try { window.history.replaceState(null, "", target); } catch {}
+        try {
+          window.history.replaceState(null, "", target);
+        } catch {}
         window.location.replace(target);
       }
     };
@@ -33,5 +43,10 @@ export default function AuthHandoff() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <div style={{ padding: 24 }}>Авторизація…</div>;
+  return (
+    <div style={{ padding: 24, fontSize: 16 }}>
+      Секунда… авторизую в MetaMask Browser
+    </div>
+  );
 }
+
