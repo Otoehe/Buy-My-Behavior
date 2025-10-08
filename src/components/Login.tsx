@@ -73,7 +73,7 @@ export default function Login() {
       }
 
       localStorage.setItem('wallet_address', address);
-      navigate('/map');
+      navigate('/my-orders');
     } catch (err: any) {
       openBmb({
         kind: 'error',
