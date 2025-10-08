@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { confirmCompletionOnChain, getDealOnChain } from '../lib/escrowContract';
 import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
@@ -17,8 +18,9 @@ import { upsertRating } from '../lib/ratings';
 import { connectWallet, ensureBSC, waitForReturn } from '../lib/providerBridge';
 import { lockFundsMobileFlow } from '../lib/escrowMobile';
 
-// ⬇⬇⬇ ДЛЯ app-switch у MetaMask і детекту in-app браузера
-import { openInMetaMaskDapp, isMetaMaskInApp } from '../lib/mmDeepLink';
+// ✅ нове: deeplink + запис сесії у cookie
+import { openInMetaMaskDapp, isMetaMaskInApp, isMobileUA } from '../lib/mmDeepLink';
+import { writeSupabaseSessionCookie } from '../lib/supabaseSessionBridge';
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
@@ -93,6 +95,7 @@ function StatusStrip({ s }: { s: Scenario }) {
 }
 
 export default function MyOrders() {
+  const location = useLocation();
   const [userId, setUserId] = useState('');
   const [list, setList] = useState<Scenario[]>([]);
   const [agreeBusy, setAgreeBusy] = useState<Record<string, boolean>>({});
@@ -124,8 +127,8 @@ export default function MyOrders() {
   const canAgree = (s: Scenario) => !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
 
   const canConfirm = (s: Scenario) => {
-    if (!s.escrow_tx_hash) return false;                    // без txHash — точно ні
-    if (!lockedOnChain[s.id]) return false;                 // поки ончейн не Locked — не дозволяємо
+    if (!s.escrow_tx_hash) return false;
+    if (!lockedOnChain[s.id]) return false;
     if (s.is_completed_by_customer) return false;
     const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
     return !Number.isNaN(dt.getTime()) && new Date() >= dt;
@@ -159,7 +162,6 @@ export default function MyOrders() {
     if (error) console.error(error);
     const items = ((data || []) as Scenario[]).filter(s => s.creator_id === uid);
     setList(items);
-    // одразу оновимо фактичний ончейн-стан
     items.forEach(s => { if (s.escrow_tx_hash) refreshLocked(s.id); });
   }, [refreshLocked]);
 
@@ -279,7 +281,7 @@ export default function MyOrders() {
     }
   };
 
-  /** Резолвер гаманця виконавця: profiles.wallet по ключу profiles.user_id = scenarios.executor_id */
+  /** Резолвер гаманця виконавця */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
@@ -342,7 +344,6 @@ export default function MyOrders() {
         onStatus: () => {},
       });
 
-      // ЧЕКАЄМО ПОКИ СТАН НА ЛАНЦЮГУ СТАНЕ LOCKED (2)
       const ok = await waitDealStatus(s.id, 2, 120_000, 3_000);
       if (!ok) {
         alert('Транзакція ще не зафіксована як Locked. Спробуйте оновити сторінку трохи пізніше.');
@@ -363,9 +364,10 @@ export default function MyOrders() {
     }
   };
 
-  // ⬇⬇⬇ “Розумний вхід”: якщо ми не в MetaMask-браузері — робимо app-switch з сесією
-  const handleLockEntry = (s: Scenario) => {
-    if (!isMetaMaskInApp()) {
+  // ✅ ВАЖЛИВО: перед редіректом у MetaMask — кладемо сесію в cookie
+  const handleLockEntry = async (s: Scenario) => {
+    if (isMobileUA() && !isMetaMaskInApp()) {
+      await writeSupabaseSessionCookie(300); // 5 хв запасу
       openInMetaMaskDapp(`/my-orders?scenario=${encodeURIComponent(s.id)}`);
       return;
     }
@@ -374,7 +376,6 @@ export default function MyOrders() {
 
   const handleConfirm = async (s: Scenario) => {
     if (confirmBusy[s.id]) return;
-    // додатковий ґейт: перевірити що реально Locked на ланцюгу
     try {
       const deal = await getDealOnChain(s.id);
       if (asStatusNum(deal) !== 2) {
@@ -476,6 +477,21 @@ export default function MyOrders() {
     [permissionStatus, requestPermission, rt.isListening, rt.method]
   );
 
+  // авторан із ?scenario= в MetaMask-браузері
+  const autoRunOnceRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isMetaMaskInApp()) return;
+    const sp = new URLSearchParams(location.search);
+    const scenarioId = sp.get('scenario');
+    if (!scenarioId) return;
+    if (autoRunOnceRef.current === scenarioId) return;
+    autoRunOnceRef.current = scenarioId;
+    const s = list.find(x => x.id === scenarioId);
+    if (s) {
+      setTimeout(() => { void handleLock(s); }, 400);
+    }
+  }, [location.search, list]);
+
   return (
     <div className="scenario-list">
       <div className="scenario-header">
@@ -524,7 +540,7 @@ export default function MyOrders() {
                   .eq('id', s.id);
               }}
               onAgree={() => handleAgree(s)}
-              onLock={() => handleLockEntry(s)}
+              onLock={() => handleLockEntry(s)}  // ← ключова зміна
               onConfirm={() => handleConfirm(s)}
               onDispute={() => handleDispute(s)}
               onOpenLocation={() => {
