@@ -1,4 +1,3 @@
-// src/components/Login.tsx
 import React, { useState } from 'react';
 import { ethers } from 'ethers';
 import { supabase } from '../lib/supabase';
@@ -50,29 +49,39 @@ export default function Login() {
         return;
       }
 
-      const { data: existing } = await supabase
+      // 1) Перевіряємо, чи існує профіль (без кидання помилки коли немає)
+      const { data: existing, error: selectErr } = await supabase
         .from('profiles')
         .select('id')
         .eq('wallet_address', address)
-        .single();
+        .maybeSingle();
 
-      if (!existing) {
-        const { error: insertError } = await supabase.from('profiles').insert({
-          wallet_address: address
+      if (selectErr) {
+        // не критично — продовжимо до upsert
+        console.warn('profiles select warning:', selectErr.message);
+      }
+
+      // 2) Створення/оновлення профілю по ключу wallet_address
+      const { error: upsertError } = await supabase
+        .from('profiles')
+        .upsert(
+          { wallet_address: address },     // додаткові поля додамо згодом
+          { onConflict: 'wallet_address' } // ключ унікальності
+        );
+
+      if (upsertError) {
+        openBmb({
+          kind: 'error',
+          title: 'Помилка створення профілю',
+          subtitle: upsertError.message,
+          actionLabel: 'OK',
         });
-
-        if (insertError) {
-          openBmb({
-            kind: 'error',
-            title: 'Помилка створення профілю',
-            subtitle: insertError.message,
-            actionLabel: 'OK',
-          });
-          return;
-        }
+        return;
       }
 
       localStorage.setItem('wallet_address', address);
+
+      // Редирект одразу у "Мої замовлення", як просив
       navigate('/my-orders');
     } catch (err: any) {
       openBmb({
@@ -92,6 +101,9 @@ export default function Login() {
         <h1 style={title}>Вхід через MetaMask</h1>
         <button onClick={loginWithWallet} style={btnOval} disabled={loading}>
           {loading ? 'Зачекайте…' : '🦊 Увійти через MetaMask'}
+        </button>
+        <button onClick={() => navigate('/my-orders')} style={btnSecondary}>
+          Повернутись у BMB
         </button>
       </div>
     </div>
@@ -131,5 +143,20 @@ const btnOval: React.CSSProperties = {
   cursor: 'pointer',
   width: '100%',
   maxWidth: 280,
-  margin: '0 auto',
+  margin: '12px auto',
+};
+
+const btnSecondary: React.CSSProperties = {
+  backgroundColor: '#fff',
+  color: '#000',
+  padding: '12px 24px',
+  fontSize: 15,
+  fontWeight: 500,
+  borderRadius: 999,
+  border: '2px solid #000',
+  marginTop: 12,
+  cursor: 'pointer',
+  width: '100%',
+  maxWidth: 240,
+  marginInline: 'auto',
 };
