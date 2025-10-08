@@ -1,88 +1,55 @@
 // src/components/SignInWithWallet.tsx
-import React, { useState } from 'react';
-import { ethers } from 'ethers';
-import { supabase } from '../lib/supabase';
-import { useNavigate } from 'react-router-dom';
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "../lib/supabase";
+import { connectWallet } from "../lib/providerBridge";
+import "./SignInWithWallet.css";
 
 export default function SignInWithWallet() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const signIn = async () => {
+  const handleLogin = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
+      const walletAddress = await connectWallet();
+      if (!walletAddress) throw new Error("Не вдалося зчитати адресу гаманця");
 
-      if (!window.ethereum) {
-        alert('MetaMask не знайдено. Встановіть MetaMask.');
-        return;
-      }
-
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      await provider.send('eth_requestAccounts', []);
-      const signer = provider.getSigner();
-      const address = await signer.getAddress();
-
-      const message = `BuyMyBehavior Login\nAddress: ${address}\nTime: ${Date.now()}`;
-      const signature = await signer.signMessage(message);
-
-      const recovered = ethers.utils.verifyMessage(message, signature);
-      if (recovered.toLowerCase() !== address.toLowerCase()) {
-        alert('Підпис не вірний');
-        return;
-      }
-
-      // Перевірка наявності профілю
+      // Перевіряємо, чи є профіль
       const { data: existingProfile, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('wallet_address', address)
+        .from("profiles")
+        .select("*")
+        .eq("wallet_address", walletAddress)
         .single();
 
-      if (error && error.code !== 'PGRST116') {
-        console.error(error);
-        alert('Помилка при перевірці профілю');
-        return;
-      }
+      if (error && error.code !== "PGRST116") throw error;
 
       if (!existingProfile) {
-        const { error: insertError } = await supabase.from('profiles').insert({
-          wallet_address: address,
-          created_at: new Date().toISOString(),
-        });
-        if (insertError) {
-          console.error(insertError);
-          alert('Не вдалося створити профіль');
-          return;
-        }
+        const { error: insertError } = await supabase.from("profiles").insert([
+          { wallet_address: walletAddress },
+        ]);
+        if (insertError) throw insertError;
       }
 
-      localStorage.setItem('wallet_address', address);
-      navigate('/map');
-    } catch (err) {
-      console.error(err);
-      alert('Помилка входу через гаманець');
+      navigate("/my-orders");
+    } catch (err: any) {
+      alert("Помилка: " + err.message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <button
-      onClick={signIn}
-      disabled={loading}
-      style={{
-        backgroundColor: '#ffcdd6',
-        color: 'black',
-        padding: '12px 24px',
-        borderRadius: '12px',
-        fontWeight: 'bold',
-        fontSize: '16px',
-        border: 'none',
-        width: '100%',
-        marginTop: '12px',
-      }}
-    >
-      {loading ? 'Підключення...' : 'Увійти через MetaMask'}
-    </button>
+    <div className="signin-wallet-container">
+      <h1 className="signin-title">Увійти через MetaMask</h1>
+
+      <button className="signin-wallet-button" onClick={handleLogin} disabled={loading}>
+        {loading ? "З'єднання..." : "🦊 Увійти через MetaMask"}
+      </button>
+
+      <button className="back-to-bmb-button" onClick={() => navigate("/my-orders")}>
+        ⬅️ Повернутись у BMB
+      </button>
+    </div>
   );
 }

@@ -1,5 +1,6 @@
 // src/App.tsx
 import React, { useEffect, useState, Suspense, lazy } from 'react';
+import SignInWithWallet from "./components/SignInWithWallet";
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
@@ -95,6 +96,7 @@ export default function App() {
       <Suspense fallback={null}>
         <Routes>
           <Route path="/" element={<HomeGate />} />
+          <Route path="/sign-in-wallet" element={<SignInWithWallet />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/auth/handoff" element={<AuthHandoff />} />
           <Route path="/login" element={<Login />} />
