@@ -17,10 +17,6 @@ import { upsertRating } from '../lib/ratings';
 import { connectWallet, ensureBSC, waitForReturn } from '../lib/providerBridge';
 import { lockFundsMobileFlow } from '../lib/escrowMobile';
 
-// ⬇⬇⬇ НОВЕ: для хенд-оффу сесії у MetaMask Browser
-import { openInMMWithSession } from '../lib/sessionHandoff';
-import { isMobileUA, isMetaMaskInApp } from '../lib/mobileEnv';
-
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
@@ -41,13 +37,13 @@ async function ensureProviderReady() {
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
-/** 0:None/Init, 1:Agreed, 2:Locked, 3:Confirmed — як у твоєму контракті */
+/** 0:None/Init, 1:Agreed, 2:Locked, 3:Confirmed — як у контракті */
 function asStatusNum(x: any): number {
   const n = Number((x ?? {}).status);
   return Number.isFinite(n) ? n : -1;
 }
 
-/** Очікуємо поки угода стане у заданий статус на ланцюгу (polling) */
+/** Очікуємо поки угода буде в потрібному статусі ончейн */
 async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 120_000, stepMs = 3_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -125,8 +121,8 @@ export default function MyOrders() {
   const canAgree = (s: Scenario) => !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
 
   const canConfirm = (s: Scenario) => {
-    if (!s.escrow_tx_hash) return false;                    // без txHash — точно ні
-    if (!lockedOnChain[s.id]) return false;                 // поки ончейн не Locked — не дозволяємо
+    if (!s.escrow_tx_hash) return false;                    // без txHash — ні
+    if (!lockedOnChain[s.id]) return false;                 // поки ончейн не Locked — ні
     if (s.is_completed_by_customer) return false;
     const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || '00:00'}`);
     return !Number.isNaN(dt.getTime()) && new Date() >= dt;
@@ -160,7 +156,6 @@ export default function MyOrders() {
     if (error) console.error(error);
     const items = ((data || []) as Scenario[]).filter(s => s.creator_id === uid);
     setList(items);
-    // одразу оновимо фактичний ончейн-стан
     items.forEach(s => { if (s.escrow_tx_hash) refreshLocked(s.id); });
   }, [refreshLocked]);
 
@@ -333,7 +328,7 @@ export default function MyOrders() {
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
       const { executor, referrer } = await resolveWallets(s);
-      void deriveExecutionTimeSec(s); // лишено для сумісності
+      void deriveExecutionTimeSec(s); // залишено для сумісності
 
       const txHash = await lockFundsMobileFlow({
         scenarioId: s.id,
@@ -343,11 +338,10 @@ export default function MyOrders() {
         onStatus: () => {},
       });
 
-      // ЧЕКАЄМО ПОКИ СТАН НА ЛАНЦЮГУ СТАНЕ LOCKED (2)
+      // Чекаємо поки стан стане Locked(2)
       const ok = await waitDealStatus(s.id, 2, 120_000, 3_000);
       if (!ok) {
-        alert('Транзакція ще не зафіксована як Locked. Спробуйте оновити сторінку трохи пізніше.');
-        // не записуємо tx у БД, щоб не розблокувати кнопку підтвердження зарано
+        alert('Транзакція ще не зафіксована як Locked. Оновіть сторінку трохи пізніше.');
         return;
       }
 
@@ -365,30 +359,18 @@ export default function MyOrders() {
     }
   };
 
-  // ⬇⬇⬇ НОВЕ: розумний вхід у флоу блокування
-  const handleLockEntry = (s: Scenario) => {
-    // Зовнішній мобільний браузер → відкриваємо MetaMask Browser і переносимо сесію
-    if (isMobileUA() && !isMetaMaskInApp()) {
-      const target = `/my-orders?scenario=${encodeURIComponent(s.id)}`;
-      void openInMMWithSession(target);
-      return;
-    }
-    // Десктоп або вже всередині MetaMask Browser → одразу флоу
-    void handleLock(s);
-  };
-
   const handleConfirm = async (s: Scenario) => {
     if (confirmBusy[s.id]) return;
-    // додатковий ґейт: перевірити що реально Locked на ланцюгу
+
     try {
       const deal = await getDealOnChain(s.id);
       if (asStatusNum(deal) !== 2) {
-        alert('Escrow ще не у статусі Locked. Дочекайтесь підтвердження блокування коштів замовником.');
+        alert('Escrow ще не у статусі Locked. Дочекайтесь підтвердження блокування.');
         await refreshLocked(s.id);
         return;
       }
     } catch {
-      alert('Не вдалося прочитати стан escrow. Перевірте підключення до мережі BSC.');
+      alert('Не вдалося прочитати стан escrow. Перевірте підключення до BSC.');
       return;
     }
 
@@ -529,7 +511,7 @@ export default function MyOrders() {
                   .eq('id', s.id);
               }}
               onAgree={() => handleAgree(s)}
-              onLock={() => handleLockEntry(s)}   {/* ← ← ← ВАЖЛИВО */}
+              onLock={() => handleLock(s)}
               onConfirm={() => handleConfirm(s)}
               onDispute={() => handleDispute(s)}
               onOpenLocation={() => {
