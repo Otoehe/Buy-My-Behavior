@@ -2,8 +2,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+
 import { confirmCompletionOnChain, getDealOnChain } from '../lib/escrowContract';
-import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
+import { pushNotificationManager as pushNotificationManager, useNotifications } from '../lib/pushNotifications';
 import { useRealtimeNotifications } from '../lib/realtimeNotifications';
 import CelebrationToast from './CelebrationToast';
 import './MyOrders.css';
@@ -18,8 +19,8 @@ import { upsertRating } from '../lib/ratings';
 import { connectWallet, ensureBSC, waitForReturn } from '../lib/providerBridge';
 import { lockFundsMobileFlow } from '../lib/escrowMobile';
 
-// ✅ нове: deeplink + запис сесії у cookie
-import { openInMetaMaskDapp, isMetaMaskInApp, isMobileUA } from '../lib/mmDeepLink';
+// ✅ правильні імпорти
+import { isMobileUA, isMetaMaskInApp, openInMetaMaskDapp } from '../lib/mmDeepLink';
 import { writeSupabaseSessionCookie } from '../lib/supabaseSessionBridge';
 
 const SOUND = new Audio('/notification.wav');
@@ -96,6 +97,7 @@ function StatusStrip({ s }: { s: Scenario }) {
 
 export default function MyOrders() {
   const location = useLocation();
+
   const [userId, setUserId] = useState('');
   const [list, setList] = useState<Scenario[]>([]);
   const [agreeBusy, setAgreeBusy] = useState<Record<string, boolean>>({});
@@ -104,8 +106,6 @@ export default function MyOrders() {
   const [toast, setToast] = useState(false);
   const [openDisputes, setOpenDisputes] = useState<Record<string, DisputeRow | null>>({});
   const [ratedOrders, setRatedOrders] = useState<Set<string>>(new Set());
-
-  // локально тримаємо факт, що escrow реально Locked на ланцюгу
   const [lockedOnChain, setLockedOnChain] = useState<Record<string, boolean>>({});
 
   const [rateOpen, setRateOpen] = useState(false);
@@ -281,7 +281,7 @@ export default function MyOrders() {
     }
   };
 
-  /** Резолвер гаманця виконавця */
+  /** Резолвер гаманця виконавця: profiles.wallet по ключу profiles.user_id = scenarios.executor_id */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
@@ -364,13 +364,22 @@ export default function MyOrders() {
     }
   };
 
-  // ✅ ВАЖЛИВО: перед редіректом у MetaMask — кладемо сесію в cookie
+  // 🔹 «Розумний вхід»: якщо ми на мобайлі й поза MetaMask-браузером — перекидаємо туди,
+  // додаємо handoff у #hash, і там уже сторінка підхопить авторизацію та одразу викличе Lock.
   const handleLockEntry = async (s: Scenario) => {
     if (isMobileUA() && !isMetaMaskInApp()) {
-      await writeSupabaseSessionCookie(300); // 5 хв запасу
-      openInMetaMaskDapp(`/my-orders?scenario=${encodeURIComponent(s.id)}`);
+      const { data } = await supabase.auth.getSession();
+      const at = data?.session?.access_token ?? null;
+      const rt = data?.session?.refresh_token ?? null;
+
+      // резервно кладемо короткий cookie (не критично, але хай буде)
+      try { writeSupabaseSessionCookie(data?.session ?? null, 300); } catch {}
+
+      const next = `/my-orders?scenario=${encodeURIComponent(s.id)}`;
+      openInMetaMaskDapp(next, { at, rt, next });
       return;
     }
+    // уже в MetaMask або десктоп — одразу крутимо ончейн-флоу
     void handleLock(s);
   };
 
@@ -477,7 +486,7 @@ export default function MyOrders() {
     [permissionStatus, requestPermission, rt.isListening, rt.method]
   );
 
-  // авторан із ?scenario= в MetaMask-браузері
+  // 🔹 Авто-ран у MetaMask-браузері: якщо прийшли через deeplink із ?scenario=...
   const autoRunOnceRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isMetaMaskInApp()) return;
@@ -485,10 +494,11 @@ export default function MyOrders() {
     const scenarioId = sp.get('scenario');
     if (!scenarioId) return;
     if (autoRunOnceRef.current === scenarioId) return;
-    autoRunOnceRef.current = scenarioId;
+
     const s = list.find(x => x.id === scenarioId);
     if (s) {
-      setTimeout(() => { void handleLock(s); }, 400);
+      autoRunOnceRef.current = scenarioId;
+      setTimeout(() => { void handleLock(s); }, 450);
     }
   }, [location.search, list]);
 
@@ -540,7 +550,7 @@ export default function MyOrders() {
                   .eq('id', s.id);
               }}
               onAgree={() => handleAgree(s)}
-              onLock={() => handleLockEntry(s)}  // ← ключова зміна
+              onLock={() => handleLockEntry(s)}
               onConfirm={() => handleConfirm(s)}
               onDispute={() => handleDispute(s)}
               onOpenLocation={() => {
