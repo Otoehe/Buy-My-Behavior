@@ -252,56 +252,42 @@ export default function MyOrders() {
     }
   };
 
-  /** Повертає першу валідну 0x-адресу з об’єкта за списком ключів */
-  function pickAddress(obj: any, keys: string[]): string | null {
-    const re = /^0x[a-fA-F0-9]{40}$/;
-    for (const k of keys) {
-      const v = obj?.[k];
-      if (typeof v === 'string' && re.test(v.trim())) return v.trim();
-    }
-    return null;
-  }
-
-  /** Витягнути гаманці виконавця/реферала: scenarios.executor_id -> profiles.(user_id|id), адреса з різних можливих колонок */
+  /** Резолвер гаманця: profiles.wallet за ключем profiles.user_id = scenarios.executor_id */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
-    // 1) пробуємо взяти прямо зі сценарію (раптом є поля)
-    let executor = pickAddress(s as any, ['executor_wallet', 'executorAddress', 'executor', 'executor_wallet_address']);
-    let referrer =
-      pickAddress(s as any, ['referrer_wallet', 'referrerAddress', 'referrer']) ||
+    // 1) пряма адреса з самого сценарію (якщо раптом є)
+    let executor =
+      (s as any).executor_wallet ||
+      (s as any).executorAddress ||
+      (s as any).executor ||
       null;
 
-    // 2) якщо немає — дістаємо профіль виконавця
+    // 2) якщо немає — тягнемо профіль виконавця
     if (!executor && (s as any).executor_id) {
       const execId = (s as any).executor_id as string;
 
-      // пробуємо спочатку по user_id, якщо немає — по id
-      let prof: any | null = null;
-      for (const key of ['user_id', 'id'] as const) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('wallet, wallet_address, public_address, address, bsc_wallet, eth_wallet, metamask_wallet, referrer_wallet')
-          .eq(key, execId)
-          .limit(1);
-        if (!error && data && data[0]) { prof = data[0]; break; }
+      const { data: prof, error } = await supabase
+        .from('profiles')
+        .select('wallet')
+        .eq('user_id', execId)
+        .single();
+
+      if (error) {
+        console.error('profiles query error', error);
       }
 
-      if (prof) {
-        executor = pickAddress(prof, [
-          'wallet', 'wallet_address', 'public_address', 'address', 'bsc_wallet', 'eth_wallet', 'metamask_wallet'
-        ]) || executor;
-        if (!referrer) {
-          referrer = pickAddress(prof, ['referrer_wallet']) || null;
-        }
-      }
+      executor = prof?.wallet ?? null;
     }
 
-    if (!executor) {
+    if (!executor || typeof executor !== 'string' || !/^0x[a-fA-F0-9]{40}$/.test(executor)) {
       throw new Error('Не знайдено адресу гаманця виконавця для цієї угоди.');
     }
 
-    return { executor, referrer: referrer ?? ZERO };
+    // 3) реферал: тільки зі сценарію (у profiles його немає)
+    const referrer = (s as any).referrer_wallet ?? ZERO;
+
+    return { executor, referrer };
   }
 
   function deriveExecutionTimeSec(s: Scenario): number {
@@ -331,7 +317,7 @@ export default function MyOrders() {
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
       const { executor, referrer } = await resolveWallets(s);
-      void deriveExecutionTimeSec(s); // лишено для сумісності, контракту не потрібно
+      void deriveExecutionTimeSec(s); // залишено для сумісності, контракту не потрібно
 
       const txHash = await lockFundsMobileFlow({
         scenarioId: s.id,
@@ -545,3 +531,4 @@ export default function MyOrders() {
     </div>
   );
 }
+
