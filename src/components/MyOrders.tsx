@@ -1,10 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import {
-  confirmCompletionOnChain,
-  getDealOnChain,
-} from '../lib/escrowContract';
+import { confirmCompletionOnChain, getDealOnChain } from '../lib/escrowContract';
 import { pushNotificationManager, useNotifications } from '../lib/pushNotifications';
 import { useRealtimeNotifications } from '../lib/realtimeNotifications';
 import CelebrationToast from './CelebrationToast';
@@ -110,10 +107,8 @@ export default function MyOrders() {
     setList(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
   const hasCoords = (s: Scenario) =>
-    typeof s.latitude === 'number' &&
-    Number.isFinite(s.latitude) &&
-    typeof s.longitude === 'number' &&
-    Number.isFinite(s.longitude);
+    typeof s.latitude === 'number' && Number.isFinite(s.latitude) &&
+    typeof s.longitude === 'number' && Number.isFinite(s.longitude);
 
   const canAgree = (s: Scenario) => !s.escrow_tx_hash && s.status !== 'confirmed' && !s.is_agreed_by_customer;
 
@@ -253,43 +248,54 @@ export default function MyOrders() {
     } catch (e: any) {
       alert(e?.message || 'Помилка погодження.');
     } finally {
-      setAgreeBusy(p => ({ ...p, [s.id]: false })); 
+      setAgreeBusy(p => ({ ...p, [s.id]: false }));
     }
   };
 
-  /** Витягнути гаманці виконавця/реферала: scenarios.executor_id -> profiles.user_id */
+  /** Повертає першу валідну 0x-адресу з об’єкта за списком ключів */
+  function pickAddress(obj: any, keys: string[]): string | null {
+    const re = /^0x[a-fA-F0-9]{40}$/;
+    for (const k of keys) {
+      const v = obj?.[k];
+      if (typeof v === 'string' && re.test(v.trim())) return v.trim();
+    }
+    return null;
+  }
+
+  /** Витягнути гаманці виконавця/реферала: scenarios.executor_id -> profiles.(user_id|id), адреса з різних можливих колонок */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
-    let executor =
-      (s as any).executor_wallet ||
-      (s as any).executorAddress ||
-      (s as any).executor ||
-      null;
-
+    // 1) пробуємо взяти прямо зі сценарію (раптом є поля)
+    let executor = pickAddress(s as any, ['executor_wallet', 'executorAddress', 'executor', 'executor_wallet_address']);
     let referrer =
-      (s as any).referrer_wallet ||
-      (s as any).referrerAddress ||
-      (s as any).referrer ||
+      pickAddress(s as any, ['referrer_wallet', 'referrerAddress', 'referrer']) ||
       null;
 
-    // якщо немає в самому сценарії — тягнемо з профілю виконавця
+    // 2) якщо немає — дістаємо профіль виконавця
     if (!executor && (s as any).executor_id) {
-      // ВАЖЛИВО: у тебе ключ у профілях — user_id (не id)
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('wallet, referrer_wallet')
-        .eq('user_id', (s as any).executor_id)
-        .single();
+      const execId = (s as any).executor_id as string;
+
+      // пробуємо спочатку по user_id, якщо немає — по id
+      let prof: any | null = null;
+      for (const key of ['user_id', 'id'] as const) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('wallet, wallet_address, public_address, address, bsc_wallet, eth_wallet, metamask_wallet, referrer_wallet')
+          .eq(key, execId)
+          .limit(1);
+        if (!error && data && data[0]) { prof = data[0]; break; }
+      }
 
       if (prof) {
-        executor = (prof as any).wallet || null;
-        if (!referrer) referrer = (prof as any).referrer_wallet || null;
+        executor = pickAddress(prof, [
+          'wallet', 'wallet_address', 'public_address', 'address', 'bsc_wallet', 'eth_wallet', 'metamask_wallet'
+        ]) || executor;
+        if (!referrer) {
+          referrer = pickAddress(prof, ['referrer_wallet']) || null;
+        }
       }
     }
-
-    // якщо у самого сценарію є referrer_wallet — це пріоритетніше
-    referrer = (s as any).referrer_wallet ?? referrer ?? null;
 
     if (!executor) {
       throw new Error('Не знайдено адресу гаманця виконавця для цієї угоди.');
@@ -325,7 +331,7 @@ export default function MyOrders() {
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
       const { executor, referrer } = await resolveWallets(s);
-      void deriveExecutionTimeSec(s); // залишено для сумісності, контракту не потрібно
+      void deriveExecutionTimeSec(s); // лишено для сумісності, контракту не потрібно
 
       const txHash = await lockFundsMobileFlow({
         scenarioId: s.id,
