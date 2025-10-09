@@ -4,101 +4,193 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
+    <meta name="theme-color" content="#ffcdd6" />
 
     <!-- Title/description -->
-    <title>Buy My Behavior — Web3 платформа для угод з поведінками (USDT, BSC, escrow 90/5/5)</title>
-    <meta name="description" content="BMB — платформа, де замовники та виконавці укладають угоди щодо 'поведінок'. Escrow у USDT на BSC: 90% виконавцю, 5% рефералу, 5% платформі.">
-    <meta name="robots" content="index,follow">
+    <title>
+      Buy My Behavior — Web3 платформа для угод з поведінками (USDT, BSC, escrow 90/5/5)
+    </title>
+    <meta
+      name="description"
+      content="BMB — платформа, де замовники та виконавці укладають угоди щодо 'поведінок'. Захист угоди — escrow у USDT на Binance Smart Chain: 90% виконавцю, 5% рефералу, 5% платформі."
+    />
+    <meta name="robots" content="index,follow" />
 
-    <!-- Canonical -->
-    <link rel="canonical" href="https://www.buymybehavior.com/">
-    <link rel="alternate" href="https://www.buymybehavior.com/" hreflang="uk">
-    <link rel="alternate" href="https://www.buymybehavior.com/" hreflang="x-default">
+    <!-- Canonical + hreflang -->
+    <link rel="canonical" href="https://www.buymybehavior.com/" />
+    <link rel="alternate" href="https://www.buymybehavior.com/" hreflang="uk" />
+    <link rel="alternate" href="https://www.buymybehavior.com/" hreflang="x-default" />
+
+    <!-- OG / Twitter -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://www.buymybehavior.com/" />
+    <meta
+      property="og:title"
+      content="Buy My Behavior — Web3 платформа для угод з поведінками"
+    />
+    <meta
+      property="og:description"
+      content="Escrow у USDT на BSC: 90% виконавцю, 5% рефералу, 5% платформі. Геолокація, реферальна система, смартконтракт."
+    />
+    <meta property="og:image" content="https://www.buymybehavior.com/og-cover.jpg" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Buy My Behavior — Web3 платформа" />
+    <meta name="twitter:description" content="Escrow у USDT на BSC: 90/5/5." />
+    <meta name="twitter:image" content="https://www.buymybehavior.com/og-cover.jpg" />
+
+    <!-- (опц.) Google Search Console -->
+    <!-- <meta name="google-site-verification" content="PASTE_TOKEN_HERE" /> -->
 
     <!-- PWA -->
-    <meta name="theme-color" content="#ffcdd6" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
 
-    <!-- Icons / Favicon -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/bmb-favicon-16.png">
-
-    <!-- Open Graph / Twitter -->
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="https://www.buymybehavior.com/">
-    <meta property="og:title" content="Buy My Behavior — Web3 платформа для угод з поведінками">
-    <meta property="og:description" content="Escrow у USDT на BSC: 90% виконавцю, 5% рефералу, 5% платформі. Геолокація, реферальна система, смартконтракт.">
-    <!-- Якщо додаси public/og-cover.jpg — заміни нижні 2 рядки на /og-cover.jpg -->
-    <meta property="og:image" content="https://www.buymybehavior.com/icons/icon-512.png">
-
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Buy My Behavior — Web3 платформа">
-    <meta name="twitter:description" content="Escrow у USDT на BSC: 90/5/5.">
-    <meta name="twitter:image" content="https://www.buymybehavior.com/icons/icon-512.png">
-
-    <!-- JSON-LD: Organization -->
+    <!-- JSON-LD: Organization + WebSite -->
     <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "Organization",
-      "name": "Buy My Behavior",
-      "url": "https://www.buymybehavior.com/",
-      "logo": "https://www.buymybehavior.com/icons/icon-512.png"
-    }
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "Buy My Behavior",
+        "url": "https://www.buymybehavior.com/",
+        "logo": "https://www.buymybehavior.com/icons/icon-512.png"
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Buy My Behavior",
+        "url": "https://www.buymybehavior.com/",
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": "https://www.buymybehavior.com/search?q={query}",
+          "query-input": "required name=query"
+        }
+      }
     </script>
 
-    <!-- Splash screen styles (брендовий фон + анімація появи тексту) -->
     <style>
-      :root { --brand-bg: #ffcdd6; --brand-fg: #0f0f12; }
-      html, body { height: 100%; background: var(--brand-bg); }
-      body { margin: 0; }
-      /* full-screen splash */
-      #bmb-splash {
-        position: fixed; inset: 0; display: grid; place-items: center;
-        background: var(--brand-bg); z-index: 9999;
+      :root {
+        --brand-bg: #ffcdd6; /* фірмовий фон заставки */
+        --brand-ink: #0b0f19; /* колір тексту логотипу */
       }
-      .bmb-logo-word {
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
-        font-weight: 800; letter-spacing: .5px;
-        font-size: clamp(28px, 8vw, 56px);
-        color: var(--brand-fg);
-        opacity: 0; transform: translateY(8px);
-        animation: bmbFadeUp .6s ease-out .15s forwards;
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background: #fff;
+        color: #111;
+        font-family: Inter, "SF Pro Display", system-ui, -apple-system, Segoe UI,
+          Roboto, Arial, sans-serif;
       }
-      @keyframes bmbFadeUp {
-        to { opacity: 1; transform: translateY(0); }
+
+      /* ----- БРЕНД-ЗАСТАВКА (оверлей до старту React) ----- */
+      #boot {
+        position: fixed;
+        inset: 0;
+        background: var(--brand-bg);
+        display: grid;
+        place-items: center;
+        z-index: 9999;
+        transition: opacity 360ms ease, visibility 360ms ease;
       }
-      /* плавне приховання splash після boot */
-      .bmb-splash-hide { animation: bmbFadeOut .35s ease forwards; }
-      @keyframes bmbFadeOut { to { opacity: 0; visibility: hidden; } }
+      #boot.fade-out {
+        opacity: 0;
+        visibility: hidden;
+      }
+      .boot-card {
+        width: min(72vw, 320px);
+        aspect-ratio: 1 / 1;
+        border-radius: 28px;
+        background: rgba(255, 255, 255, 0.55);
+        box-shadow: 0 8px 40px rgba(0, 0, 0, 0.14);
+        display: grid;
+        place-items: center;
+        animation: pop 320ms ease-out both;
+      }
+      .boot-mark {
+        font-weight: 900;
+        font-size: clamp(80px, 18vw, 148px);
+        line-height: 1;
+        color: var(--brand-ink);
+        letter-spacing: -0.04em;
+        opacity: 0;
+        animation: rise 700ms ease-out 120ms both;
+      }
+      .boot-sub {
+        margin-top: 14px;
+        font-weight: 600;
+        font-size: 16px;
+        color: rgba(11, 15, 25, 0.9);
+        opacity: 0;
+        animation: fade 500ms ease-out 360ms both;
+      }
+      @keyframes pop {
+        from {
+          transform: scale(0.96);
+          opacity: 0.8;
+        }
+        to {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+      @keyframes rise {
+        from {
+          transform: translateY(6px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+      @keyframes fade {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
     </style>
   </head>
+
   <body>
-    <!-- Splash (прибирається після завантаження застосунку) -->
-    <div id="bmb-splash" role="status" aria-label="Завантаження Buy My Behavior">
-      <div class="bmb-logo-word">Buy&nbsp;My&nbsp;Behavior</div>
+    <!-- бренд-заставка -->
+    <div id="boot" aria-hidden="true">
+      <div class="boot-card">
+        <div style="display:grid;place-items:center">
+          <div class="boot-mark">m</div>
+          <div class="boot-sub">Buy&nbsp;My&nbsp;Behavior</div>
+        </div>
+      </div>
     </div>
 
-    <noscript>Для роботи застосунку потрібен JavaScript.</noscript>
+    <!-- корінь застосунку -->
     <div id="root"></div>
 
-    <!-- Vite entry -->
-    <script type="module" src="/src/main.tsx"></script>
-
-    <!-- Приховати splash коли React змонтувався -->
+    <!-- коли застосунок стартує, main.tsx кидає подію bmb:app-ready -->
     <script>
       (function () {
-        const done = () => {
-          const el = document.getElementById('bmb-splash');
-          if (el) { el.classList.add('bmb-splash-hide'); setTimeout(() => el.remove(), 400); }
-        };
-        // якщо React не зняв splash самостійно (напр. помилка), прибери через таймаут, щоб не висіло
-        window.addEventListener('bmb:app-mounted', done, { once: true });
-        setTimeout(done, 4000);
+        var boot = document.getElementById("boot");
+        function hide() {
+          if (!boot) return;
+          boot.classList.add("fade-out");
+          setTimeout(function () {
+            boot && boot.remove();
+          }, 420);
+        }
+        window.addEventListener("bmb:app-ready", hide, { once: true });
+
+        // страховка: якщо щось піде не так — прибрати заставку через ~1.6с
+        setTimeout(hide, 1600);
       })();
     </script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

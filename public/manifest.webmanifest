@@ -5,6 +5,7 @@
   "start_url": "/map?source=pwa",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "browser"],
   "orientation": "portrait",
   "theme_color": "#ffcdd6",
   "background_color": "#ffcdd6",
@@ -30,14 +31,12 @@
     {
       "src": "/icons/bmb-favicon-16.png",
       "sizes": "16x16",
-      "type": "image/png",
-      "purpose": "any"
+      "type": "image/png"
     },
     {
       "src": "/icons/favicon-32.png",
       "sizes": "32x32",
-      "type": "image/png",
-      "purpose": "any"
+      "type": "image/png"
     }
   ],
   "prefer_related_applications": false
