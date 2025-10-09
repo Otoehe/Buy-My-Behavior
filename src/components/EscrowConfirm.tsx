@@ -2,22 +2,21 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { ethers } from "ethers";
-
-import { ensureBSC } from "../lib/providerBridge";           // існуюче у тебе
-import { approveIfNeeded, lockFunds } from "../lib/escrowContract"; // існуюче у тебе
-import { supabase } from "../lib/supabase";                  // існуюче у тебе
+import { ensureBSC } from "../lib/providerBridge";
+import { approveIfNeeded, lockFunds } from "../lib/escrowContract";
+import { supabase } from "../lib/supabase";
 
 export default function EscrowConfirm() {
   const [sp] = useSearchParams();
   const navigate = useNavigate();
 
-  // Параметри з URL (і резерв у sessionStorage, щоб не губились)
   const sidUrl = sp.get("sid") || "";
   const amtUrl = sp.get("amt") || "";
 
   const [scenarioId, setScenarioId] = useState("");
   const [amountStr, setAmountStr] = useState("");
 
+  // не губимо sid/amt між переходами
   useEffect(() => {
     const sid = sidUrl || sessionStorage.getItem("bmb.sid") || "";
     const amt = amtUrl || sessionStorage.getItem("bmb.amt") || "";
@@ -39,37 +38,30 @@ export default function EscrowConfirm() {
     setErr(null);
     setBusy(true);
     try {
-      // Якщо сторінка не у MetaMask — перенесемо її у MetaMask dapp (в тій же вкладці)
+      // Якщо відкрито НЕ у MetaMask — відкриємо ту ж сторінку у MetaMask (та сама вкладка)
       if (!(window as any).ethereum) {
         const base = `https://metamask.app.link/dapp/${location.host}/escrow/confirm`;
-        const url = `${base}?sid=${encodeURIComponent(scenarioId)}&amt=${encodeURIComponent(amountStr)}`;
-        location.href = url;     // жодних _blank
+        const url  = `${base}?sid=${encodeURIComponent(scenarioId)}&amt=${encodeURIComponent(amountStr)}`;
+        location.href = url;
         return;
       }
 
-      // 1) ініціалізація акаунта — обов'язково з кліку
       const provider = new ethers.providers.Web3Provider((window as any).ethereum, "any");
+      // має викликатися з кліку, інакше MetaMask не покаже модалку
       await provider.send("eth_requestAccounts", []);
-
-      // 2) перемкнути мережу (без редиректів)
       await ensureBSC(provider);
 
       if (!scenarioId || !amount) throw new Error("Невірні параметри сценарію або суми.");
 
-      // 3) approve → 4) lockFunds (в одному ланцюжку)
       await approveIfNeeded(provider, amount);
       await lockFunds(provider, { scenarioId, amount });
 
-      // 5) необов'язково — лог події
       try {
         await supabase.from("escrow_events").insert({ scenario_id: scenarioId, kind: "LOCKED" });
       } catch {}
 
-      // 6) повернення на My Orders
-      const back = new URL("/my-orders", location.origin);
-      back.searchParams.set("sid", scenarioId);
-      back.searchParams.set("locked", "1");
-      navigate(back.pathname + back.search, { replace: true });
+      // повертаємо на /my-orders
+      navigate(`/my-orders?sid=${encodeURIComponent(scenarioId)}&locked=1`, { replace: true });
     } catch (e: any) {
       setErr(e?.message ?? String(e));
     } finally {
@@ -80,7 +72,7 @@ export default function EscrowConfirm() {
   return (
     <div className="max-w-screen-sm mx-auto px-4 py-8">
       <h1 className="text-3xl font-extrabold mb-2">Підтвердження ескроу</h1>
-      <p className="text-slate-600 mb-4">Натисни кнопку, підтверди в MetaMask — після успіху повернемо на “Мої замовлення”.</p>
+      <p className="text-slate-600 mb-4">Після підтвердження в MetaMask повернемось на “Мої замовлення”.</p>
 
       <div className="rounded-xl border border-slate-200 p-4 mb-4">
         <div className="text-sm text-slate-500">Сценарій</div>
@@ -94,7 +86,7 @@ export default function EscrowConfirm() {
         disabled={busy}
         className="w-full rounded-2xl px-5 py-4 bg-black text-white text-lg"
       >
-        {busy ? "Підтвердження…" : `Підтвердити ескроу • ${amountStr || "—"} USDT`}
+        {busy ? "Підтвердження…" : `Підтвердити бронювання • ${amountStr || "—"} USDT`}
       </button>
 
       {err && <p className="text-red-600 mt-3">{err}</p>}
