@@ -17,8 +17,7 @@ import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 import BmbModalHost         from './components/BmbModalHost';
 
-
-
+// Ліниві імпорти сторінок
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
 const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
@@ -26,27 +25,40 @@ const Manifest          = lazy(() => import('./components/Manifest'));
 const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
 const ScenarioLocation  = lazy(() => import('./components/ScenarioLocation'));
 const BmbModalsDemo     = lazy(() => import('./components/BmbModalsDemo'));
+
+// handoff-и
 const AuthHandoff       = lazy(() => import('./components/AuthHandoff'));
-const EscrowHandoff = lazy(() => import('./components/EscrowHandoff'));
-
-
-// ✅ нова сторінка-«handoff» для escrow/approve
+// ⚠️ ЗАЛИШИТИ ЛИШЕ ОДНЕ ОГОЛОШЕННЯ EscrowHandoff:
 const EscrowHandoff     = lazy(() => import('./components/EscrowHandoff'));
 
-function RequireAuth({ user, children }: { user: User | null | undefined; children: React.ReactElement; }) {
+function RequireAuth({
+  user,
+  children,
+}: {
+  user: User | null | undefined;
+  children: React.ReactElement;
+}) {
   const location = useLocation();
   if (user === undefined) return null;
   if (user === null) return <Navigate to="/register" replace state={{ from: location.pathname }} />;
   return children;
 }
 
-function RedirectIfAuthed({ user, children }: { user: User | null | undefined; children: React.ReactElement; }) {
+function RedirectIfAuthed({
+  user,
+  children,
+}: {
+  user: User | null | undefined;
+  children: React.ReactElement;
+}) {
   if (user === undefined) return null;
   if (user) return <Navigate to="/map" replace />;
   return children;
 }
 
-function HomeGate() { return <Navigate to="/map" replace />; }
+function HomeGate() {
+  return <Navigate to="/map" replace />;
+}
 
 export default function App() {
   useViewportVH();
@@ -57,16 +69,25 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
-    supabase.auth.getSession().then(({ data }) => { if (mounted) setUser(data.session?.user ?? null); });
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (mounted) setUser(data.session?.user ?? null);
+    });
+
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setUser(session?.user ?? null);
     });
-    return () => { mounted = false; sub.subscription.unsubscribe(); };
+
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   if (user === undefined) return null;
 
-  const HIDE_UI_ROUTES = new Set<string>(['/map/select']);
+  // Де ховаємо навбар та A2HS (чисті handoff-сторінки)
+  const HIDE_UI_ROUTES = new Set<string>(['/map/select', '/escrow/approve']);
   const pathname = location.pathname;
   const hideNavAndA2HS = HIDE_UI_ROUTES.has(pathname);
   const showGlobalA2HS = !hideNavAndA2HS && pathname !== '/profile';
@@ -86,9 +107,8 @@ export default function App() {
           {/* Публічні */}
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/auth/handoff" element={<AuthHandoff />} />
-
-          {/* 🔗 нова публічна сторінка для escrow/approve */}
-          <Route path="/escrow" element={<EscrowHandoff />} />
+          {/* ✅ новий публічний маршрут для підтвердження escrow у MetaMask */}
+          <Route path="/escrow/approve" element={<EscrowHandoff />} />
 
           <Route path="/map"          element={<MapView />} />
           <Route path="/map/select"   element={<ScenarioLocation />} />
@@ -96,7 +116,7 @@ export default function App() {
           <Route path="/manifest"     element={<Manifest />} />
           <Route path="/modals"       element={<BmbModalsDemo />} />
 
-          {/* Реєстрація (може й не знадобитися, але хай лишається) */}
+          {/* Реєстрація / Вхід (зараз у тебе це сторінка з MetaMask-кнопкою) */}
           <Route
             path="/register"
             element={
