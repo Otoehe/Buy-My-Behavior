@@ -1,50 +1,104 @@
-<!-- Title/description -->
-<title>Buy My Behavior — Web3 платформа для угод з поведінками (USDT, BSC, escrow 90/5/5)</title>
-<meta name="description" content="BMB — платформа, де замовники та виконавці укладають угоди щодо 'поведінок'. Захист угоди — escrow у USDT на Binance Smart Chain: 90% виконавцю, 5% рефералу, 5% платформі.">
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
 
-<!-- Дозвіл індексації -->
-<meta name="robots" content="index,follow">
+    <!-- Title/description -->
+    <title>Buy My Behavior — Web3 платформа для угод з поведінками (USDT, BSC, escrow 90/5/5)</title>
+    <meta name="description" content="BMB — платформа, де замовники та виконавці укладають угоди щодо 'поведінок'. Escrow у USDT на BSC: 90% виконавцю, 5% рефералу, 5% платформі.">
+    <meta name="robots" content="index,follow">
 
-<!-- Мова + канонічна адреса -->
-<link rel="canonical" href="https://www.buymybehavior.com/">
-<link rel="alternate" href="https://www.buymybehavior.com/" hreflang="uk" />
-<link rel="alternate" href="https://www.buymybehavior.com/" hreflang="x-default" />
+    <!-- Canonical -->
+    <link rel="canonical" href="https://www.buymybehavior.com/">
+    <link rel="alternate" href="https://www.buymybehavior.com/" hreflang="uk">
+    <link rel="alternate" href="https://www.buymybehavior.com/" hreflang="x-default">
 
-<!-- Open Graph / Twitter -->
-<meta property="og:type" content="website">
-<meta property="og:url" content="https://www.buymybehavior.com/">
-<meta property="og:title" content="Buy My Behavior — Web3 платформа для угод з поведінками">
-<meta property="og:description" content="Escrow у USDT на BSC: 90% виконавцю, 5% рефералу, 5% платформі. Геолокація, реферальна система, смартконтракт.">
-<meta property="og:image" content="https://www.buymybehavior.com/og-cover.jpg"> <!-- поклади og-cover.jpg у public/ -->
+    <!-- PWA -->
+    <meta name="theme-color" content="#ffcdd6" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
 
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Buy My Behavior — Web3 платформа">
-<meta name="twitter:description" content="Escrow у USDT на BSC: 90/5/5.">
-<meta name="twitter:image" content="https://www.buymybehavior.com/og-cover.jpg">
+    <!-- Icons / Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/bmb-favicon-16.png">
 
-<!-- (Опціонально) верифікація Search Console: вставиш свій токен -->
-<!-- <meta name="google-site-verification" content="PASTE_TOKEN_HERE" /> -->
+    <!-- Open Graph / Twitter -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://www.buymybehavior.com/">
+    <meta property="og:title" content="Buy My Behavior — Web3 платформа для угод з поведінками">
+    <meta property="og:description" content="Escrow у USDT на BSC: 90% виконавцю, 5% рефералу, 5% платформі. Геолокація, реферальна система, смартконтракт.">
+    <!-- Якщо додаси public/og-cover.jpg — заміни нижні 2 рядки на /og-cover.jpg -->
+    <meta property="og:image" content="https://www.buymybehavior.com/icons/icon-512.png">
 
-<!-- JSON-LD: Organization + WebSite -->
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "Organization",
-  "name": "Buy My Behavior",
-  "url": "https://www.buymybehavior.com/",
-  "logo": "https://www.buymybehavior.com/icons/icon-512x512.png"
-}
-</script>
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "WebSite",
-  "name": "Buy My Behavior",
-  "url": "https://www.buymybehavior.com/",
-  "potentialAction": {
-    "@type": "SearchAction",
-    "target": "https://www.buymybehavior.com/search?q={query}",
-    "query-input": "required name=query"
-  }
-}
-</script>
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Buy My Behavior — Web3 платформа">
+    <meta name="twitter:description" content="Escrow у USDT на BSC: 90/5/5.">
+    <meta name="twitter:image" content="https://www.buymybehavior.com/icons/icon-512.png">
+
+    <!-- JSON-LD: Organization -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Buy My Behavior",
+      "url": "https://www.buymybehavior.com/",
+      "logo": "https://www.buymybehavior.com/icons/icon-512.png"
+    }
+    </script>
+
+    <!-- Splash screen styles (брендовий фон + анімація появи тексту) -->
+    <style>
+      :root { --brand-bg: #ffcdd6; --brand-fg: #0f0f12; }
+      html, body { height: 100%; background: var(--brand-bg); }
+      body { margin: 0; }
+      /* full-screen splash */
+      #bmb-splash {
+        position: fixed; inset: 0; display: grid; place-items: center;
+        background: var(--brand-bg); z-index: 9999;
+      }
+      .bmb-logo-word {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+        font-weight: 800; letter-spacing: .5px;
+        font-size: clamp(28px, 8vw, 56px);
+        color: var(--brand-fg);
+        opacity: 0; transform: translateY(8px);
+        animation: bmbFadeUp .6s ease-out .15s forwards;
+      }
+      @keyframes bmbFadeUp {
+        to { opacity: 1; transform: translateY(0); }
+      }
+      /* плавне приховання splash після boot */
+      .bmb-splash-hide { animation: bmbFadeOut .35s ease forwards; }
+      @keyframes bmbFadeOut { to { opacity: 0; visibility: hidden; } }
+    </style>
+  </head>
+  <body>
+    <!-- Splash (прибирається після завантаження застосунку) -->
+    <div id="bmb-splash" role="status" aria-label="Завантаження Buy My Behavior">
+      <div class="bmb-logo-word">Buy&nbsp;My&nbsp;Behavior</div>
+    </div>
+
+    <noscript>Для роботи застосунку потрібен JavaScript.</noscript>
+    <div id="root"></div>
+
+    <!-- Vite entry -->
+    <script type="module" src="/src/main.tsx"></script>
+
+    <!-- Приховати splash коли React змонтувався -->
+    <script>
+      (function () {
+        const done = () => {
+          const el = document.getElementById('bmb-splash');
+          if (el) { el.classList.add('bmb-splash-hide'); setTimeout(() => el.remove(), 400); }
+        };
+        // якщо React не зняв splash самостійно (напр. помилка), прибери через таймаут, щоб не висіло
+        window.addEventListener('bmb:app-mounted', done, { once: true });
+        setTimeout(done, 4000);
+      })();
+    </script>
+  </body>
+</html>
