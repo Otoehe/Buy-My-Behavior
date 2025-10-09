@@ -17,6 +17,8 @@ import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 import BmbModalHost         from './components/BmbModalHost';
 
+
+
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
 const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
@@ -25,6 +27,8 @@ const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
 const ScenarioLocation  = lazy(() => import('./components/ScenarioLocation'));
 const BmbModalsDemo     = lazy(() => import('./components/BmbModalsDemo'));
 const AuthHandoff       = lazy(() => import('./components/AuthHandoff'));
+const EscrowHandoff = lazy(() => import('./components/EscrowHandoff'));
+
 
 // ✅ нова сторінка-«handoff» для escrow/approve
 const EscrowHandoff     = lazy(() => import('./components/EscrowHandoff'));
