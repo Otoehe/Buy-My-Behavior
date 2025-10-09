@@ -34,7 +34,6 @@ const subtitle: React.CSSProperties = {
   textAlign: 'center',
   opacity: 0.85,
 };
-
 const btn: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
@@ -49,11 +48,7 @@ const btn: React.CSSProperties = {
   fontSize: 18,
   cursor: 'pointer',
 };
-const btnGhost: React.CSSProperties = {
-  ...btn,
-  background: '#fff',
-  color: '#000',
-};
+const btnGhost: React.CSSProperties = { ...btn, background: '#fff', color: '#000' };
 
 export default function EscrowHandoff() {
   const nav = useNavigate();
@@ -66,7 +61,6 @@ export default function EscrowHandoff() {
     return u.searchParams.get('next') || '/my-orders';
   }, []);
 
-  // автостарт у MetaMask-браузері
   useEffect(() => {
     if (started.current) return;
     started.current = true;
@@ -95,7 +89,6 @@ export default function EscrowHandoff() {
         });
         if (!signature) throw new Error('Підпис відмінено');
 
-        // створення/оновлення профілю (працює з твоїми RLS-політиками)
         const { error: upsertErr } = await supabase
           .from('profiles')
           .upsert(
@@ -104,10 +97,6 @@ export default function EscrowHandoff() {
           );
         if (upsertErr) throw upsertErr;
 
-        // тут міг би бути виклик escrow-смартконтракту…
-        // await contract.lock(...)
-
-        // редірект назад у BMB
         nav(nextUrl, { replace: true });
       } catch (e: any) {
         setError(e?.message || String(e));
@@ -123,29 +112,17 @@ export default function EscrowHandoff() {
     <div style={pageWrap}>
       <div style={card}>
         <h1 style={title}>Підтвердження escrow через MetaMask</h1>
-        <p style={subtitle}>
-          Ми автоматично відкриємо запит на підпис у MetaMask. Після підтвердження повернемо вас у BMB.
-        </p>
+        <p style={subtitle}>Після підпису повернемо вас у BMB.</p>
 
         {error && (
-          <p style={{ color: '#b00020', textAlign: 'center', marginBottom: 14 }}>
-            {error}
-          </p>
+          <p style={{ color: '#b00020', textAlign: 'center', marginBottom: 14 }}>{error}</p>
         )}
 
         <div style={{ display: 'grid', gap: 12, placeItems: 'center' }}>
-          <button
-            style={{ ...btn, opacity: busy ? 0.7 : 1 }}
-            disabled={busy}
-            onClick={() => window.location.reload()}
-          >
+          <button style={{ ...btn, opacity: busy ? 0.7 : 1 }} disabled={busy} onClick={() => window.location.reload()}>
             🦊 Увійти через MetaMask
           </button>
-
-          <button
-            style={btnGhost}
-            onClick={() => nav('/my-orders', { replace: true })}
-          >
+          <button style={btnGhost} onClick={() => nav('/my-orders', { replace: true })}>
             ← Повернутись у BMB
           </button>
         </div>
