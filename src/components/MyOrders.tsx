@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { isMobileUA, isMetaMaskInApp, openInMetaMaskDapp as openInMetaMaskTo } from '../lib/mmDeepLink';
 
 import { confirmCompletionOnChain, getDealOnChain } from '../lib/escrowContract';
 import { pushNotificationManager as pushNotificationManager, useNotifications } from '../lib/pushNotifications';
