@@ -1,3 +1,4 @@
+// src/App.tsx
 import React, { useEffect, useState, Suspense, lazy } from "react";
 import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import type { User } from "@supabase/supabase-js";
@@ -5,7 +6,6 @@ import { supabase } from "./lib/supabase";
 
 import BehaviorsFeed   from "./components/BehaviorsFeed";
 import NavigationBar   from "./components/NavigationBar";
-// import Register      from "./components/Register"; // ⛔️ прибрали email-реєстрацію
 import Profile         from "./components/Profile";
 import AuthCallback    from "./components/AuthCallback";
 import A2HS            from "./components/A2HS";
@@ -17,6 +17,7 @@ import SWUpdateToast        from "./components/SWUpdateToast";
 import BmbModalHost         from "./components/BmbModalHost";
 import { isMetaMaskInApp }  from "./lib/isMetaMaskBrowser";
 
+// lazy-екрани (є у твоєму /src/components)
 const MapView           = lazy(() => import("./components/MapView"));
 const MyOrders          = lazy(() => import("./components/MyOrders"));
 const ReceivedScenarios = lazy(() => import("./components/ReceivedScenarios"));
@@ -26,6 +27,7 @@ const ScenarioLocation  = lazy(() => import("./components/ScenarioLocation"));
 const BmbModalsDemo     = lazy(() => import("./components/BmbModalsDemo"));
 const EscrowHandoff     = lazy(() => import("./components/EscrowHandoff"));
 
+/** Гейт для приватних маршрутів */
 function RequireAuth({
   user,
   children,
@@ -35,12 +37,20 @@ function RequireAuth({
 }) {
   const location = useLocation();
   if (user === undefined) return null;
-  if (user === null) return <Navigate to="/escrow/approve?next=/my-orders" replace state={{ from: location.pathname }} />;
+  if (user === null) {
+    return (
+      <Navigate
+        to="/escrow/approve?next=/my-orders"
+        replace
+        state={{ from: location.pathname }}
+      />
+    );
+  }
   return children;
 }
 
+/** Домашній роут: якщо MetaMask — одразу на підпис/ескроу, інакше на карту */
 function HomeGate() {
-  // Якщо MetaMask — ведемо на підпис/ескроу, інакше лишаємо карту
   return isMetaMaskInApp()
     ? <Navigate to="/escrow/approve?next=/my-orders" replace />
     : <Navigate to="/map" replace />;
@@ -54,6 +64,7 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // Підписка на стан авторизації Supabase
   useEffect(() => {
     let mounted = true;
 
@@ -71,7 +82,7 @@ export default function App() {
     };
   }, []);
 
-  // Автопереадресація, якщо користувач відкрив / або /register в MetaMask
+  // Автоперенаправлення у MetaMask-браузері
   useEffect(() => {
     if (isMetaMaskInApp()) {
       if (location.pathname === "/" || location.pathname === "/register") {
@@ -82,6 +93,7 @@ export default function App() {
 
   if (user === undefined) return null;
 
+  // На цих екранах ховаємо глобальний нав/А2HS
   const HIDE_UI_ROUTES = new Set<string>(["/map/select", "/escrow/approve"]);
   const pathname = location.pathname;
   const hideNavAndA2HS = HIDE_UI_ROUTES.has(pathname);
@@ -102,8 +114,11 @@ export default function App() {
           {/* Публічні */}
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/escrow/approve" element={<EscrowHandoff />} />
-          {/* /register більше не використовуємо */}
-          <Route path="/register" element={<Navigate to="/escrow/approve?next=/my-orders" replace />} />
+          {/* /register прибрали — редіректимо на escrow */}
+          <Route
+            path="/register"
+            element={<Navigate to="/escrow/approve?next=/my-orders" replace />}
+          />
 
           <Route path="/map"          element={<MapView />} />
           <Route path="/map/select"   element={<ScenarioLocation />} />
