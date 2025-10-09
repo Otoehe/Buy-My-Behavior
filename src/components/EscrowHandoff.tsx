@@ -1,286 +1,248 @@
-// src/components/EscrowHandoff.tsx
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import type { AddressLike } from "ethers";
-import * as ethersNS from "ethers"; // ✅ Працює і з v5, і з v6
+import { ethers } from "ethers";
 import { supabase } from "../lib/supabase";
 import { isMetaMaskInApp } from "../lib/isMetaMaskBrowser";
 
-// ---- Константи мережі/сум ----
+const BSC_CHAIN_ID_DEC = 56;
 const BSC_CHAIN_ID_HEX = "0x38"; // 56
-const ESCROW_AMOUNT_STR = "0.01"; // 0.01 BNB у підказці/кнопці
+const ESCROW_AMOUNT_BNB = 0.01;
 
-// ---- Допоміжки для ethers v5/v6 ----
-function useEthersCompat() {
-  const isV6 = !!(ethersNS as any).BrowserProvider;
-  const BrowserProvider = (ethersNS as any).BrowserProvider;
-  const Web3Provider = (ethersNS as any).providers?.Web3Provider;
-  const utils = (ethersNS as any).utils;
+// Можна винести в .env (VITE_ESCROW_WALLET), але тримаю й fallback
+const ESCROW_WALLET =
+  import.meta.env.VITE_ESCROW_WALLET ||
+  "0x0000000000000000000000000000000000000000";
 
-  const parseEther =
-    (ethersNS as any).parseEther ?? utils?.parseEther ?? ((v: string) => {
-      throw new Error("parseEther not found in ethers");
-    });
-
-  const formatEther =
-    (ethersNS as any).formatEther ?? utils?.formatEther ?? ((v: any) => {
-      throw new Error("formatEther not found in ethers");
-    });
-
-  const makeProvider = () => {
-    const eth = (window as any).ethereum;
-    if (!eth) throw new Error("MetaMask provider не знайдено");
-    return isV6 ? new BrowserProvider(eth) : new Web3Provider(eth);
+type EthWin = Window &
+  typeof globalThis & {
+    ethereum?: any;
   };
 
-  const getSigner = async () => {
-    const p = makeProvider();
-    // v6: await provider.getSigner(); v5: provider.getSigner()
-    const s = (p as any).getSigner();
-    return s?.then?.((x: any) => x) ?? s;
-  };
-
-  return { isV6, makeProvider, getSigner, parseEther, formatEther };
+function short(addr?: string) {
+  return addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : "";
 }
 
-// ---- Примітивні стилі під мобільний MetaMask ----
-const styles = {
-  wrap: { maxWidth: 760, margin: "0 auto", padding: "16px" },
-  title: { fontWeight: 800, fontSize: 32, margin: "16px 0 8px" },
-  hint: { color: "#555", marginBottom: 16 },
-  card: {
-    borderRadius: 16,
-    background: "#fff",
-    boxShadow: "0 6px 30px rgba(0,0,0,0.06)",
-    padding: 16,
-    marginBottom: 16,
-  },
-  btn: (variant: "primary" | "ghost" = "primary") =>
-    variant === "primary"
-      ? {
-          width: "100%",
-          padding: "14px 16px",
-          borderRadius: 16,
-          border: "1px solid transparent",
-          background: "#0f172a",
-          color: "#fff",
-          fontWeight: 700 as const,
-          fontSize: 18,
-          boxShadow: "0 8px 20px rgba(15,23,42,.2)",
-        }
-      : {
-          width: "100%",
-          padding: "14px 16px",
-          borderRadius: 16,
-          border: "1px solid #e5e7eb",
-          background: "#fff",
-          color: "#111827",
-          fontWeight: 700 as const,
-          fontSize: 18,
-        },
-  mmIcon: { marginRight: 8 },
-  error: {
-    background: "#fee2e2",
-    border: "1px solid #fecaca",
-    color: "#7f1d1d",
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 16,
-  },
-  mini: { fontSize: 14, color: "#374151" },
-  walletRow: { display: "flex", flexDirection: "column" as const, gap: 4 },
-};
-
 export default function EscrowHandoff() {
-  const { makeProvider, getSigner, parseEther, formatEther } = useEthersCompat();
-  const [params] = useSearchParams();
-  const next = params.get("next") || "/my-orders";
-
   const navigate = useNavigate();
   const location = useLocation();
+  const [params] = useSearchParams();
 
-  const [address, setAddress] = useState<string>("");
-  const [balance, setBalance] = useState<string>("");
-  const [chainId, setChainId] = useState<string>("");
-  const [busy, setBusy] = useState<false | "sign" | "tx">(false);
-  const [error, setError] = useState<string>("");
+  const next = params.get("next") || "/my-orders";
 
-  // ------ базові дії з MM ------
-  const requestAccounts = useCallback(async () => {
-    const eth = (window as any).ethereum;
-    if (!eth) throw new Error("MetaMask не знайдено");
-    const accs: string[] = await eth.request({ method: "eth_requestAccounts" });
-    return (accs && accs[0]) || "";
+  const [address, setAddress] = useState<string | null>(null);
+  const [chainId, setChainId] = useState<number | null>(null);
+  const [balance, setBalance] = useState<string | null>(null);
+
+  const [signing, setSigning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const isCorrectNet = chainId === BSC_CHAIN_ID_DEC;
+
+  const provider = useMemo(() => {
+    const eth = (window as EthWin).ethereum;
+    if (!eth) return null;
+    // ethers v5
+    return new ethers.providers.Web3Provider(eth, "any");
   }, []);
 
-  const ensureBSC = useCallback(async () => {
-    const eth = (window as any).ethereum;
-    if (!eth) throw new Error("MetaMask не знайдено");
-    const current = (await eth.request({ method: "eth_chainId" })) as string;
-    setChainId(current);
-
-    if (current?.toLowerCase() !== BSC_CHAIN_ID_HEX) {
-      try {
-        await eth.request({
-          method: "wallet_switchEthereumChain",
-          params: [{ chainId: BSC_CHAIN_ID_HEX }],
-        });
-        setChainId(BSC_CHAIN_ID_HEX);
-      } catch (e: any) {
-        // Якщо мережі нема — можна додати (за потреби)
-        throw new Error("Перемкни мережу на BNB Smart Chain у MetaMask.");
-      }
-    }
-  }, []);
-
-  const refreshBalance = useCallback(async (addr: AddressLike) => {
-    const p = makeProvider();
-    const raw = await (p as any).getBalance(addr);
-    setBalance(formatEther(raw));
-  }, [formatEther, makeProvider]);
-
-  // ------ логін підписом + профіль у БД ------
-  const signIn = useCallback(async () => {
-    setError("");
-    setBusy("sign");
-    try {
-      const eth = (window as any).ethereum;
-      if (!eth) throw new Error("MetaMask не знайдено");
-
-      const acc = await requestAccounts();
-      if (!acc) throw new Error("Адресу гаманця не отримано");
-      await ensureBSC();
-
-      const signer = await getSigner();
-      const msg =
-        `BuyMyBehavior Sign-In\n` +
-        `Wallet: ${acc}\n` +
-        `Time: ${Date.now()}`;
-      await signer.signMessage(msg);
-
-      setAddress(acc);
-      await refreshBalance(acc);
-
-      // створюємо/гарантуємо профіль
-      const { error: dbErr } = await supabase
-        .from("profiles")
-        .insert({ wallet_address: acc }, { upsert: true });
-      if (dbErr && dbErr.code !== "23505") {
-        // 23505 — duplicate, ок
-        console.warn("Supabase profiles.insert:", dbErr);
-      }
-    } catch (e: any) {
-      setError(`Помилка входу: ${e?.message ?? e}`);
-    } finally {
-      setBusy(false);
-    }
-  }, [ensureBSC, getSigner, refreshBalance, requestAccounts]);
-
-  // ------ підтвердження «ескроу» (демо-транзакція) ------
-  const sendEscrow = useCallback(async () => {
-    setError("");
-    setBusy("tx");
-    try {
-      if (!address) throw new Error("Спершу увійди через MetaMask");
-
-      await ensureBSC();
-      const signer = await getSigner();
-
-      const to = address as AddressLike; // демо: на себе (щоб не «в нульовий»)
-      const value = parseEther(ESCROW_AMOUNT_STR);
-
-      const tx = await signer.sendTransaction({ to, value });
-      // За бажанням: чекаємо майнінг
-      // await tx.wait();
-
-      // оновимо баланс
-      await refreshBalance(address);
-
-      // редирект на наступний екран
-      const back = params.get("next") || "/my-orders";
-      navigate(back, { replace: true });
-    } catch (e: any) {
-      if (String(e?.message || e).includes("User denied")) {
-        setError("Користувач відхилив транзакцію у MetaMask.");
-      } else {
-        setError(`Помилка ескроу: ${e?.message ?? e}`);
-      }
-    } finally {
-      setBusy(false);
-    }
-  }, [address, ensureBSC, getSigner, navigate, params, parseEther, refreshBalance]);
-
-  // ---- авто-фокус у MetaMask-браузері ----
+  // Підтягнути акаунт, мережу, баланс
   useEffect(() => {
-    if (isMetaMaskInApp()) {
-      // авто-підключення акаунта + баланс (без підпису)
-      requestAccounts()
-        .then((acc) => {
-          if (acc) {
-            setAddress(acc);
-            refreshBalance(acc);
-          }
-        })
-        .catch(() => void 0);
-    }
-  }, [refreshBalance, requestAccounts]);
+    let dead = false;
+    (async () => {
+      try {
+        setError(null);
+        if (!provider) return;
 
-  const shortAddr = useMemo(
-    () => (address ? `${address.slice(0, 6)}…${address.slice(-4)}` : ""),
-    [address]
-  );
+        const signer = provider.getSigner();
+        const addr = await signer.getAddress().catch(async () => {
+          // Якщо ще не дано доступ — попросимо
+          await (window as EthWin).ethereum?.request?.({ method: "eth_requestAccounts" });
+          return signer.getAddress();
+        });
+
+        if (dead) return;
+
+        setAddress(addr);
+
+        const net = await provider.getNetwork();
+        if (dead) return;
+        setChainId(Number(net.chainId));
+
+        const raw = await provider.getBalance(addr);
+        if (dead) return;
+        setBalance(ethers.utils.formatEther(raw));
+      } catch (e: any) {
+        // Якщо ми не у MetaMask-браузері — просто покажемо підказку
+        setError(e?.message || String(e));
+      }
+    })();
+
+    // слухачі зміни акаунта/мережі
+    const eth = (window as EthWin).ethereum;
+    const onChainChanged = (cid: string) => setChainId(parseInt(cid, 16));
+    const onAccountsChanged = (accs: string[]) => setAddress(accs?.[0] || null);
+
+    eth?.on?.("chainChanged", onChainChanged);
+    eth?.on?.("accountsChanged", onAccountsChanged);
+
+    return () => {
+      dead = true;
+      eth?.removeListener?.("chainChanged", onChainChanged);
+      eth?.removeListener?.("accountsChanged", onAccountsChanged);
+    };
+  }, [provider]);
+
+  async function ensureBsc() {
+    const eth = (window as EthWin).ethereum;
+    if (!eth) throw new Error("MetaMask не знайдено.");
+
+    if (chainId === BSC_CHAIN_ID_DEC) return;
+
+    try {
+      await eth.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: BSC_CHAIN_ID_HEX }],
+      });
+    } catch (e: any) {
+      // Якщо мережа не додана — спробуємо додати
+      if (e?.code === 4902) {
+        await eth.request({
+          method: "wallet_addEthereumChain",
+          params: [
+            {
+              chainId: BSC_CHAIN_ID_HEX,
+              chainName: "BNB Smart Chain",
+              nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
+              rpcUrls: ["https://bsc-dataseed.binance.org/"],
+              blockExplorerUrls: ["https://bscscan.com"],
+            },
+          ],
+        });
+      } else {
+        throw e;
+      }
+    }
+  }
+
+  async function handleApprove() {
+    setError(null);
+    setSigning(true);
+    try {
+      const eth = (window as EthWin).ethereum;
+      if (!provider || !eth) throw new Error("Спочатку підʼєднай MetaMask.");
+
+      // 1) Гарантуємо BSC
+      await ensureBsc();
+
+      // 2) Виставляємо транзакцію на ескроу-адресу
+      const signer = provider.getSigner();
+
+      const valueWei = ethers.utils.parseEther(ESCROW_AMOUNT_BNB.toString());
+
+      const tx = await signer.sendTransaction({
+        to: ESCROW_WALLET,
+        value: valueWei,
+      });
+
+      // 3) Просто чекаємо появи tx.hash (не блокуємо UI на повний confirmation)
+      if (!tx?.hash) throw new Error("Не вдалося створити транзакцію.");
+
+      // 4) Фіксуємо в БД (не критично, якщо впаде)
+      try {
+        await supabase.from("behaviors").insert({
+          // приклад: зафіксувати «депозит від користувача»
+          user_id: (await supabase.auth.getUser()).data.user?.id ?? null,
+          type: "escrow_deposit",
+          payload: { txHash: tx.hash, amountBNB: ESCROW_AMOUNT_BNB },
+        });
+      } catch {}
+
+      // 5) Перехід далі
+      navigate(next, { replace: true });
+    } catch (e: any) {
+      const msg =
+        e?.message ||
+        (typeof e === "string" ? e : "Невідома помилка під час підтвердження.");
+      setError(`Помилка: ${msg}`);
+    } finally {
+      setSigning(false);
+    }
+  }
+
+  // Кнопка «Відкрити у MetaMask-браузері» для зовнішніх браузерів
+  function openInMetamaskBrowser() {
+    const url = `https://metamask.app.link/dapp/${location.hostname}${location.port ? `:${location.port}` : ""
+      }${location.pathname}${location.search}`;
+    location.href = url;
+  }
 
   return (
-    <div style={styles.wrap}>
-      <h1 style={styles.title}>Вхід через MetaMask</h1>
-      <div style={styles.hint}>Якщо запит не з’явився — натисни кнопку нижче.</div>
+    <div className="mx-auto max-w-screen-sm px-4 py-6">
+      <h1 className="text-3xl font-extrabold mb-3">Вхід через MetaMask</h1>
+      <p className="text-slate-500 mb-4">
+        Якщо запит не зʼявився — натисни кнопку нижче.
+      </p>
 
-      {/* Кнопка входу */}
-      <div style={{ ...styles.card, opacity: busy ? 0.7 : 1 }}>
-        <button
-          style={styles.btn("ghost")}
-          onClick={signIn}
-          disabled={busy === "sign"}
-          aria-busy={busy === "sign"}
-        >
-          <span style={styles.mmIcon}>🦊</span> Увійти через MetaMask
-        </button>
+      {/* Кнопка логіну (для надійного eth_requestAccounts) */}
+      <button
+        onClick={async () => {
+          setError(null);
+          const eth = (window as EthWin).ethereum;
+          if (!eth) {
+            setError("MetaMask не знайдено.");
+            return;
+          }
+          try {
+            await eth.request({ method: "eth_requestAccounts" });
+          } catch (e: any) {
+            setError(e?.message || String(e));
+          }
+        }}
+        className="w-full rounded-2xl border border-slate-200 px-5 py-4 text-lg font-semibold flex items-center gap-2 justify-center mb-4 bg-white"
+      >
+        🦊 Увійти через MetaMask
+      </button>
+
+      {/* Блок з інфо про гаманець */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4">
+        <div className="text-sm text-slate-500 mb-1">Гаманець</div>
+        <div className="text-lg font-semibold">{short(address) || "—"}</div>
+        <div className="text-sm text-slate-500">
+          Мережа: {chainId ?? "—"}{" "}
+          {isCorrectNet ? "(BNB Smart Chain)" : "(інша мережа)"}
+          {" · "}Баланс: {balance ? `${Number(balance).toFixed(4)} BNB` : "—"}
+        </div>
       </div>
 
-      {/* Інфо про гаманець */}
-      {address && (
-        <div style={styles.card}>
-          <div style={styles.walletRow as any}>
-            <div style={{ fontWeight: 700, fontSize: 16 }}>Гаманець</div>
-            <div style={{ fontFamily: "monospace" }}>{shortAddr}</div>
-            <div style={styles.mini}>
-              Мережа: {chainId || "—"} &nbsp; Баланс: {balance ? `${balance} BNB` : "—"}
-            </div>
-          </div>
-        </div>
+      {/* Основна CTA */}
+      <button
+        disabled={signing}
+        onClick={handleApprove}
+        className={`w-full rounded-2xl px-6 py-5 text-lg font-extrabold text-white shadow-sm transition-all
+          ${signing
+            ? "bg-slate-400"
+            : "bg-slate-900 hover:bg-black active:scale-[0.99]"
+          }`}
+      >
+        🔒 Підтвердити ескроу • {ESCROW_AMOUNT_BNB.toFixed(2)} BNB
+      </button>
+
+      {/* Лінк відкрити у MetaMask-браузері, якщо ми НЕ в ньому */}
+      {!isMetaMaskInApp() && (
+        <button
+          onClick={openInMetamaskBrowser}
+          className="mt-4 text-slate-600 underline underline-offset-4"
+        >
+          Відкрити у MetaMask-браузері
+        </button>
       )}
 
-      {/* Підтвердити ескроу */}
-      <div style={{ ...styles.card, opacity: busy ? 0.7 : 1 }}>
-        <button
-          style={styles.btn("primary")}
-          onClick={sendEscrow}
-          disabled={!address || busy === "tx"}
-          aria-busy={busy === "tx"}
-        >
-          <span style={{ marginRight: 8 }}>🔒</span>
-          Підтвердити ескроу • {ESCROW_AMOUNT_STR} BNB
-        </button>
-      </div>
-
-      {/* Лінк для відкриття у вбудованому MetaMask-браузері (на всяк випадок) */}
-      <div style={{ marginTop: 12 }}>
-        <a href="https://metamask.app.link/dapp/www.buymybehavior.com" style={{ color: "#111827" }}>
-          Відкрити у MetaMask-браузері
-        </a>
-      </div>
-
-      {error && <div style={styles.error}>{error}</div>}
+      {/* Помилка */}
+      {error && (
+        <div className="mt-5 rounded-xl bg-rose-50 text-rose-700 p-3 text-sm">
+          {error}
+        </div>
+      )}
     </div>
   );
 }
