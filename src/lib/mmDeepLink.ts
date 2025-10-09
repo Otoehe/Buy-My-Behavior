@@ -1,48 +1,48 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { supabase } from "./supabase";
+import { isMetaMaskInApp } from "./isMetaMaskBrowser";
 
-// Мінімальні детектори середовища
-export function isMobileUA(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+/**
+ * Формує url виду https://metamask.app.link/dapp/<host>/<path>#bmbSess=...
+ * Ми вантажимо корінь dapp із hash-хенд-оффом, а далі bootstrapSessionHandoff
+ * переведе на next (наприклад, /escrow/approve?...).
+ */
+function buildMetamaskDeeplink(handoffUrl: string): string {
+  const u = new URL(handoffUrl);
+  // приклад: https://metamask.app.link/dapp/www.buymybehavior.com/#bmbSess=...
+  return `https://metamask.app.link/dapp/${u.host}${u.pathname}${u.search}${u.hash}`;
 }
 
-export function isMetaMaskInApp(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /MetaMaskMobile/i.test(navigator.userAgent);
+/** Створюємо handoff-url: <APP_ORIGIN>/#bmbSess=<base64-json> */
+async function buildHandoffUrl(nextPath: string): Promise<string> {
+  const appOrigin = import.meta.env.VITE_PUBLIC_APP_URL as string;
+  const { data } = await supabase.auth.getSession();
+  const at = data.session?.access_token ?? null;
+  const rt = data.session?.refresh_token ?? null;
+
+  const payload = {
+    at,
+    rt,
+    next: nextPath.startsWith("/") ? nextPath : "/my-orders",
+  };
+  const encoded = encodeURIComponent(btoa(JSON.stringify(payload)));
+  const url = new URL(appOrigin);
+  url.hash = `bmbSess=${encoded}`;
+  return url.toString();
 }
 
 /**
- * Відкриває нашу dApp у браузері MetaMask через deeplink.
- * Якщо передати handoff, додасть у URL hash `#bmbSess=...` (base64 JSON).
- *
- * @param path Напр., "/my-orders?scenario=abc"
- * @param handoff { at, rt, next } — токени сесії та бажаний next route
+ * Відкрити шлях у MetaMask.
+ * - Якщо ВЖЕ знаходимося у MetaMask-браузері — просто переходимо на nextPath (без нових вкладок).
+ * - Якщо ЗОВНІ — відкриваємо deeplink у MetaMask.
  */
-export function openInMetaMaskDapp(
-  path: string,
-  handoff?: { at?: string | null; rt?: string | null; next?: string }
-): void {
-  const host =
-    (import.meta as any)?.env?.VITE_PUBLIC_APP_URL?.replace(/^https?:\/\//, "") ||
-    (typeof window !== "undefined" ? window.location.host : "www.buymybehavior.com");
-
-  // абсолютний шлях без дубльованого слеша
-  const cleanPath = path.startsWith("/") ? path : `/${path}`;
-
-  let url = `https://metamask.app.link/dapp/${host}${cleanPath}`;
-
-  if (handoff && (handoff.at || handoff.rt || handoff.next)) {
-    const payload = {
-      at: handoff.at ?? null,
-      rt: handoff.rt ?? null,
-      next: handoff.next && handoff.next.startsWith("/") ? handoff.next : cleanPath,
-    };
-    const b64 = btoa(JSON.stringify(payload));
-    url += `#bmbSess=${encodeURIComponent(b64)}`;
+export async function openInMetaMaskTo(nextPath: string): Promise<void> {
+  if (isMetaMaskInApp()) {
+    // Уже в MetaMask → звичайна навігація (щоб не плодити вкладки)
+    location.assign(nextPath);
+    return;
   }
-
-  // Переходимо — система сама підхопить MetaMask
-  if (typeof window !== "undefined") {
-    window.location.href = url;
-  }
+  const handoff = await buildHandoffUrl(nextPath);
+  const deeplink = buildMetamaskDeeplink(handoff);
+  location.href = deeplink;
 }

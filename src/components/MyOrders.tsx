@@ -19,9 +19,8 @@ import { upsertRating } from '../lib/ratings';
 import { connectWallet, ensureBSC, waitForReturn } from '../lib/providerBridge';
 import { lockFundsMobileFlow } from '../lib/escrowMobile';
 
-// ✅ правильні імпорти
-import { isMobileUA, isMetaMaskInApp, openInMetaMaskDapp } from '../lib/mmDeepLink';
-import { writeSupabaseSessionCookie } from '../lib/supabaseSessionBridge';
+// ✅ правильні імпорти (оновлено)
+import { isMobileUA, isMetaMaskInApp, openInMetaMaskTo } from '../lib/mmDeepLink';
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
@@ -364,23 +363,22 @@ export default function MyOrders() {
     }
   };
 
-  // 🔹 «Розумний вхід»: якщо ми на мобайлі й поза MetaMask-браузером — перекидаємо туди,
-  // додаємо handoff у #hash, і там уже сторінка підхопить авторизацію та одразу викличе Lock.
+  // 🔹 «Розумний вхід»: тепер ведемо на екран /escrow/approve із сумою.
+  //    У MetaMask (мобайл) відкривається без створення нових вкладок; після approve вертаємось на /my-orders.
   const handleLockEntry = async (s: Scenario) => {
-    if (isMobileUA() && !isMetaMaskInApp()) {
-      const { data } = await supabase.auth.getSession();
-      const at = data?.session?.access_token ?? null;
-      const rt = data?.session?.refresh_token ?? null;
+    if (!isBothAgreed(s)) { alert('Спершу потрібні дві згоди.'); return; }
+    if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) { alert('Сума має бути > 0'); return; }
 
-      // резервно кладемо короткий cookie (не критично, але хай буде)
-      try { writeSupabaseSessionCookie(data?.session ?? null, 300); } catch {}
+    const amount = Number(s.donation_amount_usdt);
+    const nextPath = `/escrow/approve?amount=${amount}&symbol=USDT&next=/my-orders`;
 
-      const next = `/my-orders?scenario=${encodeURIComponent(s.id)}`;
-      openInMetaMaskDapp(next, { at, rt, next });
+    if (isMobileUA()) {
+      await openInMetaMaskTo(nextPath);   // ✅ показує в MetaMask кнопку «Підтвердити ескроу»
       return;
     }
-    // уже в MetaMask або десктоп — одразу крутимо ончейн-флоу
-    void handleLock(s);
+
+    // Десктоп/інші випадки — старий прямий шлях
+    await handleLock(s);
   };
 
   const handleConfirm = async (s: Scenario) => {
@@ -486,7 +484,7 @@ export default function MyOrders() {
     [permissionStatus, requestPermission, rt.isListening, rt.method]
   );
 
-  // 🔹 Авто-ран у MetaMask-браузері: якщо прийшли через deeplink із ?scenario=...
+  // (залишив як було) Авто-ран у MetaMask-браузері для старого ?scenario=...
   const autoRunOnceRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isMetaMaskInApp()) return;
