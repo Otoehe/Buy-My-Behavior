@@ -1,32 +1,30 @@
-// src/App.tsx
-import React, { useEffect, useState, Suspense, lazy } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import type { User } from '@supabase/supabase-js';
-import { supabase } from './lib/supabase';
+import React, { useEffect, useState, Suspense, lazy } from "react";
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import type { User } from "@supabase/supabase-js";
+import { supabase } from "./lib/supabase";
 
-import BehaviorsFeed   from './components/BehaviorsFeed';
-import NavigationBar   from './components/NavigationBar';
-import Register        from './components/Register';
-import Profile         from './components/Profile';
-import AuthCallback    from './components/AuthCallback';
-import A2HS            from './components/A2HS';
+import BehaviorsFeed   from "./components/BehaviorsFeed";
+import NavigationBar   from "./components/NavigationBar";
+// import Register      from "./components/Register"; // ⛔️ прибрали email-реєстрацію
+import Profile         from "./components/Profile";
+import AuthCallback    from "./components/AuthCallback";
+import A2HS            from "./components/A2HS";
 
-import useViewportVH        from './lib/useViewportVH';
-import useGlobalImageHints  from './lib/useGlobalImageHints';
-import NetworkToast         from './components/NetworkToast';
-import SWUpdateToast        from './components/SWUpdateToast';
-import BmbModalHost         from './components/BmbModalHost';
+import useViewportVH        from "./lib/useViewportVH";
+import useGlobalImageHints  from "./lib/useGlobalImageHints";
+import NetworkToast         from "./components/NetworkToast";
+import SWUpdateToast        from "./components/SWUpdateToast";
+import BmbModalHost         from "./components/BmbModalHost";
+import { isMetaMaskInApp }  from "./lib/isMetaMaskBrowser";
 
-// Ліниві імпорти
-const MapView           = lazy(() => import('./components/MapView'));
-const MyOrders          = lazy(() => import('./components/MyOrders'));
-const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
-const Manifest          = lazy(() => import('./components/Manifest'));
-const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
-const ScenarioLocation  = lazy(() => import('./components/ScenarioLocation'));
-const BmbModalsDemo     = lazy(() => import('./components/BmbModalsDemo'));
-const AuthHandoff       = lazy(() => import('./components/AuthHandoff'));     // якщо використовуєш
-const EscrowHandoff     = lazy(() => import('./components/EscrowHandoff'));   // ← наш новий екран
+const MapView           = lazy(() => import("./components/MapView"));
+const MyOrders          = lazy(() => import("./components/MyOrders"));
+const ReceivedScenarios = lazy(() => import("./components/ReceivedScenarios"));
+const Manifest          = lazy(() => import("./components/Manifest"));
+const ScenarioForm      = lazy(() => import("./components/ScenarioForm"));
+const ScenarioLocation  = lazy(() => import("./components/ScenarioLocation"));
+const BmbModalsDemo     = lazy(() => import("./components/BmbModalsDemo"));
+const EscrowHandoff     = lazy(() => import("./components/EscrowHandoff"));
 
 function RequireAuth({
   user,
@@ -37,24 +35,15 @@ function RequireAuth({
 }) {
   const location = useLocation();
   if (user === undefined) return null;
-  if (user === null) return <Navigate to="/register" replace state={{ from: location.pathname }} />;
-  return children;
-}
-
-function RedirectIfAuthed({
-  user,
-  children,
-}: {
-  user: User | null | undefined;
-  children: React.ReactElement;
-}) {
-  if (user === undefined) return null;
-  if (user) return <Navigate to="/map" replace />;
+  if (user === null) return <Navigate to="/escrow/approve?next=/my-orders" replace state={{ from: location.pathname }} />;
   return children;
 }
 
 function HomeGate() {
-  return <Navigate to="/map" replace />;
+  // Якщо MetaMask — ведемо на підпис/ескроу, інакше лишаємо карту
+  return isMetaMaskInApp()
+    ? <Navigate to="/escrow/approve?next=/my-orders" replace />
+    : <Navigate to="/map" replace />;
 }
 
 export default function App() {
@@ -63,6 +52,7 @@ export default function App() {
 
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     let mounted = true;
@@ -81,13 +71,21 @@ export default function App() {
     };
   }, []);
 
+  // Автопереадресація, якщо користувач відкрив / або /register в MetaMask
+  useEffect(() => {
+    if (isMetaMaskInApp()) {
+      if (location.pathname === "/" || location.pathname === "/register") {
+        navigate("/escrow/approve?next=/my-orders", { replace: true });
+      }
+    }
+  }, [location.pathname, navigate]);
+
   if (user === undefined) return null;
 
-  // Режим “чиста карта”: не показуємо навбар та A2HS
-  const HIDE_UI_ROUTES = new Set<string>(['/map/select']);
+  const HIDE_UI_ROUTES = new Set<string>(["/map/select", "/escrow/approve"]);
   const pathname = location.pathname;
   const hideNavAndA2HS = HIDE_UI_ROUTES.has(pathname);
-  const showGlobalA2HS = !hideNavAndA2HS && pathname !== '/profile';
+  const showGlobalA2HS = !hideNavAndA2HS && pathname !== "/profile";
 
   return (
     <>
@@ -103,24 +101,15 @@ export default function App() {
 
           {/* Публічні */}
           <Route path="/auth/callback" element={<AuthCallback />} />
-          <Route path="/auth/handoff" element={<AuthHandoff />} />
-          <Route path="/escrow/approve" element={<EscrowHandoff />} /> {/* ← тут */}
+          <Route path="/escrow/approve" element={<EscrowHandoff />} />
+          {/* /register більше не використовуємо */}
+          <Route path="/register" element={<Navigate to="/escrow/approve?next=/my-orders" replace />} />
 
           <Route path="/map"          element={<MapView />} />
           <Route path="/map/select"   element={<ScenarioLocation />} />
           <Route path="/behaviors"    element={<BehaviorsFeed />} />
           <Route path="/manifest"     element={<Manifest />} />
           <Route path="/modals"       element={<BmbModalsDemo />} />
-
-          {/* Реєстрація */}
-          <Route
-            path="/register"
-            element={
-              <RedirectIfAuthed user={user}>
-                <Register />
-              </RedirectIfAuthed>
-            }
-          />
 
           {/* Приватні */}
           <Route
