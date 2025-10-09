@@ -1,312 +1,235 @@
 // src/components/EscrowHandoff.tsx
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { BrowserProvider, parseEther, formatEther } from "ethers";
 
 const BSC_CHAIN_ID_HEX = "0x38"; // 56
-const BSC_PARAMS = {
-  chainId: BSC_CHAIN_ID_HEX,
-  chainName: "BNB Smart Chain",
-  nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
-  rpcUrls: ["https://bsc-dataseed.binance.org/"],
-  blockExplorerUrls: ["https://bscscan.com/"],
-};
+const BSC_CHAIN_ID = 56n;
 
-// ⚠️ вистави у .env (Vercel → Project → Settings → Environment Variables)
-const ESCROW_VAULT =
-  (import.meta.env.VITE_ESCROW_VAULT as string) ??
-  "0x0000000000000000000000000000000000000000"; // ← заміни на свою адресу
+// .env (Vercel/локально)
+// VITE_ESCROW_WALLET=0x...  -> адреса одержувача ескроу
+// VITE_ESCROW_AMOUNT=0.01   -> сума у BNB
+const ESCROW_ADDRESS = (import.meta.env.VITE_ESCROW_WALLET || "").trim() as `0x${string}`;
+const ESCROW_AMOUNT = (import.meta.env.VITE_ESCROW_AMOUNT || "0.01").trim();
 
-// ===== helpers: parse/format без ethers =====
-const WEI = 10n ** 18n;
-
-function parseEtherToHex(amount: number | string): string {
-  const s = String(amount);
-  const [intPart, fracRaw = ""] = s.split(".");
-  const frac = (fracRaw + "0".repeat(18)).slice(0, 18);
-  const wei = BigInt(intPart || "0") * WEI + BigInt(frac || "0");
-  return "0x" + wei.toString(16);
-}
-
-function formatEtherFromHex(hexWei: string, digits = 4): string {
-  const wei = BigInt(hexWei);
-  const whole = wei / WEI;
-  const frac = (wei % WEI).toString().padStart(18, "0").slice(0, digits);
-  return `${whole}.${frac}`;
-}
-
-function shorten(addr?: string) {
-  return addr ? addr.slice(0, 6) + "…" + addr.slice(-4) : "";
-}
+type UIState = "idle" | "signing" | "pending" | "done";
 
 export default function EscrowHandoff() {
-  const [searchParams] = useSearchParams();
+  const [search] = useSearchParams();
+  const next = search.get("next") || "/my-orders";
+
   const navigate = useNavigate();
-  const location = useLocation();
-
-  // сума для блокування (?amount=0.01), дефолт 0.01 BNB
-  const requestedAmount = useMemo(() => {
-    const raw = searchParams.get("amount");
-    const n = Number(raw);
-    return Number.isFinite(n) && n > 0 ? n : 0.01;
-  }, [searchParams]);
-
-  const next = searchParams.get("next") || "/my-orders";
 
   const [address, setAddress] = useState<string>("");
-  const [chainId, setChainId] = useState<string>("");
-  const [balance, setBalance] = useState<string>("");
-  const [busy, setBusy] = useState<"idle" | "connecting" | "signing" | "sending">("idle");
+  const [balance, setBalance] = useState<bigint>(0n);
+  const [state, setState] = useState<UIState>("idle");
   const [error, setError] = useState<string>("");
 
-  const onAccountsChanged = useCallback((accs: string[]) => {
-    setAddress(accs?.[0] || "");
-  }, []);
-
-  const onChainChanged = useCallback((id: string) => {
-    setChainId(id);
-  }, []);
-
-  // підключення до MetaMask і читання стану
-  const connect = useCallback(async () => {
-    setError("");
+  const amountWei = useMemo(() => {
     try {
-      if (!window.ethereum) throw new Error("MetaMask не знайдено.");
-      setBusy("connecting");
-
-      const accs: string[] = await window.ethereum.request({
-        method: "eth_requestAccounts",
-      });
-      onAccountsChanged(accs);
-
-      const cid: string = await window.ethereum.request({ method: "eth_chainId" });
-      onChainChanged(cid);
-
-      if (accs[0]) {
-        const balHex: string = await window.ethereum.request({
-          method: "eth_getBalance",
-          params: [accs[0], "latest"],
-        });
-        setBalance(formatEtherFromHex(balHex));
-      }
-
-      window.ethereum.removeListener?.("accountsChanged", onAccountsChanged);
-      window.ethereum.removeListener?.("chainChanged", onChainChanged);
-      window.ethereum.on?.("accountsChanged", onAccountsChanged);
-      window.ethereum.on?.("chainChanged", onChainChanged);
-    } catch (e: any) {
-      setError(e?.message || String(e));
-    } finally {
-      setBusy("idle");
-    }
-  }, [onAccountsChanged, onChainChanged]);
-
-  // перемикання/додавання BSC
-  const ensureBsc = useCallback(async () => {
-    if (!window.ethereum) throw new Error("MetaMask не знайдено.");
-    const current = (await window.ethereum.request({ method: "eth_chainId" })) as string;
-    if (current?.toLowerCase() === BSC_CHAIN_ID_HEX.toLowerCase()) return;
-
-    try {
-      await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: BSC_CHAIN_ID_HEX }],
-      });
-    } catch (err: any) {
-      if (err?.code === 4902) {
-        await window.ethereum.request({
-          method: "wallet_addEthereumChain",
-          params: [BSC_PARAMS],
-        });
-      } else {
-        throw err;
-      }
+      return parseEther(ESCROW_AMOUNT);
+    } catch {
+      return 0n;
     }
   }, []);
 
-  // відправка в ескроу
-  const confirmEscrow = useCallback(async () => {
-    setError("");
+  const misconfigured = !ESCROW_ADDRESS || !ESCROW_ADDRESS.startsWith("0x") || amountWei === 0n;
+
+  // ---- helpers -------------------------------------------------------------
+
+  const short = (a: string) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "");
+
+  const refreshAccountAndBalance = async () => {
     try {
-      if (!window.ethereum) throw new Error("MetaMask не знайдено.");
-      if (!address) throw new Error("Спочатку під’єднай MetaMask.");
-      if (!/^0x[0-9a-fA-F]{40}$/.test(ESCROW_VAULT))
-        throw new Error("ESCROW_VAULT не налаштований.");
+      const eth = (window as any).ethereum;
+      if (!eth) return;
 
-      setBusy("signing");
-      await ensureBsc();
+      const provider = new BrowserProvider(eth);
+      const signer = await provider.getSigner();
+      const addr = await signer.getAddress();
+      setAddress(addr);
 
-      setBusy("sending");
-      const txHash: string = await window.ethereum.request({
-        method: "eth_sendTransaction",
-        params: [
-          {
-            from: address,
-            to: ESCROW_VAULT,
-            // значення у wei (hex)
-            value: parseEtherToHex(requestedAmount),
-          },
-        ],
-      });
-
-      // редірект з хешем
-      navigate(next, { replace: true, state: { escrowTx: txHash } });
-    } catch (e: any) {
-      setError(e?.message || String(e));
-    } finally {
-      setBusy("idle");
+      const bal = await provider.getBalance(addr);
+      setBalance(bal);
+    } catch (e) {
+      console.warn("[Escrow] refreshAccountAndBalance:", e);
     }
-  }, [address, ensureBsc, navigate, next, requestedAmount]);
+  };
 
-  // автоконект (якщо акаунт уже авторизовано)
+  // ---- effects -------------------------------------------------------------
+
   useEffect(() => {
-    if (window.ethereum) {
-      window.ethereum
-        .request({ method: "eth_accounts" })
-        .then(async (accs: string[]) => {
-          if (accs?.[0]) {
-            setAddress(accs[0]);
-            const cid: string = await window.ethereum.request({ method: "eth_chainId" });
-            setChainId(cid);
-            const balHex: string = await window.ethereum.request({
-              method: "eth_getBalance",
-              params: [accs[0], "latest"],
-            });
-            setBalance(formatEtherFromHex(balHex));
-          }
-        })
-        .catch(() => {});
-    }
+    refreshAccountAndBalance();
+
+    const eth = (window as any).ethereum;
+    if (!eth) return;
+
+    const onAccounts = () => refreshAccountAndBalance();
+    const onChain = () => refreshAccountAndBalance();
+
+    eth.on?.("accountsChanged", onAccounts);
+    eth.on?.("chainChanged", onChain);
+
+    return () => {
+      eth.removeListener?.("accountsChanged", onAccounts);
+      eth.removeListener?.("chainChanged", onChain);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const disabled = busy !== "idle";
-  const isBsc = chainId?.toLowerCase() === BSC_CHAIN_ID_HEX.toLowerCase();
+  // ---- actions -------------------------------------------------------------
+
+  const handleLogin = async () => {
+    try {
+      const eth = (window as any).ethereum;
+      if (!eth) return;
+      await eth.request({ method: "eth_requestAccounts" });
+      await refreshAccountAndBalance();
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+
+  const handleApprove = async () => {
+    setError("");
+    setState("signing");
+
+    try {
+      const eth = (window as any).ethereum;
+      if (!eth) throw new Error("MetaMask не знайдено");
+
+      // 1) Перемкнутися на BSC
+      try {
+        await eth.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: BSC_CHAIN_ID_HEX }],
+        });
+      } catch (e: any) {
+        if (e?.code === 4902) {
+          // якщо мережу не додано — пропонуємо додати
+          await eth.request({
+            method: "wallet_addEthereumChain",
+            params: [
+              {
+                chainId: BSC_CHAIN_ID_HEX,
+                chainName: "BNB Smart Chain",
+                nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
+                rpcUrls: ["https://bsc-dataseed.binance.org/"],
+                blockExplorerUrls: ["https://bscscan.com/"],
+              },
+            ],
+          });
+        } else {
+          throw e;
+        }
+      }
+
+      const provider = new BrowserProvider(eth);
+      const net = await provider.getNetwork();
+      if (net.chainId !== BSC_CHAIN_ID) {
+        throw new Error("Перемкніть мережу на BNB Smart Chain.");
+      }
+
+      const signer = await provider.getSigner();
+      const from = await signer.getAddress();
+
+      // 2) Перевірити баланс з запасом на комісію
+      const gasPrice = await provider.getGasPrice(); // bigint
+      const feeEstimate = gasPrice * 21000n;
+      if (balance < amountWei + feeEstimate) {
+        throw new Error("Недостатньо BNB для суми та комісії мережі.");
+      }
+
+      // 3) Надіслати legacy-транзакцію (BSC любить type:0)
+      const tx = await signer.sendTransaction({
+        to: ESCROW_ADDRESS,
+        value: amountWei,
+        type: 0,       // legacy
+        gasPrice,      // явний gasPrice
+        // gasLimit: 21000n, // можна явно зафіксувати за бажання
+      });
+
+      setState("pending");
+      await tx.wait(); // 1 підтвердження достатньо
+
+      setState("done");
+      // TODO: за потреби — записати tx.hash / from / amount у вашу БД (Supabase)
+
+      navigate(next, { replace: true });
+    } catch (e: any) {
+      if (e?.code === 4001 || /User denied/i.test(e?.message || "")) {
+        setError("Ви відхилили транзакцію в MetaMask.");
+      } else {
+        setError(e?.message || "Сталася помилка під час виконання транзакції.");
+      }
+      setState("idle");
+    }
+  };
+
+  const disabled = state !== "idle" || misconfigured || !address || balance === 0n;
+
+  // ---- UI ------------------------------------------------------------------
 
   return (
-    <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px 16px 56px" }}>
-      <h1 style={{ fontSize: 32, fontWeight: 800, marginBottom: 8 }}>Вхід через MetaMask</h1>
-      <p style={{ color: "#6b7280", marginBottom: 20 }}>
-        Якщо запит не з'явився — натисни кнопку нижче.
-      </p>
+    <div className="p-4 max-w-screen-sm mx-auto">
+      <h1 className="text-3xl font-bold mb-2">Вхід через MetaMask</h1>
+      <p className="text-gray-500 mb-4">Якщо запит не з'явився — натисни кнопку нижче.</p>
 
-      {/* КНОПКА УВІЙТИ */}
+      {/* Логін через MetaMask */}
       <button
-        onClick={connect}
-        disabled={disabled}
-        style={{
-          width: "100%",
-          border: "none",
-          borderRadius: 16,
-          padding: "16px 18px",
-          fontSize: 18,
-          fontWeight: 700,
-          background: disabled ? "#e5e7eb" : "#f3f4f6",
-          boxShadow: "0 8px 20px rgba(0,0,0,.08) inset, 0 2px 10px rgba(0,0,0,.04)",
-          marginBottom: 14,
-        }}
+        className="w-full rounded-2xl px-5 py-4 bg-white border text-black shadow-sm mb-3"
+        onClick={handleLogin}
       >
         🦊 Увійти через MetaMask
       </button>
 
-      {/* САММАРІ ГАМАНЦЯ */}
-      {!!address && (
-        <div
-          style={{
-            border: "1px solid #e5e7eb",
-            borderRadius: 14,
-            padding: 14,
-            marginBottom: 14,
-            background: "#fafafa",
-          }}
-        >
-          <div style={{ fontSize: 14, color: "#6b7280" }}>Гаманець</div>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>{shorten(address)}</div>
-
-          <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 14 }}>
-            <span>Мережа: {isBsc ? "BNB Smart Chain" : `chainId ${chainId || "-"}`}</span>
-            <span>Баланс: {balance ? `${balance} BNB` : "—"}</span>
-          </div>
+      {/* Інфо про гаманець/баланс */}
+      <div className="rounded-2xl border bg-white p-4 mb-4">
+        <div className="text-sm text-gray-500 mb-1">Гаманець</div>
+        <div className="font-semibold">{address ? short(address) : "—"}</div>
+        <div className="text-sm text-gray-500 mt-1">
+          Мережа: BNB Smart Chain · Баланс: {formatEther(balance)} BNB
         </div>
-      )}
-
-      {/* КНОПКА ЕСКРОУ */}
-      <button
-        onClick={confirmEscrow}
-        disabled={disabled || !address}
-        style={{
-          width: "100%",
-          border: "none",
-          borderRadius: 16,
-          padding: "18px 20px",
-          fontSize: 18,
-          fontWeight: 800,
-          color: "white",
-          background:
-            disabled || !address
-              ? "linear-gradient(180deg,#9ca3af,#6b7280)"
-              : "linear-gradient(180deg,#111827,#111827)",
-          boxShadow:
-            "0 16px 40px rgba(17,24,39,.35), inset 0 0 0 1px rgba(255,255,255,.04), inset 0 -6px 24px rgba(255,255,255,.06)",
-        }}
-      >
-        🔒 Підтвердити ескроу • {requestedAmount} BNB
-      </button>
-
-      {/* СТАТУС */}
-      <div style={{ minHeight: 24, marginTop: 12, fontSize: 14, color: "#6b7280" }}>
-        {busy === "connecting" && "З'єднання з MetaMask…"}
-        {busy === "signing" && "Підготовка транзакції…"}
-        {busy === "sending" && "Надсилання у мережу…"}
       </div>
 
-      {/* ПОМИЛКА */}
+      {/* Кнопка підтвердження ескроу */}
+      <button
+        className={`w-full rounded-2xl px-5 py-4 text-white font-semibold transition
+          ${disabled ? "bg-gray-400" : "bg-black hover:opacity-90 active:opacity-80"}
+        `}
+        disabled={disabled}
+        onClick={handleApprove}
+      >
+        {state === "signing" && "Підписання…"}
+        {state === "pending" && "Очікуємо підтвердження…"}
+        {state === "done" && "Готово!"}
+        {state === "idle" && `🔒 Підтвердити ескроу · ${ESCROW_AMOUNT} BNB`}
+      </button>
+
       {error && (
-        <div
-          style={{
-            marginTop: 10,
-            color: "#991b1b",
-            background: "#fee2e2",
-            border: "1px solid #fecaca",
-            borderRadius: 12,
-            padding: "10px 12px",
-            fontSize: 14,
-          }}
-        >
+        <div className="mt-4 rounded-xl bg-rose-50 text-rose-700 p-3 text-sm">
           Помилка: {error}
         </div>
       )}
 
-      {/* Запасний варіант — відкрити в MetaMask-браузері */}
-      {location.search.includes("deep=1") ? null : (
-        <div style={{ marginTop: 18 }}>
-          <button
-            onClick={() => {
-              const url = `metamask://dapp/${location.hostname}${location.pathname}${location.search}`;
-              location.href = url;
-            }}
-            style={{
-              fontSize: 14,
-              border: "none",
-              background: "transparent",
-              textDecoration: "underline",
-              color: "#1f2937",
-            }}
-          >
-            Відкрити у MetaMask-браузері
-          </button>
+      <div className="mt-5">
+        <a
+          href="https://metamask.app.link/dapp/www.buymybehavior.com/escrow/approve"
+          className="underline text-gray-600"
+        >
+          Відкрити у MetaMask-браузері
+        </a>
+      </div>
+
+      {/* Діагностика env (не показувати у проді — за бажанням прибереш) */}
+      {misconfigured && (
+        <div className="mt-6 text-xs text-amber-700 bg-amber-50 p-3 rounded-xl">
+          <div className="font-semibold mb-1">Попередження конфігурації:</div>
+          <div>VITE_ESCROW_WALLET: {ESCROW_ADDRESS || "—"}</div>
+          <div>VITE_ESCROW_AMOUNT: {ESCROW_AMOUNT || "—"}</div>
         </div>
       )}
     </div>
   );
 }
 
-// Типізація для window.ethereum
-declare global {
-  interface Window {
-    ethereum?: {
-      request: (args: { method: string; params?: any[] | Record<string, any> }) => Promise<any>;
-      on?: (ev: string, cb: (...a: any[]) => void) => void;
-      removeListener?: (ev: string, cb: (...a: any[]) => void) => void;
-    };
-  }
-}
