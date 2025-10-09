@@ -2,6 +2,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import EscrowButton from "./EscrowButton";
+
 
 import { confirmCompletionOnChain, getDealOnChain } from "../lib/escrowContract";
 import {
