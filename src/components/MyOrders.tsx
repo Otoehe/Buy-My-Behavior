@@ -22,16 +22,38 @@ import { upsertRating } from "../lib/ratings";
 import { connectWallet, ensureBSC, waitForReturn } from "../lib/providerBridge";
 import { lockFundsMobileFlow } from "../lib/escrowMobile";
 
-// ✅ лише існуючі експорти з утиліти диплінку
-import { isMetaMaskInApp, openInMetaMaskTo } from "../lib/mmDeepLink";
+// ⬇ якщо цього немає у проєкті — ок, воно опційне
 import { writeSupabaseSessionCookie } from "../lib/supabaseSessionBridge";
 
-// ----------------- helpers -----------------
+/* -----------------------------------------
+ * ЛОКАЛЬНІ невеличкі утиліти, щоб не падали імпорти
+ * ----------------------------------------- */
+const isMobileUA = (): boolean =>
+  /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+
+const isMetaMaskInApp = (): boolean =>
+  /MetaMaskMobile/i.test(navigator.userAgent || "");
+
+function openInMetaMaskDapp(nextPath: string, handoff?: { at?: string | null; rt?: string | null; next?: string }) {
+  // домен беремо з ENV або з поточного location
+  const publicUrl =
+    (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) || window.location.origin;
+  const host = publicUrl.replace(/^https?:\/\//i, "").replace(/\/+$/g, "");
+  const base = `https://metamask.app.link/dapp/${host}`;
+
+  let url = `${base}${nextPath.startsWith("/") ? nextPath : `/${nextPath}`}`;
+
+  if (handoff && (handoff.at || handoff.rt || handoff.next)) {
+    const payload = encodeURIComponent(btoa(JSON.stringify(handoff)));
+    url += `#bmbSess=${payload}`;
+  }
+  window.location.href = url;
+}
+
+/* ----------------------------------------- */
+
 const SOUND = new Audio("/notification.wav");
 SOUND.volume = 0.8;
-
-// Локальна перевірка мобільного UA (щоб не тягнути isMobileUA)
-const isMobileUA = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 async function withTimeout<T>(p: Promise<T>, ms = 8000, label = "op"): Promise<T> {
   return (await Promise.race([
@@ -47,21 +69,17 @@ async function ensureProviderReady() {
 }
 
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
-const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== "confirmed";
+const canEditFields = (s: Scenario) =>
+  !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== "confirmed";
 
-/** 0:None/Init, 1:Agreed, 2:Locked, 3:Confirmed — як у смарті */
+/** 0:None/Init, 1:Agreed, 2:Locked, 3:Confirmed — як у контракті */
 function asStatusNum(x: any): number {
   const n = Number((x ?? {}).status);
   return Number.isFinite(n) ? n : -1;
 }
 
-/** Polling стану угоди в ланцюгу */
-async function waitDealStatus(
-  scenarioId: string,
-  target: number,
-  timeoutMs = 120_000,
-  stepMs = 3_000
-) {
+/** Очікуємо поки угода стане в потрібний статус на ланцюгу (polling) */
+async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 120_000, stepMs = 3_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     try {
@@ -74,7 +92,9 @@ async function waitDealStatus(
 }
 
 function StatusStrip({ s }: { s: Scenario }) {
-  const stage = s.status === "confirmed" ? 3 : s.escrow_tx_hash ? 2 : isBothAgreed(s) ? 1 : 0;
+  const stage =
+    s.status === "confirmed" ? 3 : s.escrow_tx_hash ? 2 : isBothAgreed(s) ? 1 : 0;
+
   const Dot = ({ active }: { active: boolean }) => (
     <span
       style={{
@@ -113,7 +133,6 @@ function StatusStrip({ s }: { s: Scenario }) {
   );
 }
 
-// ----------------- компонент -----------------
 export default function MyOrders() {
   const location = useLocation();
 
@@ -154,7 +173,9 @@ export default function MyOrders() {
     if (!s.escrow_tx_hash) return false;
     if (!lockedOnChain[s.id]) return false;
     if (s.is_completed_by_customer) return false;
-    const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || "00:00"}`);
+    const dt = s.execution_time
+      ? new Date(s.execution_time)
+      : new Date(`${s.date}T${s.time || "00:00"}`);
     return !Number.isNaN(dt.getTime()) && new Date() >= dt;
   };
 
@@ -219,68 +240,73 @@ export default function MyOrders() {
 
       const ch = supabase
         .channel("realtime:myorders")
-        .on("postgres_changes", { event: "*", schema: "public", table: "scenarios" }, async (p) => {
-          const ev = p.eventType as "INSERT" | "UPDATE" | "DELETE";
-          const s = (p as any).new as Scenario | undefined;
-          const oldId = (p as any).old?.id as string | undefined;
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "scenarios" },
+          async (p) => {
+            const ev = p.eventType as "INSERT" | "UPDATE" | "DELETE";
+            const s = (p as any).new as Scenario | undefined;
+            const oldId = (p as any).old?.id as string | undefined;
 
-          setList((prev) => {
-            if (ev === "DELETE" && oldId) return prev.filter((x) => x.id !== oldId);
-            if (!s) return prev;
+            setList((prev) => {
+              if (ev === "DELETE" && oldId) return prev.filter((x) => x.id !== oldId);
+              if (!s) return prev;
 
-            if (s.creator_id !== uid) return prev.filter((x) => x.id !== s.id);
+              if (s.creator_id !== uid) return prev.filter((x) => x.id !== s.id);
 
-            const i = prev.findIndex((x) => x.id === s.id);
-            if (ev === "INSERT") {
-              if (i === -1) return [s, ...prev];
-              const cp = [...prev];
-              cp[i] = { ...cp[i], ...s };
-              return cp;
-            }
-            if (ev === "UPDATE") {
-              if (i === -1) return prev;
-              const before = prev[i];
-              const after = { ...before, ...s };
-
-              if (before.status !== "confirmed" && after.status === "confirmed") {
-                (async () => {
-                  try {
-                    SOUND.currentTime = 0;
-                    await SOUND.play();
-                  } catch {}
-                  await pushNotificationManager.showNotification({
-                    title: "🎉 Виконання підтверджено",
-                    body: "Escrow розподілив кошти.",
-                    tag: `confirm-${after.id}`,
-                    requireSound: true,
-                  });
-                })();
-                setToast(true);
+              const i = prev.findIndex((x) => x.id === s.id);
+              if (ev === "INSERT") {
+                if (i === -1) return [s, ...prev];
+                const cp = [...prev];
+                cp[i] = { ...cp[i], ...s };
+                return cp;
               }
+              if (ev === "UPDATE") {
+                if (i === -1) return prev;
+                const before = prev[i];
+                const after = { ...before, ...s };
 
-              const bothAgreed = !!after.is_agreed_by_customer && !!after.is_agreed_by_executor;
-              const needLock = bothAgreed && !after.escrow_tx_hash && after.creator_id === uid;
+                if (before.status !== "confirmed" && after.status === "confirmed") {
+                  (async () => {
+                    try {
+                      SOUND.currentTime = 0;
+                      await SOUND.play();
+                    } catch {}
+                    await pushNotificationManager.showNotification({
+                      title: "🎉 Виконання підтверджено",
+                      body: "Escrow розподілив кошти.",
+                      tag: `confirm-${after.id}`,
+                      requireSound: true,
+                    });
+                  })();
+                  setToast(true);
+                }
 
-              const cp = [...prev];
-              cp[i] = after;
+                const bothAgreed = !!after.is_agreed_by_customer && !!after.is_agreed_by_executor;
+                const needLock =
+                  bothAgreed && !after.escrow_tx_hash && after.creator_id === uid;
 
-              if (after.escrow_tx_hash) refreshLocked(after.id);
+                const cp = [...prev];
+                cp[i] = after;
 
-              if (needLock && !(window as any).__locking) {
-                (window as any).__locking = true;
-                setTimeout(
-                  () => handleLock(after).finally(() => ((window as any).__locking = false)),
-                  0
-                );
+                if (after.escrow_tx_hash) refreshLocked(after.id);
+
+                if (needLock && !(window as any).__locking) {
+                  (window as any).__locking = true;
+                  setTimeout(
+                    () => handleLock(after).finally(() => ((window as any).__locking = false)),
+                    0
+                  );
+                }
+
+                return cp;
               }
+              return prev;
+            });
 
-              return cp;
-            }
-            return prev;
-          });
-
-          setTimeout(() => refreshRated(uid, s ? [s] : []), 0);
-        })
+            setTimeout(() => refreshRated(uid, s ? [s] : []), 0);
+          }
+        )
         .subscribe();
 
       const chRatings = supabase
@@ -410,7 +436,7 @@ export default function MyOrders() {
     }
   };
 
-  // Вхід у MetaMask, якщо ми на мобайлі поза MetaMask
+  // Вхід у MetaMask-браузер через deeplink із handoff сесії
   const handleLockEntry = async (s: Scenario) => {
     if (isMobileUA() && !isMetaMaskInApp()) {
       const { data } = await supabase.auth.getSession();
@@ -418,14 +444,14 @@ export default function MyOrders() {
       const rt = data?.session?.refresh_token ?? null;
 
       try {
-        writeSupabaseSessionCookie(data?.session ?? null, 300);
+        writeSupabaseSessionCookie?.(data?.session ?? null, 300);
       } catch {}
 
       const next = `/my-orders?scenario=${encodeURIComponent(s.id)}`;
-      openInMetaMaskTo(next, { at, rt, next });
+      openInMetaMaskDapp(next, { at, rt, next });
       return;
     }
-    // вже в MetaMask або десктоп — одразу ончейн
+    // вже в MetaMask або десктоп: одразу ончейн-флоу
     void handleLock(s);
   };
 
@@ -544,7 +570,7 @@ export default function MyOrders() {
     [permissionStatus, requestPermission, rt.isListening, rt.method]
   );
 
-  // Автостарт lock у MetaMask, якщо прийшли з диплінку з ?scenario=...
+  // Авто-ран у MetaMask-браузері, якщо прийшли через deeplink із ?scenario=...
   const autoRunOnceRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isMetaMaskInApp()) return;
