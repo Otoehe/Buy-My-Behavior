@@ -17,6 +17,9 @@ import SWUpdateToast        from "./components/SWUpdateToast";
 import BmbModalHost         from "./components/BmbModalHost";
 import { isMetaMaskInApp }  from "./lib/isMetaMaskBrowser";
 
+// ⬇ додано: сторож редиректів під час ескроу
+import RouterGuard from "./RouterGuard";
+
 // lazy-екрани
 const MapView           = lazy(() => import("./components/MapView"));
 const MyOrders          = lazy(() => import("./components/MyOrders"));
@@ -26,6 +29,8 @@ const ScenarioForm      = lazy(() => import("./components/ScenarioForm"));
 const ScenarioLocation  = lazy(() => import("./components/ScenarioLocation"));
 const BmbModalsDemo     = lazy(() => import("./components/BmbModalsDemo"));
 const EscrowHandoff     = lazy(() => import("./components/EscrowHandoff"));
+// ⬇ додано: сторінка підтвердження ескроу з кнопкою
+const EscrowConfirm     = lazy(() => import("./pages/EscrowConfirm"));
 
 /** Гейт для приватних маршрутів */
 function RequireAuth({
@@ -93,8 +98,13 @@ export default function App() {
 
   if (user === undefined) return null;
 
-  // На цих екранах ховаємо глобальний нав/А2HS
-  const HIDE_UI_ROUTES = new Set<string>(["/map/select", "/escrow/approve"]);
+  // На цих екранах ховаємо глобальний нав/A2HS
+  const HIDE_UI_ROUTES = new Set<string>([
+    "/map/select",
+    "/escrow/approve",
+    // ⬇ додано: на екрані підтвердження ескроу також ховаємо верхній нав
+    "/escrow/confirm",
+  ]);
   const pathname = location.pathname;
   const hideNavAndA2HS = HIDE_UI_ROUTES.has(pathname);
   const showGlobalA2HS = !hideNavAndA2HS && pathname !== "/profile";
@@ -107,6 +117,9 @@ export default function App() {
       {!hideNavAndA2HS && <NavigationBar />}
       <BmbModalHost />
 
+      {/* ⬇ додано: глобальний сторож, який під час lockIntent повертає на /escrow/confirm */}
+      <RouterGuard />
+
       <Suspense fallback={null}>
         <Routes>
           <Route path="/" element={<HomeGate />} />
@@ -114,6 +127,9 @@ export default function App() {
           {/* Публічні */}
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/escrow/approve" element={<EscrowHandoff />} />
+          {/* ⬇ додано: маршрут екрана підтвердження з кнопкою */}
+          <Route path="/escrow/confirm" element={<EscrowConfirm />} />
+
           {/* /register прибрали — редіректимо на escrow */}
           <Route
             path="/register"

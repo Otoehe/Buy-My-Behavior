@@ -23,12 +23,10 @@ import { upsertRating } from "../lib/ratings";
 import { connectWallet, ensureBSC, waitForReturn } from "../lib/providerBridge";
 import { lockFundsMobileFlow } from "../lib/escrowMobile";
 
-// ⬇ якщо цього немає у проєкті — ок, воно опційне
+// (опційно) збереження сесії для MetaMask deeplink
 import { writeSupabaseSessionCookie } from "../lib/supabaseSessionBridge";
 
-/* -----------------------------------------
- * ЛОКАЛЬНІ невеличкі утиліти, щоб не падали імпорти
- * ----------------------------------------- */
+/* ----------------------------------------- */
 const isMobileUA = (): boolean =>
   /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
 
@@ -39,7 +37,6 @@ function openInMetaMaskDapp(
   nextPath: string,
   handoff?: { at?: string | null; rt?: string | null; next?: string }
 ) {
-  // домен беремо з ENV або з поточного location
   const publicUrl =
     (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ||
     window.location.origin;
@@ -47,29 +44,22 @@ function openInMetaMaskDapp(
   const base = `https://metamask.app.link/dapp/${host}`;
 
   let url = `${base}${nextPath.startsWith("/") ? nextPath : `/${nextPath}`}`;
-
   if (handoff && (handoff.at || handoff.rt || handoff.next)) {
     const payload = encodeURIComponent(btoa(JSON.stringify(handoff)));
     url += `#bmbSess=${payload}`;
   }
+  // ВАЖЛИВО: відкриваємо в ТІЙ САМІЙ вкладці, без "_blank"
   window.location.href = url;
 }
-
 /* ----------------------------------------- */
 
 const SOUND = new Audio("/notification.wav");
 SOUND.volume = 0.8;
 
-async function withTimeout<T>(
-  p: Promise<T>,
-  ms = 8000,
-  label = "op"
-): Promise<T> {
+async function withTimeout<T>(p: Promise<T>, ms = 8000, label = "op"): Promise<T> {
   return (await Promise.race([
     p,
-    new Promise<T>((_, rej) =>
-      setTimeout(() => rej(new Error(`Timeout:${label}`)), ms)
-    ) as any,
+    new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Timeout:${label}`)), ms)) as any,
   ])) as T;
 }
 
@@ -79,8 +69,7 @@ async function ensureProviderReady() {
   return provider;
 }
 
-const isBothAgreed = (s: Scenario) =>
-  !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
+const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) =>
   !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== "confirmed";
 
@@ -90,13 +79,8 @@ function asStatusNum(x: any): number {
   return Number.isFinite(n) ? n : -1;
 }
 
-/** Очікуємо поки угода стане в потрібний статус на ланцюгу (polling) */
-async function waitDealStatus(
-  scenarioId: string,
-  target: number,
-  timeoutMs = 120_000,
-  stepMs = 3_000
-) {
+/** очікуємо цільовий статус у ланцюгу */
+async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 120_000, stepMs = 3_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     try {
@@ -155,23 +139,16 @@ export default function MyOrders() {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
 
-  /** ГАРД: якщо ми в процесі бронювання — тримаємо користувача на /escrow/confirm */
+  /** ГАРД: під час бронювання завжди тримаємо користувача на /escrow/confirm */
   useEffect(() => {
     if (sessionStorage.getItem("bmb.lockIntent") === "1") {
-      const sid =
-        sessionStorage.getItem("bmb.sid") || sp.get("sid") || "";
-      const amt =
-        sessionStorage.getItem("bmb.amt") || sp.get("amt") || "";
-      if (sid && amt) {
-        navigate(
-          `/escrow/confirm?sid=${encodeURIComponent(
-            sid
-          )}&amt=${encodeURIComponent(amt)}`,
-          { replace: true }
-        );
+      const sid = sessionStorage.getItem("bmb.sid") || sp.get("sid") || "";
+      const amt = sessionStorage.getItem("bmb.amt") || sp.get("amt") || "";
+      if (sid && amt && location.pathname !== "/escrow/confirm") {
+        navigate(`/escrow/confirm?sid=${encodeURIComponent(sid)}&amt=${encodeURIComponent(amt)}`, { replace: true });
       }
     }
-  }, [navigate, sp]);
+  }, [navigate, sp, location.pathname]);
 
   const [userId, setUserId] = useState("");
   const [list, setList] = useState<Scenario[]>([]);
@@ -179,19 +156,12 @@ export default function MyOrders() {
   const [confirmBusy, setConfirmBusy] = useState<Record<string, boolean>>({});
   const [lockBusy, setLockBusy] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState(false);
-  const [openDisputes, setOpenDisputes] = useState<
-    Record<string, DisputeRow | null>
-  >({});
+  const [openDisputes, setOpenDisputes] = useState<Record<string, DisputeRow | null>>({});
   const [ratedOrders, setRatedOrders] = useState<Set<string>>(new Set());
-  const [lockedOnChain, setLockedOnChain] = useState<Record<string, boolean>>(
-    {}
-  );
+  const [lockedOnChain, setLockedOnChain] = useState<Record<string, boolean>>({});
 
   const [rateOpen, setRateOpen] = useState(false);
-  const [rateFor, setRateFor] = useState<{
-    scenarioId: string;
-    counterpartyId: string;
-  } | null>(null);
+  const [rateFor, setRateFor] = useState<{ scenarioId: string; counterpartyId: string } | null>(null);
   const [rateScore, setRateScore] = useState(10);
   const [rateComment, setRateComment] = useState("");
   const [rateBusy, setRateBusy] = useState(false);
@@ -203,10 +173,8 @@ export default function MyOrders() {
     setList((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
 
   const hasCoords = (s: Scenario) =>
-    typeof s.latitude === "number" &&
-    Number.isFinite(s.latitude) &&
-    typeof s.longitude === "number" &&
-    Number.isFinite(s.longitude);
+    typeof s.latitude === "number" && Number.isFinite(s.latitude) &&
+    typeof s.longitude === "number" && Number.isFinite(s.longitude);
 
   const canAgree = (s: Scenario) =>
     !s.escrow_tx_hash && s.status !== "confirmed" && !s.is_agreed_by_customer;
@@ -215,9 +183,7 @@ export default function MyOrders() {
     if (!s.escrow_tx_hash) return false;
     if (!lockedOnChain[s.id]) return false;
     if (s.is_completed_by_customer) return false;
-    const dt = s.execution_time
-      ? new Date(s.execution_time)
-      : new Date(`${s.date}T${s.time || "00:00"}`);
+    const dt = s.execution_time ? new Date(s.execution_time) : new Date(`${s.date}T${s.time || "00:00"}`);
     return !Number.isNaN(dt.getTime()) && new Date() >= dt;
   };
 
@@ -238,10 +204,7 @@ export default function MyOrders() {
 
   const loadOpenDispute = useCallback(async (scenarioId: string) => {
     const d = await getLatestDisputeByScenario(scenarioId);
-    setOpenDisputes((prev) => ({
-      ...prev,
-      [scenarioId]: d && d.status === "open" ? d : null,
-    }));
+    setOpenDisputes((prev) => ({ ...prev, [scenarioId]: d && d.status === "open" ? d : null }));
   }, []);
 
   const load = useCallback(
@@ -252,9 +215,7 @@ export default function MyOrders() {
         .eq("creator_id", uid)
         .order("created_at", { ascending: false });
       if (error) console.error(error);
-      const items = ((data || []) as Scenario[]).filter(
-        (s) => s.creator_id === uid
-      );
+      const items = ((data || []) as Scenario[]).filter((s) => s.creator_id === uid);
       setList(items);
       items.forEach((s) => {
         if (s.escrow_tx_hash) refreshLocked(s.id);
@@ -315,10 +276,7 @@ export default function MyOrders() {
 
                 if (before.status !== "confirmed" && after.status === "confirmed") {
                   (async () => {
-                    try {
-                      SOUND.currentTime = 0;
-                      await SOUND.play();
-                    } catch {}
+                    try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
                     await pushNotificationManager.showNotification({
                       title: "🎉 Виконання підтверджено",
                       body: "Escrow розподілив кошти.",
@@ -329,10 +287,8 @@ export default function MyOrders() {
                   setToast(true);
                 }
 
-                const bothAgreed =
-                  !!after.is_agreed_by_customer && !!after.is_agreed_by_executor;
-                const needLock =
-                  bothAgreed && !after.escrow_tx_hash && after.creator_id === uid;
+                const bothAgreed = !!after.is_agreed_by_customer && !!after.is_agreed_by_executor;
+                const needLock = bothAgreed && !after.escrow_tx_hash && after.creator_id === uid;
 
                 const cp = [...prev];
                 cp[i] = after;
@@ -341,10 +297,7 @@ export default function MyOrders() {
 
                 if (needLock && !(window as any).__locking) {
                   (window as any).__locking = true;
-                  setTimeout(
-                    () => handleLock(after).finally(() => ((window as any).__locking = false)),
-                    0
-                  );
+                  setTimeout(() => handleLock(after).finally(() => ((window as any).__locking = false)), 0);
                 }
 
                 return cp;
@@ -369,12 +322,8 @@ export default function MyOrders() {
         .subscribe();
 
       return () => {
-        try {
-          supabase.removeChannel(ch);
-        } catch {}
-        try {
-          supabase.removeChannel(chRatings);
-        } catch {}
+        try { supabase.removeChannel(ch); } catch {}
+        try { supabase.removeChannel(chRatings); } catch {}
       };
     })();
   }, [load, list, refreshRated, refreshLocked]);
@@ -382,9 +331,7 @@ export default function MyOrders() {
   useEffect(() => {
     if (!userId) return;
     refreshRated(userId, list);
-    list.forEach((s) => {
-      if (s?.id) loadOpenDispute(s.id);
-    });
+    list.forEach((s) => { if (s?.id) loadOpenDispute(s.id); });
   }, [userId, list, loadOpenDispute, refreshRated]);
 
   const handleAgree = async (s: Scenario) => {
@@ -410,17 +357,12 @@ export default function MyOrders() {
     }
   };
 
-  /** Резолвер гаманця виконавця */
-  async function resolveWallets(
-    s: Scenario
-  ): Promise<{ executor: string; referrer: string }> {
+  /** резолвер гаманця виконавця */
+  async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = "0x0000000000000000000000000000000000000000";
 
     let executor =
-      (s as any).executor_wallet ||
-      (s as any).executorAddress ||
-      (s as any).executor ||
-      null;
+      (s as any).executor_wallet || (s as any).executorAddress || (s as any).executor || null;
 
     if (!executor && (s as any).executor_id) {
       const execId = (s as any).executor_id as string;
@@ -469,14 +411,11 @@ export default function MyOrders() {
 
       const ok = await waitDealStatus(s.id, 2, 120_000, 3_000);
       if (!ok) {
-        alert(
-          "Транзакція ще не зафіксована як Locked. Спробуйте оновити сторінку трохи пізніше."
-        );
+        alert("Транзакція ще не зафіксована як Locked. Спробуйте оновити сторінку пізніше.");
         return;
       }
 
-      await supabase
-        .from("scenarios")
+      await supabase.from("scenarios")
         .update({ escrow_tx_hash: txHash, status: "agreed" as Status })
         .eq("id", s.id);
 
@@ -489,22 +428,21 @@ export default function MyOrders() {
     }
   };
 
-  // Вхід у MetaMask-браузер через deeplink із handoff сесії
+  /** Вхід у MetaMask через deeplink — ТЕПЕР одразу на /escrow/confirm */
   const handleLockEntry = async (s: Scenario) => {
     if (isMobileUA() && !isMetaMaskInApp()) {
       const { data } = await supabase.auth.getSession();
       const at = data?.session?.access_token ?? null;
       const rt = data?.session?.refresh_token ?? null;
 
-      try {
-        writeSupabaseSessionCookie?.(data?.session ?? null, 300);
-      } catch {}
+      try { writeSupabaseSessionCookie?.(data?.session ?? null, 300); } catch {}
 
-      const next = `/my-orders?scenario=${encodeURIComponent(s.id)}`;
+      const amt = String(s.donation_amount_usdt ?? "");
+      const next = `/escrow/confirm?sid=${encodeURIComponent(s.id)}&amt=${encodeURIComponent(amt)}`;
       openInMetaMaskDapp(next, { at, rt, next });
       return;
     }
-    // вже в MetaMask або десктоп: одразу ончейн-флоу
+    // вже у MetaMask або десктоп: одразу запускаємо ланцюг
     void handleLock(s);
   };
 
@@ -513,14 +451,12 @@ export default function MyOrders() {
     try {
       const deal = await getDealOnChain(s.id);
       if (asStatusNum(deal) !== 2) {
-        alert(
-          "Escrow ще не у статусі Locked. Дочекайтесь підтвердження блокування коштів замовником."
-        );
+        alert("Escrow ще не Locked. Зачекайте підтвердження блокування коштів.");
         await refreshLocked(s.id);
         return;
       }
     } catch {
-      alert("Не вдалося прочитати стан escrow. Перевірте підключення до мережі BSC.");
+      alert("Не вдалося прочитати стан escrow. Перевірте мережу BSC.");
       return;
     }
 
@@ -530,15 +466,9 @@ export default function MyOrders() {
     try {
       const eth = await ensureProviderReady();
 
-      try {
-        await withTimeout(eth.request({ method: "eth_chainId" }), 4000, "poke4");
-      } catch {}
-      try {
-        await withTimeout(eth.request({ method: "eth_accounts" }), 4000, "poke5");
-      } catch {}
-      try {
-        await waitForReturn(15000);
-      } catch {}
+      try { await withTimeout(eth.request({ method: "eth_chainId" }), 4000, "poke4"); } catch {}
+      try { await withTimeout(eth.request({ method: "eth_accounts" }), 4000, "poke5"); } catch {}
+      try { await waitForReturn(15000); } catch {}
 
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
@@ -590,9 +520,7 @@ export default function MyOrders() {
       });
       setRateOpen(false);
       setRatedOrders((prev) => new Set([...Array.from(prev), rateFor.scenarioId]));
-      window.dispatchEvent(
-        new CustomEvent("ratings:updated", { detail: { userId: rateFor.counterpartyId } })
-      );
+      window.dispatchEvent(new CustomEvent("ratings:updated", { detail: { userId: rateFor.counterpartyId } }));
       alert("Рейтинг збережено ✅");
     } catch (e: any) {
       alert(e?.message ?? "Помилка під час збереження рейтингу");
@@ -623,21 +551,19 @@ export default function MyOrders() {
     [permissionStatus, requestPermission, rt.isListening, rt.method]
   );
 
-  // Авто-ран у MetaMask-браузері, якщо прийшли через deeplink із ?scenario=...
+  // авто-ран у MetaMask in-app, якщо прийшли з ?scenario=...
   const autoRunOnceRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isMetaMaskInApp()) return;
-    const sp = new URLSearchParams(location.search);
-    const scenarioId = sp.get("scenario");
+    const spx = new URLSearchParams(location.search);
+    const scenarioId = spx.get("scenario");
     if (!scenarioId) return;
     if (autoRunOnceRef.current === scenarioId) return;
 
     const s = list.find((x) => x.id === scenarioId);
     if (s) {
       autoRunOnceRef.current = scenarioId;
-      setTimeout(() => {
-        void handleLock(s);
-      }, 450);
+      setTimeout(() => { void handleLock(s); }, 450);
     }
   }, [location.search, list]);
 
@@ -663,9 +589,7 @@ export default function MyOrders() {
             <ScenarioCard
               role="customer"
               s={s}
-              onChangeDesc={(v) => {
-                if (fieldsEditable) setLocal(s.id, { description: v });
-              }}
+              onChangeDesc={(v) => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async (v) => {
                 if (!fieldsEditable) return;
                 await supabase
@@ -678,9 +602,7 @@ export default function MyOrders() {
                   })
                   .eq("id", s.id);
               }}
-              onChangeAmount={(v) => {
-                if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v });
-              }}
+              onChangeAmount={(v) => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
               onCommitAmount={async (v) => {
                 if (!fieldsEditable) return;
                 if (v !== null && (!Number.isFinite(v) || v <= 0)) {
@@ -704,24 +626,16 @@ export default function MyOrders() {
               onDispute={() => handleDispute(s)}
               onOpenLocation={() => {
                 if (hasCoords(s)) {
-                  window.open(
-                    `https://www.google.com/maps?q=${s.latitude},${s.longitude}`,
-                    "_blank"
-                  );
+                  window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, "_blank");
                 } else {
-                  alert(
-                    "Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію."
-                  );
+                  alert("Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію.");
                 }
               }}
               canAgree={canAgree(s)}
               canLock={bothAgreed && !s.escrow_tx_hash}
               canConfirm={canConfirm(s)}
               canDispute={
-                s.status !== "confirmed" &&
-                !!s.escrow_tx_hash &&
-                !openDisputes[s.id] &&
-                userId === s.creator_id
+                s.status !== "confirmed" && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id
               }
               hasCoords={true}
               isRated={rated}
@@ -755,11 +669,7 @@ export default function MyOrders() {
         );
       })}
 
-      <CelebrationToast
-        open={toast}
-        variant="customer"
-        onClose={() => setToast(false)}
-      />
+      <CelebrationToast open={toast} variant="customer" onClose={() => setToast(false)} />
 
       <RateModal
         open={rateOpen}

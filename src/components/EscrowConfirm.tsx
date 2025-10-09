@@ -16,12 +16,12 @@ export default function EscrowConfirm() {
   const [scenarioId, setScenarioId] = useState("");
   const [amountStr, setAmountStr] = useState("");
 
-  // зафіксувати намір бронювання (важливо для гардa на /my-orders)
+  // маркер наміру бронювання (для гардa)
   useEffect(() => {
     sessionStorage.setItem("bmb.lockIntent", "1");
   }, []);
 
-  // не губимо sid/amt між переходами
+  // зберігати sid/amt між переходами
   useEffect(() => {
     const sid = sidUrl || sessionStorage.getItem("bmb.sid") || "";
     const amt = amtUrl || sessionStorage.getItem("bmb.amt") || "";
@@ -43,29 +43,27 @@ export default function EscrowConfirm() {
     setErr(null);
     setBusy(true);
     try {
-      // Якщо відкрито НЕ у MetaMask — відкриваємо ту ж сторінку у MetaMask
+      // Якщо сторінка НЕ в MetaMask — відкриваємо цю ж сторінку в MetaMask in-app browser
       if (!(window as any).ethereum) {
         const base = `https://metamask.app.link/dapp/${location.host}/escrow/confirm`;
         const url  = `${base}?sid=${encodeURIComponent(scenarioId)}&amt=${encodeURIComponent(amountStr)}`;
-        location.href = url;
+        location.href = url; // той самий таб
         return;
       }
 
-      const provider = new ethers.providers.Web3Provider((window as any).ethereum, "any");
-      await provider.send("eth_requestAccounts", []);
-      // ✅ ensureBSC на EIP-1193-провайдері
+      const web3 = new ethers.providers.Web3Provider((window as any).ethereum, "any");
+      await web3.send("eth_requestAccounts", []);
+      // ensureBSC — саме на EIP-1193 провайдері
       await ensureBSC((window as any).ethereum);
 
       if (!scenarioId || !amount) throw new Error("Невірні параметри сценарію або суми.");
 
-      await approveIfNeeded(provider, amount);
-      await lockFunds(provider, { scenarioId, amount });
+      await approveIfNeeded(web3, amount);
+      await lockFunds(web3, { scenarioId, amount });
 
-      try {
-        await supabase.from("escrow_events").insert({ scenario_id: scenarioId, kind: "LOCKED" });
-      } catch {}
+      try { await supabase.from("escrow_events").insert({ scenario_id: scenarioId, kind: "LOCKED" }); } catch {}
 
-      // ✅ очистити намір і перейти на /my-orders
+      // очистити намір і повернути на Мої замовлення
       sessionStorage.removeItem("bmb.lockIntent");
       navigate(`/my-orders?sid=${encodeURIComponent(scenarioId)}&locked=1`, { replace: true });
     } catch (e: any) {
@@ -78,7 +76,7 @@ export default function EscrowConfirm() {
   return (
     <div className="max-w-screen-sm mx-auto px-4 py-8">
       <h1 className="text-3xl font-extrabold mb-2">Підтвердження ескроу</h1>
-      <p className="text-slate-600 mb-4">Після підтвердження в MetaMask повернемось на “Мої замовлення”.</p>
+      <p className="text-slate-600 mb-4">Після підтвердження у MetaMask повернемось на “Мої замовлення”.</p>
 
       <div className="rounded-xl border border-slate-200 p-4 mb-4">
         <div className="text-sm text-slate-500">Сценарій</div>
@@ -92,7 +90,7 @@ export default function EscrowConfirm() {
         disabled={busy}
         className="w-full rounded-2xl px-5 py-4 bg-black text-white text-lg"
       >
-        {busy ? "Підтвердження…" : `Підтвердити бронювання • ${amountStr || "—"} USDT`}
+        {busy ? "Підтвердження…" : `Підтвердити ескроу • ${amountStr || "—"} USDT`}
       </button>
 
       {err && <p className="text-red-600 mt-3">{err}</p>}
