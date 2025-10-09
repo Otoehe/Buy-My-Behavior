@@ -17,7 +17,7 @@ import NetworkToast         from './components/NetworkToast';
 import SWUpdateToast        from './components/SWUpdateToast';
 import BmbModalHost         from './components/BmbModalHost';
 
-// Ліниві імпорти сторінок
+// Ліниві імпорти
 const MapView           = lazy(() => import('./components/MapView'));
 const MyOrders          = lazy(() => import('./components/MyOrders'));
 const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
@@ -25,11 +25,8 @@ const Manifest          = lazy(() => import('./components/Manifest'));
 const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
 const ScenarioLocation  = lazy(() => import('./components/ScenarioLocation'));
 const BmbModalsDemo     = lazy(() => import('./components/BmbModalsDemo'));
-
-// handoff-и
-const AuthHandoff       = lazy(() => import('./components/AuthHandoff'));
-// ⚠️ ЗАЛИШИТИ ЛИШЕ ОДНЕ ОГОЛОШЕННЯ EscrowHandoff:
-const EscrowHandoff     = lazy(() => import('./components/EscrowHandoff'));
+const AuthHandoff       = lazy(() => import('./components/AuthHandoff'));     // якщо використовуєш
+const EscrowHandoff     = lazy(() => import('./components/EscrowHandoff'));   // ← наш новий екран
 
 function RequireAuth({
   user,
@@ -86,8 +83,8 @@ export default function App() {
 
   if (user === undefined) return null;
 
-  // Де ховаємо навбар та A2HS (чисті handoff-сторінки)
-  const HIDE_UI_ROUTES = new Set<string>(['/map/select', '/escrow/approve']);
+  // Режим “чиста карта”: не показуємо навбар та A2HS
+  const HIDE_UI_ROUTES = new Set<string>(['/map/select']);
   const pathname = location.pathname;
   const hideNavAndA2HS = HIDE_UI_ROUTES.has(pathname);
   const showGlobalA2HS = !hideNavAndA2HS && pathname !== '/profile';
@@ -107,8 +104,7 @@ export default function App() {
           {/* Публічні */}
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/auth/handoff" element={<AuthHandoff />} />
-          {/* ✅ новий публічний маршрут для підтвердження escrow у MetaMask */}
-          <Route path="/escrow/approve" element={<EscrowHandoff />} />
+          <Route path="/escrow/approve" element={<EscrowHandoff />} /> {/* ← тут */}
 
           <Route path="/map"          element={<MapView />} />
           <Route path="/map/select"   element={<ScenarioLocation />} />
@@ -116,7 +112,7 @@ export default function App() {
           <Route path="/manifest"     element={<Manifest />} />
           <Route path="/modals"       element={<BmbModalsDemo />} />
 
-          {/* Реєстрація / Вхід (зараз у тебе це сторінка з MetaMask-кнопкою) */}
+          {/* Реєстрація */}
           <Route
             path="/register"
             element={
