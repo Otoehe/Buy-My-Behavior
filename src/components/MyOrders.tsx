@@ -1,4 +1,19 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+// на самому початку тіла компонента (після імпортів)
+import { useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+
+// ...всередині MyOrders()
+const navigate = useNavigate();
+const [sp] = useSearchParams();
+useEffect(() => {
+  if (sessionStorage.getItem("bmb.lockIntent") === "1") {
+    const sid = sessionStorage.getItem("bmb.sid") || sp.get("sid") || "";
+    const amt = sessionStorage.getItem("bmb.amt") || sp.get("amt") || "";
+    if (sid && amt) navigate(`/escrow/confirm?sid=${encodeURIComponent(sid)}&amt=${encodeURIComponent(amt)}`, { replace: true });
+  }
+}, [navigate, sp]);
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
