@@ -1,157 +1,149 @@
-// src/components/EscrowHandoff.tsx
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { supabase } from "../lib/supabase";
+import React, { useCallback, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { isMetaMaskInApp } from "../lib/isMetaMaskBrowser";
 
-type EthereumProvider = {
-  request: (args: { method: string; params?: any[] }) => Promise<any>;
+type EthProvider = {
   isMetaMask?: boolean;
+  request: (args: { method: string; params?: any[] }) => Promise<any>;
 };
+
 declare global {
   interface Window {
-    ethereum?: EthereumProvider;
+    ethereum?: EthProvider;
+    location: Location;
   }
 }
 
-function useQuery() {
-  const { search } = useLocation();
-  return useMemo(() => new URLSearchParams(search), [search]);
-}
-
 export default function EscrowHandoff() {
-  const q = useQuery();
+  const [search] = useSearchParams();
   const navigate = useNavigate();
 
+  const next = useMemo(
+    () => decodeURIComponent(search.get("next") || "/my-orders"),
+    [search]
+  );
+
   const [address, setAddress] = useState<string | null>(null);
-  const [status, setStatus] = useState<"idle" | "connecting" | "signing" | "ready" | "error">("idle");
+  const [stage, setStage] = useState<"idle" | "signing" | "ready" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
-  const nextUrl = q.get("next") || "/my-orders";
+  const connectAndSign = useCallback(async () => {
+    setError(null);
+    const provider = window.ethereum;
 
-  const connect = useCallback(async () => {
     try {
-      setError(null);
-      setStatus("connecting");
-
-      const provider = window.ethereum;
-      if (!provider) {
-        throw new Error("MetaMask не знайдено. Відкрий додаток MetaMask і зайди на цю сторінку.");
+      if (!provider || !provider.isMetaMask) {
+        throw new Error("Відкрий у MetaMask-браузері або встанови MetaMask.");
       }
 
+      // 1) Request accounts
       const accounts: string[] = await provider.request({
         method: "eth_requestAccounts",
       });
-      const wallet = accounts?.[0];
-      if (!wallet) throw new Error("Не вдалося отримати адресу гаманця.");
+      const addr = (accounts && accounts[0]) || "";
+      if (!addr) throw new Error("Адресу гаманця не отримано.");
 
-      setAddress(wallet);
+      setStage("signing");
 
-      // Створюємо/оновлюємо профіль (унікальність по wallet_address)
-      const { error: upsertErr } = await supabase
-        .from("profiles")
-        .upsert({ wallet_address: wallet }, { onConflict: "wallet_address", ignoreDuplicates: false });
+      // 2) Sign a simple message (без Buffer)
+      const msg =
+        `BuyMyBehavior Sign-In\n` +
+        `Wallet: ${addr}\n` +
+        `Time: ${Date.now()}`;
 
-      // Якщо унікальний ключ — нічого страшного (23505)
-      if (upsertErr && upsertErr.code !== "23505") {
-        throw upsertErr;
-      }
+      await provider.request({
+        method: "personal_sign",
+        params: [msg, addr],
+      });
 
-      // Підпис (plain string, без Buffer)
-      setStatus("signing");
-      const msg = `BuyMyBehavior Sign-In\nWallet: ${wallet}\nTime: ${Date.now()}`;
-
-      // деякі провайдери хочуть [message, address], інші — [address, message]
-      let signature: string | undefined;
-      try {
-        signature = await provider.request({
-          method: "personal_sign",
-          params: [msg, wallet],
-        });
-      } catch {
-        signature = await provider.request({
-          method: "personal_sign",
-          params: [wallet, msg],
-        });
-      }
-
-      if (!signature) {
-        throw new Error("Користувач скасував підпис або сталася помилка підпису.");
-      }
-
-      setStatus("ready");
-
-      // у нас немає e-mail логіну через Supabase; після успіху просто ведемо на next
-      navigate(nextUrl, { replace: true });
+      setAddress(addr);
+      setStage("ready");
     } catch (e: any) {
-      console.error(e);
-      setStatus("error");
-      setError(e?.message || "Невідома помилка");
+      setStage("error");
+      setError(e?.message || "Помилка під час входу через MetaMask.");
     }
-  }, [navigate, nextUrl]);
+  }, []);
 
   const approveEscrow = useCallback(async () => {
-    try {
-      setError(null);
-      // Тут зробиш виклик свого смарт-контракту ескроу/BNB — поки заглушка:
-      alert("Ескроу підтверджено (заглушка). Тут виклик контракту.");
-      navigate(nextUrl, { replace: true });
-    } catch (e: any) {
-      console.error(e);
-      setError(e?.message || "Помилка підтвердження ескроу");
-    }
-  }, [navigate, nextUrl]);
+    // Тут можемо викликати ваш контракт/flow,
+    // але щоби не чіпати інші файли, просто переводжу на next.
+    navigate(next, { replace: true });
+  }, [navigate, next]);
 
-  const mmDeepLink = useMemo(() => {
-    // відкриє поточну сторінку в мобільному MM
-    const url = typeof window !== "undefined" ? window.location.href : "https://www.buymybehavior.com/escrow/approve";
-    return `https://metamask.app.link/dapp/${url.replace(/^https?:\/\//, "")}`;
-  }, []);
+  const openInMetaMask = useCallback(() => {
+    // Відкрити поточний шлях у MetaMask-браузері
+    const host = window.location.host;
+    const path = `/escrow/approve?next=${encodeURIComponent(next)}`;
+    // схема для мобільного MetaMask
+    window.location.href = `metamask://dapp/${host}${path}`;
+  }, [next]);
 
-  useEffect(() => {
-    // у вбудованому браузері MetaMask пробуємо одразу конектитись
-    if (isMetaMaskInApp()) {
-      void connect();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const inMetaMask = isMetaMaskInApp();
 
   return (
-    <main className="p-4 max-w-screen-sm mx-auto">
-      <h1 className="text-3xl font-bold mb-4">Вхід через MetaMask</h1>
+    <div style={{ padding: 16, maxWidth: 720, margin: "0 auto" }}>
+      {/* локальні стилі кнопок — без окремого css файлу */}
+      <style>{`
+        .mm-wrap { display:flex; flex-direction:column; gap:12px; }
+        .mm-btn {
+          display:flex; align-items:center; justify-content:center;
+          width:100%;
+          padding:14px 18px;
+          border-radius:16px;
+          font-size:16px; font-weight:600;
+          border:1px solid rgba(0,0,0,.12);
+          background:#fff; color:#111;
+          box-shadow: 0 2px 8px rgba(0,0,0,.06);
+          touch-action: manipulation;
+        }
+        .mm-btn:active { transform: translateY(1px); }
+        .mm-btn:disabled { opacity:.5; transform:none; }
+        .mm-btn--primary { background:#111; color:#fff; border-color:#111; }
+        .mm-btn--lock::before {
+          content:"🔒"; margin-right:8px; font-size:18px; line-height:1;
+        }
+        .mm-hint { font-size:14px; opacity:.7; margin:10px 0 4px; }
+        .mm-err { margin-top:10px; color:#b00020; font-size:14px; }
+      `}</style>
 
-      <p className="mb-4">
-        Якщо запит не з'явився — натисни кнопку нижче. Після підпису автоматично перейдемо на <code>{nextUrl}</code>.
+      <h1 style={{ fontSize: 28, fontWeight: 800, margin: "4px 0 12px" }}>
+        Вхід через MetaMask
+      </h1>
+      <p className="mm-hint">
+        Якщо запит не з'явився — натисни кнопку нижче.
       </p>
 
-      <div className="flex gap-2 flex-wrap mb-4">
+      <div className="mm-wrap">
         <button
-          className="px-3 py-2 rounded bg-black text-white"
-          disabled={status === "connecting" || status === "signing"}
-          onClick={connect}
+          type="button"
+          className="mm-btn"
+          onClick={connectAndSign}
+          disabled={stage === "signing"}
         >
           🦊 Увійти через MetaMask
         </button>
 
         <button
-          className="px-3 py-2 rounded border"
-          disabled={!address || status === "signing"}
+          type="button"
+          className="mm-btn mm-btn--primary mm-btn--lock"
           onClick={approveEscrow}
-          title={!address ? "Спочатку під'єднай MetaMask" : "Підтвердити ескроу"}
+          disabled={!address || stage === "signing"}
+          title={!address ? "Спочатку увійди через MetaMask" : "Підтвердити ескроу"}
         >
-          🔒 Підтвердити ескроу
+          Підтвердити ескроу
         </button>
 
-        <a className="px-3 py-2 rounded border" href={mmDeepLink}>
-          Відкрити у MetaMask-браузері
-        </a>
+        {!inMetaMask && (
+          <button type="button" className="mm-btn" onClick={openInMetaMask}>
+            Відкрити у MetaMask-браузері
+          </button>
+        )}
       </div>
 
-      <div className="text-sm text-gray-600 space-y-1">
-        <div>Статус: {status}</div>
-        {address && <div>Адреса: {address}</div>}
-        {error && <div className="text-red-600">Помилка: {error}</div>}
-      </div>
-    </main>
+      {stage === "signing" && (
+        <p className="mm-hint">Підписуємо запит у MetaMask…</p>
+      )}
+      {error && <p className="mm-err">Помилка: {error}</p>}
+    </div>
   );
 }

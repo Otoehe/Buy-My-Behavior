@@ -9,7 +9,7 @@ import App from "./App";
 import { registerServiceWorker, applyServiceWorkerUpdate } from "./lib/sw-guard";
 import UpdateToast from "./components/UpdateToast";
 
-// ⬇⬇⬇ ДОДАНО: підхоплення сесії з MetaMask-браузера ДО рендера
+// ⬇⬇⬇ Підхоплення сесії з MetaMask-браузера ДО рендера
 import { bootstrapSessionHandoff } from "./lib/sessionHandoffBoot";
 
 // DEV: чистимо старі SW/кеші
@@ -18,6 +18,7 @@ if (import.meta.env.DEV && "serviceWorker" in navigator) {
   if ("caches" in window) caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)));
 }
 
+// Глобальні логи помилок — щоб не було «білого екрану без слідів» у консолі
 window.addEventListener("error", (e) =>
   console.error("[GlobalError]", (e as any).error ?? (e as any).message)
 );
@@ -27,11 +28,22 @@ window.addEventListener("unhandledrejection", (e) =>
 
 console.log(import.meta.env.PROD ? "BMB boot production" : "BMB boot dev");
 
-const rootEl = document.getElementById("root")!;
+const rootEl = document.getElementById("root");
+if (!rootEl) {
+  throw new Error("#root element not found");
+}
 
-// ⬇⬇⬇ ВАЖЛИВО: чекаємо хенд-офф і лише потім рендеримо App
-bootstrapSessionHandoff().finally(() => {
-  ReactDOM.createRoot(rootEl).render(
+// ✅ Страховка від зависання: якщо MM handoff не завершиться за 4с — все одно рендеримо App
+function withTimeout<T>(p: Promise<T>, ms = 4000): Promise<T | void> {
+  return Promise.race([
+    p,
+    new Promise<void>((resolve) => setTimeout(resolve, ms)),
+  ]);
+}
+
+// ⬇⬇⬇ ВАЖЛИВО: чекаємо хенд-офф (з таймаутом) і лише потім рендеримо App
+withTimeout(bootstrapSessionHandoff(), 4000).finally(() => {
+  ReactDOM.createRoot(rootEl!).render(
     <React.StrictMode>
       <BrowserRouter>
         <App />
