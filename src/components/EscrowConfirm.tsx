@@ -16,6 +16,11 @@ export default function EscrowConfirm() {
   const [scenarioId, setScenarioId] = useState("");
   const [amountStr, setAmountStr] = useState("");
 
+  // зафіксувати намір бронювання (важливо для гардa на /my-orders)
+  useEffect(() => {
+    sessionStorage.setItem("bmb.lockIntent", "1");
+  }, []);
+
   // не губимо sid/amt між переходами
   useEffect(() => {
     const sid = sidUrl || sessionStorage.getItem("bmb.sid") || "";
@@ -38,7 +43,7 @@ export default function EscrowConfirm() {
     setErr(null);
     setBusy(true);
     try {
-      // Якщо відкрито НЕ у MetaMask — відкриємо ту ж сторінку у MetaMask (та сама вкладка)
+      // Якщо відкрито НЕ у MetaMask — відкриваємо ту ж сторінку у MetaMask
       if (!(window as any).ethereum) {
         const base = `https://metamask.app.link/dapp/${location.host}/escrow/confirm`;
         const url  = `${base}?sid=${encodeURIComponent(scenarioId)}&amt=${encodeURIComponent(amountStr)}`;
@@ -47,9 +52,9 @@ export default function EscrowConfirm() {
       }
 
       const provider = new ethers.providers.Web3Provider((window as any).ethereum, "any");
-      // має викликатися з кліку, інакше MetaMask не покаже модалку
       await provider.send("eth_requestAccounts", []);
-      await ensureBSC(provider);
+      // ✅ ensureBSC на EIP-1193-провайдері
+      await ensureBSC((window as any).ethereum);
 
       if (!scenarioId || !amount) throw new Error("Невірні параметри сценарію або суми.");
 
@@ -60,7 +65,8 @@ export default function EscrowConfirm() {
         await supabase.from("escrow_events").insert({ scenario_id: scenarioId, kind: "LOCKED" });
       } catch {}
 
-      // повертаємо на /my-orders
+      // ✅ очистити намір і перейти на /my-orders
+      sessionStorage.removeItem("bmb.lockIntent");
       navigate(`/my-orders?sid=${encodeURIComponent(scenarioId)}&locked=1`, { replace: true });
     } catch (e: any) {
       setErr(e?.message ?? String(e));
