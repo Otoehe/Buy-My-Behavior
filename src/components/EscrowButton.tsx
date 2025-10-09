@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 type Props = {
   scenarioId: string;
-  amountUsdt: string;   // рядок, наприклад "1" або "2.5"
+  amountUsdt: string;   // "1" | "2.5" тощо
   className?: string;
 };
 
@@ -12,8 +12,9 @@ export default function EscrowButton({ scenarioId, amountUsdt, className }: Prop
   const navigate = useNavigate();
 
   function onClick() {
-    // ЖОДНИХ window.open / target="_blank" — ідемо в межах того самого таба
-    navigate(`/escrow/confirm?sid=${encodeURIComponent(scenarioId)}&amt=${encodeURIComponent(amountUsdt)}`);
+    // Переходимо в межах ТІЄЇ САМОЇ вкладки, щоб не ловити "Maximum tabs reached"
+    const url = `/escrow/confirm?sid=${encodeURIComponent(scenarioId)}&amt=${encodeURIComponent(amountUsdt)}`;
+    navigate(url);
   }
 
   return (
