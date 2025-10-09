@@ -1,24 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// на самому початку тіла компонента (після імпортів)
-import { useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-
-// ...всередині MyOrders()
-const navigate = useNavigate();
-const [sp] = useSearchParams();
-useEffect(() => {
-  if (sessionStorage.getItem("bmb.lockIntent") === "1") {
-    const sid = sessionStorage.getItem("bmb.sid") || sp.get("sid") || "";
-    const amt = sessionStorage.getItem("bmb.amt") || sp.get("amt") || "";
-    if (sid && amt) navigate(`/escrow/confirm?sid=${encodeURIComponent(sid)}&amt=${encodeURIComponent(amt)}`, { replace: true });
-  }
-}, [navigate, sp]);
-
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import EscrowButton from "./EscrowButton";
-
 
 import { confirmCompletionOnChain, getDealOnChain } from "../lib/escrowContract";
 import {
@@ -51,10 +35,14 @@ const isMobileUA = (): boolean =>
 const isMetaMaskInApp = (): boolean =>
   /MetaMaskMobile/i.test(navigator.userAgent || "");
 
-function openInMetaMaskDapp(nextPath: string, handoff?: { at?: string | null; rt?: string | null; next?: string }) {
+function openInMetaMaskDapp(
+  nextPath: string,
+  handoff?: { at?: string | null; rt?: string | null; next?: string }
+) {
   // домен беремо з ENV або з поточного location
   const publicUrl =
-    (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) || window.location.origin;
+    (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ||
+    window.location.origin;
   const host = publicUrl.replace(/^https?:\/\//i, "").replace(/\/+$/g, "");
   const base = `https://metamask.app.link/dapp/${host}`;
 
@@ -72,10 +60,16 @@ function openInMetaMaskDapp(nextPath: string, handoff?: { at?: string | null; rt
 const SOUND = new Audio("/notification.wav");
 SOUND.volume = 0.8;
 
-async function withTimeout<T>(p: Promise<T>, ms = 8000, label = "op"): Promise<T> {
+async function withTimeout<T>(
+  p: Promise<T>,
+  ms = 8000,
+  label = "op"
+): Promise<T> {
   return (await Promise.race([
     p,
-    new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Timeout:${label}`)), ms)) as any,
+    new Promise<T>((_, rej) =>
+      setTimeout(() => rej(new Error(`Timeout:${label}`)), ms)
+    ) as any,
   ])) as T;
 }
 
@@ -85,7 +79,8 @@ async function ensureProviderReady() {
   return provider;
 }
 
-const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
+const isBothAgreed = (s: Scenario) =>
+  !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) =>
   !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== "confirmed";
 
@@ -96,7 +91,12 @@ function asStatusNum(x: any): number {
 }
 
 /** Очікуємо поки угода стане в потрібний статус на ланцюгу (polling) */
-async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 120_000, stepMs = 3_000) {
+async function waitDealStatus(
+  scenarioId: string,
+  target: number,
+  timeoutMs = 120_000,
+  stepMs = 3_000
+) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     try {
@@ -152,6 +152,26 @@ function StatusStrip({ s }: { s: Scenario }) {
 
 export default function MyOrders() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const [sp] = useSearchParams();
+
+  /** ГАРД: якщо ми в процесі бронювання — тримаємо користувача на /escrow/confirm */
+  useEffect(() => {
+    if (sessionStorage.getItem("bmb.lockIntent") === "1") {
+      const sid =
+        sessionStorage.getItem("bmb.sid") || sp.get("sid") || "";
+      const amt =
+        sessionStorage.getItem("bmb.amt") || sp.get("amt") || "";
+      if (sid && amt) {
+        navigate(
+          `/escrow/confirm?sid=${encodeURIComponent(
+            sid
+          )}&amt=${encodeURIComponent(amt)}`,
+          { replace: true }
+        );
+      }
+    }
+  }, [navigate, sp]);
 
   const [userId, setUserId] = useState("");
   const [list, setList] = useState<Scenario[]>([]);
@@ -159,14 +179,19 @@ export default function MyOrders() {
   const [confirmBusy, setConfirmBusy] = useState<Record<string, boolean>>({});
   const [lockBusy, setLockBusy] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState(false);
-  const [openDisputes, setOpenDisputes] = useState<Record<string, DisputeRow | null>>({});
+  const [openDisputes, setOpenDisputes] = useState<
+    Record<string, DisputeRow | null>
+  >({});
   const [ratedOrders, setRatedOrders] = useState<Set<string>>(new Set());
-  const [lockedOnChain, setLockedOnChain] = useState<Record<string, boolean>>({});
+  const [lockedOnChain, setLockedOnChain] = useState<Record<string, boolean>>(
+    {}
+  );
 
   const [rateOpen, setRateOpen] = useState(false);
-  const [rateFor, setRateFor] = useState<{ scenarioId: string; counterpartyId: string } | null>(
-    null
-  );
+  const [rateFor, setRateFor] = useState<{
+    scenarioId: string;
+    counterpartyId: string;
+  } | null>(null);
   const [rateScore, setRateScore] = useState(10);
   const [rateComment, setRateComment] = useState("");
   const [rateBusy, setRateBusy] = useState(false);
@@ -213,7 +238,10 @@ export default function MyOrders() {
 
   const loadOpenDispute = useCallback(async (scenarioId: string) => {
     const d = await getLatestDisputeByScenario(scenarioId);
-    setOpenDisputes((prev) => ({ ...prev, [scenarioId]: d && d.status === "open" ? d : null }));
+    setOpenDisputes((prev) => ({
+      ...prev,
+      [scenarioId]: d && d.status === "open" ? d : null,
+    }));
   }, []);
 
   const load = useCallback(
@@ -224,7 +252,9 @@ export default function MyOrders() {
         .eq("creator_id", uid)
         .order("created_at", { ascending: false });
       if (error) console.error(error);
-      const items = ((data || []) as Scenario[]).filter((s) => s.creator_id === uid);
+      const items = ((data || []) as Scenario[]).filter(
+        (s) => s.creator_id === uid
+      );
       setList(items);
       items.forEach((s) => {
         if (s.escrow_tx_hash) refreshLocked(s.id);
@@ -299,7 +329,8 @@ export default function MyOrders() {
                   setToast(true);
                 }
 
-                const bothAgreed = !!after.is_agreed_by_customer && !!after.is_agreed_by_executor;
+                const bothAgreed =
+                  !!after.is_agreed_by_customer && !!after.is_agreed_by_executor;
                 const needLock =
                   bothAgreed && !after.escrow_tx_hash && after.creator_id === uid;
 
@@ -380,11 +411,16 @@ export default function MyOrders() {
   };
 
   /** Резолвер гаманця виконавця */
-  async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
+  async function resolveWallets(
+    s: Scenario
+  ): Promise<{ executor: string; referrer: string }> {
     const ZERO = "0x0000000000000000000000000000000000000000";
 
     let executor =
-      (s as any).executor_wallet || (s as any).executorAddress || (s as any).executor || null;
+      (s as any).executor_wallet ||
+      (s as any).executorAddress ||
+      (s as any).executor ||
+      null;
 
     if (!executor && (s as any).executor_id) {
       const execId = (s as any).executor_id as string;
@@ -682,7 +718,10 @@ export default function MyOrders() {
               canLock={bothAgreed && !s.escrow_tx_hash}
               canConfirm={canConfirm(s)}
               canDispute={
-                s.status !== "confirmed" && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id
+                s.status !== "confirmed" &&
+                !!s.escrow_tx_hash &&
+                !openDisputes[s.id] &&
+                userId === s.creator_id
               }
               hasCoords={true}
               isRated={rated}
@@ -716,7 +755,11 @@ export default function MyOrders() {
         );
       })}
 
-      <CelebrationToast open={toast} variant="customer" onClose={() => setToast(false)} />
+      <CelebrationToast
+        open={toast}
+        variant="customer"
+        onClose={() => setToast(false)}
+      />
 
       <RateModal
         open={rateOpen}
