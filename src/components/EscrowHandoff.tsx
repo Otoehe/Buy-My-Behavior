@@ -1,7 +1,6 @@
 // src/components/EscrowHandoff.tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { BrowserProvider, parseEther, formatEther } from "ethers";
 
 const BSC_CHAIN_ID_HEX = "0x38"; // 56
 const BSC_PARAMS = {
@@ -12,11 +11,28 @@ const BSC_PARAMS = {
   blockExplorerUrls: ["https://bscscan.com/"],
 };
 
-// ⚠️ адреса контракту/скарбнички ескроу
-// краще задати у .env як VITE_ESCROW_VAULT
+// ⚠️ вистави у .env (Vercel → Project → Settings → Environment Variables)
 const ESCROW_VAULT =
   (import.meta.env.VITE_ESCROW_VAULT as string) ??
-  "0x0000000000000000000000000000000000000000"; // ← заміни на свою
+  "0x0000000000000000000000000000000000000000"; // ← заміни на свою адресу
+
+// ===== helpers: parse/format без ethers =====
+const WEI = 10n ** 18n;
+
+function parseEtherToHex(amount: number | string): string {
+  const s = String(amount);
+  const [intPart, fracRaw = ""] = s.split(".");
+  const frac = (fracRaw + "0".repeat(18)).slice(0, 18);
+  const wei = BigInt(intPart || "0") * WEI + BigInt(frac || "0");
+  return "0x" + wei.toString(16);
+}
+
+function formatEtherFromHex(hexWei: string, digits = 4): string {
+  const wei = BigInt(hexWei);
+  const whole = wei / WEI;
+  const frac = (wei % WEI).toString().padStart(18, "0").slice(0, digits);
+  return `${whole}.${frac}`;
+}
 
 function shorten(addr?: string) {
   return addr ? addr.slice(0, 6) + "…" + addr.slice(-4) : "";
@@ -27,7 +43,7 @@ export default function EscrowHandoff() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // сума для блокування з query (?amount=0.01), дефолт 0.01 BNB
+  // сума для блокування (?amount=0.01), дефолт 0.01 BNB
   const requestedAmount = useMemo(() => {
     const raw = searchParams.get("amount");
     const n = Number(raw);
@@ -50,14 +66,13 @@ export default function EscrowHandoff() {
     setChainId(id);
   }, []);
 
-  // підключення до MM + читання стану
+  // підключення до MetaMask і читання стану
   const connect = useCallback(async () => {
     setError("");
     try {
       if (!window.ethereum) throw new Error("MetaMask не знайдено.");
       setBusy("connecting");
 
-      // запит акаунтів
       const accs: string[] = await window.ethereum.request({
         method: "eth_requestAccounts",
       });
@@ -66,12 +81,14 @@ export default function EscrowHandoff() {
       const cid: string = await window.ethereum.request({ method: "eth_chainId" });
       onChainChanged(cid);
 
-      // баланс
-      const provider = new BrowserProvider(window.ethereum);
-      const bal = await provider.getBalance(accs[0]);
-      setBalance(formatEther(bal));
+      if (accs[0]) {
+        const balHex: string = await window.ethereum.request({
+          method: "eth_getBalance",
+          params: [accs[0], "latest"],
+        });
+        setBalance(formatEtherFromHex(balHex));
+      }
 
-      // підпис подій
       window.ethereum.removeListener?.("accountsChanged", onAccountsChanged);
       window.ethereum.removeListener?.("chainChanged", onChainChanged);
       window.ethereum.on?.("accountsChanged", onAccountsChanged);
@@ -83,7 +100,7 @@ export default function EscrowHandoff() {
     }
   }, [onAccountsChanged, onChainChanged]);
 
-  // перемикач мережі на BSC
+  // перемикання/додавання BSC
   const ensureBsc = useCallback(async () => {
     if (!window.ethereum) throw new Error("MetaMask не знайдено.");
     const current = (await window.ethereum.request({ method: "eth_chainId" })) as string;
@@ -95,7 +112,6 @@ export default function EscrowHandoff() {
         params: [{ chainId: BSC_CHAIN_ID_HEX }],
       });
     } catch (err: any) {
-      // якщо мережа не додана
       if (err?.code === 4902) {
         await window.ethereum.request({
           method: "wallet_addEthereumChain",
@@ -107,39 +123,33 @@ export default function EscrowHandoff() {
     }
   }, []);
 
-  // основний клік: відправка коштів на ескроу
+  // відправка в ескроу
   const confirmEscrow = useCallback(async () => {
     setError("");
     try {
       if (!window.ethereum) throw new Error("MetaMask не знайдено.");
       if (!address) throw new Error("Спочатку під’єднай MetaMask.");
-      if (!ESCROW_VAULT || ESCROW_VAULT === "0x0000000000000000000000000000000000000000") {
+      if (!/^0x[0-9a-fA-F]{40}$/.test(ESCROW_VAULT))
         throw new Error("ESCROW_VAULT не налаштований.");
-      }
 
       setBusy("signing");
       await ensureBsc();
 
       setBusy("sending");
-      const provider = new BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-
-      // значення у wei
-      const value = parseEther(String(requestedAmount));
-
-      // простий переказ на адресу ескроу (контракт/скарбничка)
-      const tx = await signer.sendTransaction({
-        to: ESCROW_VAULT,
-        value,
+      const txHash: string = await window.ethereum.request({
+        method: "eth_sendTransaction",
+        params: [
+          {
+            from: address,
+            to: ESCROW_VAULT,
+            // значення у wei (hex)
+            value: parseEtherToHex(requestedAmount),
+          },
+        ],
       });
 
-      // можна показати toast з tx.hash
-      console.log("Escrow tx:", tx.hash);
-
-      await tx.wait();
-
-      // редірект після успіху
-      navigate(next, { replace: true, state: { escrowTx: tx.hash } });
+      // редірект з хешем
+      navigate(next, { replace: true, state: { escrowTx: txHash } });
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -147,17 +157,24 @@ export default function EscrowHandoff() {
     }
   }, [address, ensureBsc, navigate, next, requestedAmount]);
 
-  // авто-конект у MM-браузері
+  // автоконект (якщо акаунт уже авторизовано)
   useEffect(() => {
     if (window.ethereum) {
-      window.ethereum.request({ method: "eth_accounts" }).then((accs: string[]) => {
-        if (accs?.[0]) {
-          setAddress(accs[0]);
-          window.ethereum.request({ method: "eth_chainId" }).then((cid: string) => setChainId(cid));
-          const provider = new BrowserProvider(window.ethereum);
-          provider.getBalance(accs[0]).then((b) => setBalance(formatEther(b)));
-        }
-      });
+      window.ethereum
+        .request({ method: "eth_accounts" })
+        .then(async (accs: string[]) => {
+          if (accs?.[0]) {
+            setAddress(accs[0]);
+            const cid: string = await window.ethereum.request({ method: "eth_chainId" });
+            setChainId(cid);
+            const balHex: string = await window.ethereum.request({
+              method: "eth_getBalance",
+              params: [accs[0], "latest"],
+            });
+            setBalance(formatEtherFromHex(balHex));
+          }
+        })
+        .catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -207,7 +224,7 @@ export default function EscrowHandoff() {
 
           <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 14 }}>
             <span>Мережа: {isBsc ? "BNB Smart Chain" : `chainId ${chainId || "-"}`}</span>
-            <span>Баланс: {balance ? `${Number(balance).toFixed(4)} BNB` : "—"}</span>
+            <span>Баланс: {balance ? `${balance} BNB` : "—"}</span>
           </div>
         </div>
       )}
@@ -259,7 +276,7 @@ export default function EscrowHandoff() {
         </div>
       )}
 
-      {/* Лінк «відкрити в MetaMask-браузері» як запасний варіант */}
+      {/* Запасний варіант — відкрити в MetaMask-браузері */}
       {location.search.includes("deep=1") ? null : (
         <div style={{ marginTop: 18 }}>
           <button
