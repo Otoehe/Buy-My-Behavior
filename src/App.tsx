@@ -17,7 +17,7 @@ import SWUpdateToast        from "./components/SWUpdateToast";
 import BmbModalHost         from "./components/BmbModalHost";
 import { isMetaMaskInApp }  from "./lib/isMetaMaskBrowser";
 
-// lazy-екрани (є у твоєму /src/components)
+// lazy-екрани
 const MapView           = lazy(() => import("./components/MapView"));
 const MyOrders          = lazy(() => import("./components/MyOrders"));
 const ReceivedScenarios = lazy(() => import("./components/ReceivedScenarios"));
@@ -82,12 +82,12 @@ export default function App() {
     };
   }, []);
 
-  // Автоперенаправлення у MetaMask-браузері
+  // Автоперенаправлення у MetaMask-браузері з домашньої / register
   useEffect(() => {
-    if (isMetaMaskInApp()) {
-      if (location.pathname === "/" || location.pathname === "/register") {
-        navigate("/escrow/approve?next=/my-orders", { replace: true });
-      }
+    if (!isMetaMaskInApp()) return;
+    const p = location.pathname;
+    if (p === "/" || p === "/register") {
+      navigate("/escrow/approve?next=/my-orders", { replace: true });
     }
   }, [location.pathname, navigate]);
 
