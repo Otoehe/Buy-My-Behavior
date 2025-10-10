@@ -1,34 +1,43 @@
-/* Контейнер: колоночний layout — сторісбар зверху, мапа нижче */
+/* ===== Контейнер мапи: стабільна висота ===== */
 .map-view-container{
-  --sb-h: 80px;
+  --sb-h: 80px;                 /* висота сторісбару */
+  --nav-h: 64px;                /* висота навбара (fallback) */
+
   position: relative;
-  display: flex;
-  flex-direction: column;
   width: 100%;
   height: calc(var(--app-vh, 1vh) * 100);
   min-height: 100vh;
   overscroll-behavior: none;
   overflow: hidden;
-  z-index: 0;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+
+  /* щоб контент мапи не «зайшов» під навбар + сторісбар */
+  padding-top: calc(var(--nav-h, 64px) + var(--sb-h));
 }
 
-/* Сторісбар у нормальному потоці */
-.storybar-row{
-  flex: 0 0 var(--sb-h);
-  position: relative;
+/* Мапа займає весь простір під навбаром + сторісбаром */
+.map-container{
+  position: absolute;
+  inset: calc(var(--nav-h, 64px) + var(--sb-h)) 0 0 0; /* не перекриває навбар */
   z-index: 1;
 }
 
-/* Мапа займає весь залишок висоти */
-.map-container{
-  flex: 1 1 auto;
-  width: 100%;
-  height: auto; /* керує flex */
-  z-index: 0;
+/* ===== СТОРІСБАР — всередині контейнера, без fixed ===== */
+.storybar-overlay{
+  position: absolute;
+  left: 0; right: 0; top: var(--nav-h, 64px);
+  height: var(--sb-h);
+  z-index: 2;                    /* нижче будь-яких модалок/шторок */
+  pointer-events: none;          /* сам шар не ловить кліки */
+}
+.storybar-overlay .story-bar{ pointer-events: auto; }
+
+/* ===== Ліфлет-контроли — вони вже нижче сторісбару ===== */
+.map-view-container .leaflet-top.leaflet-left{
+  top: calc(var(--nav-h, 64px) + var(--sb-h) + 8px);
 }
 
-/* Більше не піднімаємо ліфлет-контроли — сторісбар не накладається */
+/* ===== Маячки на карті (аватар з білим кільцем) ===== */
 .custom-marker.small{
   width: 40px; height: 40px; border-radius: 50%;
   overflow: hidden; border: 3px solid #fff;
@@ -37,7 +46,7 @@
 }
 .marker-img{ width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 
-/* Рейтинг */
+/* ===== Рейтинг (10 чорних зірок) ===== */
 .rating-row{ display:flex; align-items:center; justify-content:center; gap:8px; margin:6px 0 14px; white-space:nowrap; }
 .stars-wrap{ position:relative; width:172px; height:18px; line-height:18px; font-size:17px; letter-spacing:2px; user-select:none; }
 .stars-bg,.stars-fill{ position:absolute; top:0; left:0; overflow:hidden; font-weight:700; }
