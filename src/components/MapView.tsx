@@ -49,7 +49,6 @@ export default function MapView() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // стабілізуємо визначення режиму
   const isSelectMode = useMemo(() => {
     const params = new URLSearchParams(location.search);
     return location.pathname === '/map/select' || params.get('pick') === '1';
@@ -63,11 +62,11 @@ export default function MapView() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
 
-  // єдиний екземпляр сторісбару (щоб не перемонтовувався)
+  // один постійний екземпляр сторісбару (без перемонтувань)
   const storyBarElRef = useRef<JSX.Element | null>(null);
   if (!storyBarElRef.current) storyBarElRef.current = <StoryBar />;
 
-  // drawer (шторка)
+  // drawer
   const drawerWidth = 340;
   const panelRef = useRef<HTMLDivElement | null>(null);
   const backdropRef = useRef<HTMLDivElement | null>(null);
@@ -90,12 +89,10 @@ export default function MapView() {
       rafRef.current = null;
     });
   };
-
   const setTransition = (enabled: boolean) => {
     const el = panelRef.current; if (!el) return;
     el.style.transition = enabled ? 'transform 200ms cubic-bezier(.2,.8,.2,1)' : 'none';
   };
-
   const onTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX; lastX.current = touchStartX.current; setTransition(false);
   };
@@ -237,9 +234,9 @@ export default function MapView() {
 
   return (
     <div className="map-view-container" onClick={handleMapClick}>
-      {/* ⬇️ СТОРІСБАР: локальний оверлей усередині контейнера (НЕ fixed по всій сторінці) */}
+      {/* Сторісбар у нормальному потоці над мапою */}
       {!isSelectMode && (
-        <div className="storybar-overlay">
+        <div className="storybar-row">
           {storyBarElRef.current}
         </div>
       )}
@@ -249,7 +246,7 @@ export default function MapView() {
         zoom={15}
         className="map-container"
         whenCreated={(m) => { mapRef.current = m; }}
-        updateWhenIdle={true}
+        updateWhenIdle
         preferCanvas={false}
         inertia={false}
         zoomAnimation={false}

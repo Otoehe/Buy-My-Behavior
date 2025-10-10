@@ -1,48 +1,34 @@
-/* ===== Контейнер мапи ===== */
+/* Контейнер: колоночний layout — сторісбар зверху, мапа нижче */
 .map-view-container{
-  --sb-h: 80px;                 /* висота сторісбару (64 кружок + падинги) */
+  --sb-h: 80px;
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: calc(var(--app-vh, 1vh) * 100);
   min-height: 100vh;
   overscroll-behavior: none;
   overflow: hidden;
-  z-index: 0;                   /* гарантовано нижче за шапку */
+  z-index: 0;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
-/* Мапа займає весь простір */
-.map-container{ width: 100%; height: 100%; z-index: 1; }
-
-/* ===== СТОРІСБАР: локальний оверлей всередині MapView ===== */
-.storybar-overlay{
-  position: absolute;
-  left: 0; right: 0;
-  top: calc(var(--nav-h, 64px)); /* безпечний відступ під навбаром */
-  height: var(--sb-h);
-  z-index: 10;                   /* вище мапи, нижче будь-яких модалок */
-  pointer-events: none;          /* сам контейнер не ловить кліки */
-}
-/* але всередині стрічка інтерактивна */
-.storybar-overlay .story-bar{ pointer-events: auto; }
-
-/* Внутрішня стрічка (оптимально — як було) */
-.story-bar{
-  display: flex; align-items: center; gap: 12px;
-  padding: 8px 12px;
-  background: #fff;
-  overflow-x: auto; overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  box-shadow: 0 1px 0 rgba(0,0,0,.06);
+/* Сторісбар у нормальному потоці */
+.storybar-row{
+  flex: 0 0 var(--sb-h);
+  position: relative;
+  z-index: 1;
 }
 
-/* Ліфлет-контроли — трохи нижче сторісбару */
-.map-view-container .leaflet-top.leaflet-left{
-  top: calc(var(--nav-h, 64px) + var(--sb-h));
+/* Мапа займає весь залишок висоти */
+.map-container{
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto; /* керує flex */
+  z-index: 0;
 }
 
-/* ===== Маячки на карті (аватар з білим кільцем) ===== */
+/* Більше не піднімаємо ліфлет-контроли — сторісбар не накладається */
 .custom-marker.small{
   width: 40px; height: 40px; border-radius: 50%;
   overflow: hidden; border: 3px solid #fff;
@@ -51,7 +37,7 @@
 }
 .marker-img{ width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 
-/* ===== Рейтинг (10 чорних зірок) ===== */
+/* Рейтинг */
 .rating-row{ display:flex; align-items:center; justify-content:center; gap:8px; margin:6px 0 14px; white-space:nowrap; }
 .stars-wrap{ position:relative; width:172px; height:18px; line-height:18px; font-size:17px; letter-spacing:2px; user-select:none; }
 .stars-bg,.stars-fill{ position:absolute; top:0; left:0; overflow:hidden; font-weight:700; }
