@@ -1,45 +1,27 @@
-/* ===========================
-   MapView.css — стабільна карта + сторісбар
-   =========================== */
-
-/* Рекомендація (глобально, якщо ще нема):
-html, body, #root { height: 100%; }
-*/
+/* MapView.css — стабільна карта + сторісбар */
 
 :root{
-  /* висота твого хедера/навігації */
   --nav-h: 64px;
-  /* висота сторісбару (кружок 64 + падинги 8*2) */
-  --sb-h: 80px;
+  --sb-h: 80px; /* висота сторісбару (кружок 64 + падинги 8*2) */
 }
 
-/* ===== Контейнер мапи: стабільна висота ===== */
+/* Контейнер мапи */
 .map-view-container{
   position: relative;
   width: 100%;
-
-  /* сучасні мобільні: точний viewport */
   height: 100dvh;
-
-  /* fallback + підтримка кастомної змінної */
-  height: calc(var(--app-vh, 1vh) * 100);
+  height: calc(var(--app-vh, 1vh) * 100); /* fallback */
   min-height: 100vh;
-
   overscroll-behavior: none;
   overflow: hidden;
-
-  /* ізолюємо стек контекст, щоб сторонні оверлеї не ламали z-index */
-  isolation: isolate;
-
-  /* дрібне згладжування скролу/композиції */
+  isolation: isolate;              /* свій стек для z-index */
   will-change: transform;
   backface-visibility: hidden;
-
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   background: #fff;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
-/* Мапа займає весь простір контейнера гарантовано */
+/* Карта — на весь контейнер */
 .map-container{
   position: absolute;
   inset: 0;
@@ -48,21 +30,18 @@ html, body, #root { height: 100%; }
   z-index: 1;
 }
 
-/* ===== СТОРІСБАР — ПІД НАВБАРОМ І НИЖЧЕ ШТОРКИ ===== */
+/* Сторісбар — під навбаром, не блокує карту */
 .storybar-overlay{
   position: fixed;
   left: 0; right: 0;
-  top: var(--nav-h);             /* впритул під навбар */
-  z-index: 1500;                 /* нижче backdrop:1999 і drawer:2000 */
-  pointer-events: none;          /* сам контейнер прозорий для кліків по карті */
-  transform: translateZ(0);      /* прибирає мікро-мерехтіння на мобільних */
+  top: var(--nav-h);
+  z-index: 1500;           /* нижче backdrop:1999 і drawer:2000 */
+  pointer-events: none;    /* контейнер прозорий для кліків */
+  transform: translateZ(0);
   backface-visibility: hidden;
 }
-
-/* Внутрішня смужка сторісів клікобільна */
 .storybar-overlay .story-bar{ pointer-events: auto; }
 
-/* Базовий вигляд сторіс-стрічки */
 .story-bar{
   display: flex; align-items: center; gap: 12px;
   padding: 8px 12px;
@@ -73,12 +52,12 @@ html, body, #root { height: 100%; }
   box-shadow: 0 1px 0 rgba(0,0,0,.06);
 }
 
-/* ===== Ліфлет-контроли — опустити під сторісбар ===== */
+/* Ліфлет-контроли — нижче сторісбару */
 .map-view-container .leaflet-top.leaflet-left{
   top: calc(var(--nav-h) + var(--sb-h));
 }
 
-/* ===== Маячки на карті (аватар з білим кільцем) ===== */
+/* Маркери */
 .custom-marker.small{
   width: 40px; height: 40px; border-radius: 50%;
   overflow: hidden; border: 3px solid #fff;
@@ -87,7 +66,7 @@ html, body, #root { height: 100%; }
 }
 .marker-img{ width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 
-/* ===== Рейтинг (10 чорних зірок) ===== */
+/* Рейтинг */
 .rating-row{ display:flex; align-items:center; justify-content:center; gap:8px; margin:6px 0 14px; white-space:nowrap; }
 .stars-wrap{ position:relative; width:172px; height:18px; line-height:18px; font-size:17px; letter-spacing:2px; user-select:none; }
 .stars-bg,.stars-fill{ position:absolute; top:0; left:0; overflow:hidden; font-weight:700; }
