@@ -140,7 +140,7 @@ export default function MyOrders() {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
 
-  /** ГАРД: під час бронювання завжди тримаємо користувача на /escrow/confirm */
+  /** ГАРД: під час бронювання тримаємо користувача на /escrow/confirm */
   useEffect(() => {
     if (sessionStorage.getItem("bmb.lockIntent") === "1") {
       const sid = sessionStorage.getItem("bmb.sid") || sp.get("sid") || "";
@@ -429,6 +429,12 @@ export default function MyOrders() {
       alert(e?.message || "Не вдалося заблокувати кошти.");
     } finally {
       setLockBusy((p) => ({ ...p, [s.id]: false }));
+      // 🧹 очищаємо прапорці наміру незалежно від результату
+      try {
+        sessionStorage.removeItem("bmb.lockIntent");
+        sessionStorage.removeItem("bmb.sid");
+        sessionStorage.removeItem("bmb.amt");
+      } catch {}
     }
   };
 
@@ -443,6 +449,14 @@ export default function MyOrders() {
 
       const amt = String(s.donation_amount_usdt ?? "");
       const next = `/escrow/confirm?sid=${encodeURIComponent(s.id)}&amt=${encodeURIComponent(amt)}`;
+
+      // 🔑 Фіксуємо намір користувача — щоб автороут/автопродовження спрацювали після кліку
+      try {
+        sessionStorage.setItem("bmb.lockIntent", "1");
+        sessionStorage.setItem("bmb.sid", s.id);
+        sessionStorage.setItem("bmb.amt", amt);
+      } catch {}
+
       openInMetaMaskDapp(next, { at, rt, next });
       return;
     }
@@ -562,6 +576,8 @@ export default function MyOrders() {
     const spx = new URLSearchParams(location.search);
     const scenarioId = spx.get("scenario");
     if (!scenarioId) return;
+    // ✅ Дозволяємо автозапуск ТІЛЬКИ після свідомого кліку (намір зафіксований)
+    if (sessionStorage.getItem("bmb.lockIntent") !== "1") return;
     if (autoRunOnceRef.current === scenarioId) return;
 
     const s = list.find((x) => x.id === scenarioId);
