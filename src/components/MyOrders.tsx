@@ -3,8 +3,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
-// import EscrowButton from "./EscrowButton"; // не використовується — прибрав
-
 import { confirmCompletionOnChain, getDealOnChain } from "../lib/escrowContract";
 import {
   pushNotificationManager as pushNotificationManager,
@@ -23,14 +21,11 @@ import { upsertRating } from "../lib/ratings";
 
 import { connectWallet, ensureBSC, waitForReturn } from "../lib/providerBridge";
 import { lockFundsMobileFlow } from "../lib/escrowMobile";
-
-// (опційно) збереження сесії для MetaMask deeplink
 import { writeSupabaseSessionCookie } from "../lib/supabaseSessionBridge";
 
 /* ----------------------------------------- */
 const isMobileUA = (): boolean =>
   /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
-
 const isMetaMaskInApp = (): boolean =>
   /MetaMaskMobile/i.test(navigator.userAgent || "");
 
@@ -49,10 +44,8 @@ function openInMetaMaskDapp(
     const payload = encodeURIComponent(btoa(JSON.stringify(handoff)));
     url += `#bmbSess=${payload}`;
   }
-  // ВАЖЛИВО: відкриваємо в ТІЙ САМІЙ вкладці, без "_blank"
-  window.location.href = url;
+  window.location.href = url; // та ж вкладка
 }
-/* ----------------------------------------- */
 
 const SOUND = new Audio("/notification.wav");
 SOUND.volume = 0.8;
@@ -63,7 +56,6 @@ async function withTimeout<T>(p: Promise<T>, ms = 8000, label = "op"): Promise<T
     new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Timeout:${label}`)), ms)) as any,
   ])) as T;
 }
-
 async function ensureProviderReady() {
   const { provider } = await connectWallet();
   await ensureBSC(provider);
@@ -79,7 +71,6 @@ function asStatusNum(x: any): number {
   const n = Number((x ?? {}).status);
   return Number.isFinite(n) ? n : -1;
 }
-
 /** очікуємо цільовий статус у ланцюгу */
 async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 120_000, stepMs = 3_000) {
   const started = Date.now();
@@ -93,6 +84,22 @@ async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 12
   return false;
 }
 
+/* ========== Сумісність: забезпечуємо s.amount для UI ========== */
+const pickAmount = (s: any): number | null => {
+  const v = s?.donation_amount_usdt ?? s?.amount ?? null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+const withAmountCompat = <T extends Record<string, any>>(s: T): T & { amount: number | null } => ({
+  ...s,
+  amount: pickAmount(s),
+});
+const mirrorAmountPatch = (patch: Partial<Scenario>): Partial<Scenario & { amount: number | null }> =>
+  "donation_amount_usdt" in patch
+    ? { ...patch, amount: pickAmount(patch) }
+    : (patch as any);
+/* ============================================================= */
+
 function StatusStrip({ s }: { s: Scenario }) {
   const stage =
     s.status === "confirmed" ? 3 : s.escrow_tx_hash ? 2 : isBothAgreed(s) ? 1 : 0;
@@ -100,25 +107,16 @@ function StatusStrip({ s }: { s: Scenario }) {
   const Dot = ({ active }: { active: boolean }) => (
     <span
       style={{
-        width: 10,
-        height: 10,
-        borderRadius: 9999,
-        display: "inline-block",
-        margin: "0 6px",
-        background: active ? "#111" : "#e5e7eb",
+        width: 10, height: 10, borderRadius: 9999, display: "inline-block",
+        margin: "0 6px", background: active ? "#111" : "#e5e7eb",
       }}
     />
   );
   return (
     <div
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "6px 10px",
-        borderRadius: 10,
-        background: "rgba(0,0,0,0.035)",
-        margin: "6px 0 10px",
+        display: "flex", alignItems: "center", gap: 10, padding: "6px 10px",
+        borderRadius: 10, background: "rgba(0,0,0,0.035)", margin: "6px 0 10px",
       }}
     >
       <Dot active={stage >= 0} />
@@ -140,22 +138,19 @@ export default function MyOrders() {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
 
-  /** ГАРД: під час бронювання тримаємо користувача на /escrow/confirm */
+  // ГАРД: під час бронювання тримаємо користувача на /escrow/confirm
   useEffect(() => {
     if (sessionStorage.getItem("bmb.lockIntent") === "1") {
       const sid = sessionStorage.getItem("bmb.sid") || sp.get("sid") || "";
       const amt = sessionStorage.getItem("bmb.amt") || sp.get("amt") || "";
       if (sid && amt && location.pathname !== "/escrow/confirm") {
-        navigate(
-          `/escrow/confirm?sid=${encodeURIComponent(sid)}&amt=${encodeURIComponent(amt)}`,
-          { replace: true }
-        );
+        navigate(`/escrow/confirm?sid=${encodeURIComponent(sid)}&amt=${encodeURIComponent(amt)}`, { replace: true });
       }
     }
   }, [navigate, sp, location.pathname]);
 
   const [userId, setUserId] = useState("");
-  const [list, setList] = useState<Scenario[]>([]);
+  const [list, setList] = useState<(Scenario & { amount?: number | null })[]>([]);
   const [agreeBusy, setAgreeBusy] = useState<Record<string, boolean>>({});
   const [confirmBusy, setConfirmBusy] = useState<Record<string, boolean>>({});
   const [lockBusy, setLockBusy] = useState<Record<string, boolean>>({});
@@ -174,7 +169,7 @@ export default function MyOrders() {
   const rt = useRealtimeNotifications(userId);
 
   const setLocal = (id: string, patch: Partial<Scenario>) =>
-    setList((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+    setList((prev) => prev.map((x) => (x.id === id ? { ...x, ...mirrorAmountPatch(patch) } : x)));
 
   const hasCoords = (s: Scenario) =>
     typeof s.latitude === "number" && Number.isFinite(s.latitude) &&
@@ -219,11 +214,11 @@ export default function MyOrders() {
         .eq("creator_id", uid)
         .order("created_at", { ascending: false });
       if (error) console.error(error);
-      const items = ((data || []) as Scenario[]).filter((s) => s.creator_id === uid);
+      const items = ((data || []) as Scenario[])
+        .filter((s) => s.creator_id === uid)
+        .map(withAmountCompat); // ⬅️ додали amount-дзеркало
       setList(items);
-      items.forEach((s) => {
-        if (s.escrow_tx_hash) refreshLocked(s.id);
-      });
+      items.forEach((s) => { if (s.escrow_tx_hash) refreshLocked(s.id); });
     },
     [refreshLocked]
   );
@@ -257,7 +252,8 @@ export default function MyOrders() {
           { event: "*", schema: "public", table: "scenarios" },
           async (p) => {
             const ev = p.eventType as "INSERT" | "UPDATE" | "DELETE";
-            const s = (p as any).new as Scenario | undefined;
+            const raw = (p as any).new as Scenario | undefined;
+            const s = raw ? withAmountCompat(raw) : undefined; // ⬅️ сумісність тут
             const oldId = (p as any).old?.id as string | undefined;
 
             setList((prev) => {
@@ -269,9 +265,7 @@ export default function MyOrders() {
               const i = prev.findIndex((x) => x.id === s.id);
               if (ev === "INSERT") {
                 if (i === -1) return [s, ...prev];
-                const cp = [...prev];
-                cp[i] = { ...cp[i], ...s };
-                return cp;
+                const cp = [...prev]; cp[i] = { ...cp[i], ...s }; return cp;
               }
               if (ev === "UPDATE") {
                 if (i === -1) return prev;
@@ -303,7 +297,6 @@ export default function MyOrders() {
                   (window as any).__locking = true;
                   setTimeout(() => handleLock(after).finally(() => ((window as any).__locking = false)), 0);
                 }
-
                 return cp;
               }
               return prev;
@@ -319,9 +312,7 @@ export default function MyOrders() {
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "ratings", filter: `rater_id=eq.${uid}` },
-          async () => {
-            await refreshRated(uid, list);
-          }
+          async () => { await refreshRated(uid, list); }
         )
         .subscribe();
 
@@ -361,10 +352,8 @@ export default function MyOrders() {
     }
   };
 
-  /** резолвер гаманця виконавця */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = "0x0000000000000000000000000000000000000000";
-
     let executor =
       (s as any).executor_wallet || (s as any).executorAddress || (s as any).executor || null;
 
@@ -377,18 +366,18 @@ export default function MyOrders() {
         .single();
       executor = prof?.wallet ?? null;
     }
-
     if (!executor || typeof executor !== "string" || !/^0x[a-fA-F0-9]{40}$/.test(executor)) {
       throw new Error("Не знайдено адресу гаманця виконавця для цієї угоди.");
     }
-
     const referrer = (s as any).referrer_wallet ?? ZERO;
     return { executor, referrer };
   }
 
   const handleLock = async (s: Scenario) => {
     if (lockBusy[s.id]) return;
-    if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) {
+
+    const amountNum = Number(s.donation_amount_usdt ?? (s as any).amount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
       alert("Сума має бути > 0");
       return;
     }
@@ -409,7 +398,7 @@ export default function MyOrders() {
         scenarioId: s.id,
         executor,
         referrer,
-        amount: Number(s.donation_amount_usdt),
+        amount: amountNum,
         onStatus: () => {},
       });
 
@@ -429,7 +418,6 @@ export default function MyOrders() {
       alert(e?.message || "Не вдалося заблокувати кошти.");
     } finally {
       setLockBusy((p) => ({ ...p, [s.id]: false }));
-      // 🧹 очищаємо прапорці наміру незалежно від результату
       try {
         sessionStorage.removeItem("bmb.lockIntent");
         sessionStorage.removeItem("bmb.sid");
@@ -438,7 +426,6 @@ export default function MyOrders() {
     }
   };
 
-  /** Вхід у MetaMask через deeplink — ТЕПЕР одразу на /escrow/confirm */
   const handleLockEntry = async (s: Scenario) => {
     if (isMobileUA() && !isMetaMaskInApp()) {
       const { data } = await supabase.auth.getSession();
@@ -447,20 +434,18 @@ export default function MyOrders() {
 
       try { writeSupabaseSessionCookie?.(data?.session ?? null, 300); } catch {}
 
-      const amt = String(s.donation_amount_usdt ?? "");
-      const next = `/escrow/confirm?sid=${encodeURIComponent(s.id)}&amt=${encodeURIComponent(amt)}`;
+      const amtStr = String(s.donation_amount_usdt ?? (s as any).amount ?? "");
+      const next = `/escrow/confirm?sid=${encodeURIComponent(s.id)}&amt=${encodeURIComponent(amtStr)}`;
 
-      // 🔑 Фіксуємо намір користувача — щоб автороут/автопродовження спрацювали після кліку
       try {
         sessionStorage.setItem("bmb.lockIntent", "1");
         sessionStorage.setItem("bmb.sid", s.id);
-        sessionStorage.setItem("bmb.amt", amt);
+        sessionStorage.setItem("bmb.amt", amtStr);
       } catch {}
 
       openInMetaMaskDapp(next, { at, rt, next });
       return;
     }
-    // вже у MetaMask або десктоп: одразу запускаємо ланцюг
     void handleLock(s);
   };
 
@@ -569,14 +554,12 @@ export default function MyOrders() {
     [permissionStatus, requestPermission, rt.isListening, rt.method]
   );
 
-  // авто-ран у MetaMask in-app, якщо прийшли з ?scenario=...
   const autoRunOnceRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isMetaMaskInApp()) return;
     const spx = new URLSearchParams(location.search);
     const scenarioId = spx.get("scenario");
     if (!scenarioId) return;
-    // ✅ Дозволяємо автозапуск ТІЛЬКИ після свідомого кліку (намір зафіксований)
     if (sessionStorage.getItem("bmb.lockIntent") !== "1") return;
     if (autoRunOnceRef.current === scenarioId) return;
 
@@ -608,7 +591,7 @@ export default function MyOrders() {
 
             <ScenarioCard
               role="customer"
-              s={s}
+              s={s as any}               {/* ⬅️ s вже має поле amount */}
               onChangeDesc={(v) => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async (v) => {
                 if (!fieldsEditable) return;
@@ -622,12 +605,14 @@ export default function MyOrders() {
                   })
                   .eq("id", s.id);
               }}
-              onChangeAmount={(v) => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
-              onCommitAmount={async (v) => {
+              onChangeAmount={(v) => {          // ⬅️ дзеркалимо локально
+                if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v, amount: v ?? null } as any);
+              }}
+              onCommitAmount={async (v) => {    // ⬅️ дзеркалимо після коміту
                 if (!fieldsEditable) return;
                 if (v !== null && (!Number.isFinite(v) || v <= 0)) {
                   alert("Сума має бути > 0");
-                  setLocal(s.id, { donation_amount_usdt: null });
+                  setLocal(s.id, { donation_amount_usdt: null, amount: null } as any);
                   return;
                 }
                 await supabase
@@ -639,6 +624,7 @@ export default function MyOrders() {
                     is_agreed_by_executor: false,
                   })
                   .eq("id", s.id);
+                setLocal(s.id, { donation_amount_usdt: v, amount: v ?? null } as any);
               }}
               onAgree={() => handleAgree(s)}
               onLock={() => handleLockEntry(s)}
@@ -668,16 +654,9 @@ export default function MyOrders() {
                   type="button"
                   onClick={() => openRateFor(s)}
                   style={{
-                    width: "100%",
-                    maxWidth: 520,
-                    marginTop: 10,
-                    padding: "12px 18px",
-                    borderRadius: 999,
-                    background: "#ffd7e0",
-                    color: "#111",
-                    fontWeight: 800,
-                    border: "1px solid #f3c0ca",
-                    cursor: "pointer",
+                    width: "100%", maxWidth: 520, marginTop: 10, padding: "12px 18px",
+                    borderRadius: 999, background: "#ffd7e0", color: "#111",
+                    fontWeight: 800, border: "1px solid #f3c0ca", cursor: "pointer",
                     boxShadow: "inset 0 0 0 1px rgba(255,255,255,.7)",
                   }}
                 >
