@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+// src/components/MapView.tsx
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -6,7 +7,7 @@ import 'leaflet/dist/leaflet.css';
 import { supabase } from '../lib/supabase';
 
 import ReviewsModal from './ReviewsModal';
-import StoryBar from './StoryBar';            // ⬅️ сторісбар
+import StoryBar from './StoryBar';
 import './Pills.css';
 import './MapView.css';
 
@@ -32,7 +33,9 @@ interface Scenario { id: string; description: string; price: number }
 
 const CenterMap: React.FC<{ center: [number, number] }> = ({ center }) => {
   const map = useMap();
-  useEffect(() => { map.setView(center, map.getZoom(), { animate: false }); }, [center, map]);
+  useEffect(() => {
+    map.setView(center, map.getZoom(), { animate: false });
+  }, [center, map]);
   return null;
 };
 
@@ -48,8 +51,10 @@ export default function MapView() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const params = new URLSearchParams(location.search);
-  const isSelectMode = location.pathname === '/map/select' || params.get('pick') === '1';
+  const isSelectMode = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return location.pathname === '/map/select' || params.get('pick') === '1';
+  }, [location.pathname, location.search]);
 
   const mapRef = useRef<L.Map | null>(null);
 
@@ -58,6 +63,10 @@ export default function MapView() {
   const [selectedProfile, setSelectedProfile] = useState<User | null>(null);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
+
+  // фіксуємо екземпляр StoryBar, щоб його не ремонтувало на кожен ререндер батька
+  const storyBarElRef = useRef<JSX.Element | null>(null);
+  if (!storyBarElRef.current) storyBarElRef.current = <StoryBar />;
 
   const drawerWidth = 340;
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -103,22 +112,33 @@ export default function MapView() {
     touchStartX.current = null; lastX.current = null;
   };
 
+  // один ефект — один «пакет» оновлень (менше стартових ререндерів)
   useEffect(() => {
+    let alive = true;
     (async () => {
-      const { data, error } = await supabase
-        .from('profiles').select('*')
-        .not('latitude', 'is', null)
-        .not('longitude', 'is', null);
-      if (!error && data) setUsers(data as unknown as User[]);
+      const [{ data: profiles, error: pErr }, { data: auth }] = await Promise.all([
+        supabase.from('profiles').select('*')
+          .not('latitude', 'is', null)
+          .not('longitude', 'is', null),
+        supabase.auth.getUser(),
+      ]);
+
+      if (!alive) return;
+      if (!pErr && profiles) setUsers(profiles as unknown as User[]);
+
+      const user = auth?.user;
+      if (user) {
+        const { data: coords } = await supabase
+          .from('profiles')
+          .select('latitude, longitude')
+          .eq('user_id', user.id)
+          .single();
+        if (coords?.latitude && coords?.longitude) {
+          setCenter([coords.latitude, coords.longitude]);
+        }
+      }
     })();
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase
-        .from('profiles').select('latitude, longitude')
-        .eq('user_id', user.id).single();
-      if (data?.latitude && data?.longitude) setCenter([data.latitude, data.longitude]);
-    })();
+    return () => { alive = false; };
   }, []);
 
   useEffect(() => {
@@ -127,7 +147,10 @@ export default function MapView() {
     const lng = Number(localStorage.getItem('longitude'));
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
       setCenter([lat, lng]);
-      requestAnimationFrame(() => { const m = mapRef.current; if (m) m.setView({ lat, lng }, m.getZoom(), { animate: false }); });
+      requestAnimationFrame(() => {
+        const m = mapRef.current;
+        if (m) m.setView({ lat, lng }, m.getZoom(), { animate: false });
+      });
     }
     setSelectedProfile(null);
     setReviewsOpen(false);
@@ -205,6 +228,7 @@ export default function MapView() {
       localStorage.setItem('longitude', String(c.lng));
       sessionStorage.setItem('scenario_visited_map', '1');
     } catch {}
+    const params = new URLSearchParams(location.search);
     const executorId =
       params.get('executor_id') || localStorage.getItem('scenario_receiverId') || '';
     navigate(`/scenario/new${executorId ? `?executor_id=${encodeURIComponent(executorId)}` : ''}`,
@@ -214,11 +238,15 @@ export default function MapView() {
   const avg = selectedProfile?.avg_rating ?? 10;
 
   return (
-    <div className="map-view-container" onClick={handleMapClick}>
-      {/* ⬇️ СТОРІСБАР під навбаром і нижче зета шторки */}
+    // ⬅️ робимо контейнер позиційним, щоб усі оверлеї були ЛОКАЛЬНІ
+    <div className="map-view-container" onClick={handleMapClick} style={{ position: 'relative' }}>
+      {/* сторісбар під навбаром */}
       {!isSelectMode && (
-        <div className="storybar-overlay">
-          <StoryBar />
+        <div
+          className="storybar-overlay"
+          style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
+        >
+          {storyBarElRef.current}
         </div>
       )}
 
@@ -303,12 +331,13 @@ export default function MapView() {
         </>
       )}
 
+      {/* ⬇️ ГОЛОВНЕ: оверлеї тепер absolute, не fixed */}
       {!isSelectMode && selectedProfile && (
         <div
           ref={backdropRef}
           onClick={() => setSelectedProfile(null)}
           style={{
-            position: 'fixed', inset: 0, zIndex: 1999,                   // ⬅️ над сторісбаром
+            position: 'absolute', inset: 0, zIndex: 1999,
             background: 'rgba(0,0,0,0.35)', opacity: 0.35, transition: 'opacity 200ms ease',
           }}
         />
@@ -319,7 +348,7 @@ export default function MapView() {
           ref={panelRef}
           className="drawer-overlay"
           style={{
-            position: 'fixed', zIndex: 2000, top: 0, right: 0, bottom: 0, // ⬅️ ще вище
+            position: 'absolute', zIndex: 2000, top: 0, right: 0, bottom: 0,
             width: drawerWidth,
             background: '#fff', boxShadow: '-8px 0 24px rgba(0,0,0,0.22)',
             padding: 20, overflowY: 'auto',
