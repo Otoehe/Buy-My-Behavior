@@ -44,7 +44,7 @@ function openInMetaMaskDapp(
     const payload = encodeURIComponent(btoa(JSON.stringify(handoff)));
     url += `#bmbSess=${payload}`;
   }
-  window.location.href = url; // та ж вкладка
+  window.location.href = url; // відкриваємо в тій самій вкладці
 }
 
 const SOUND = new Audio("/notification.wav");
