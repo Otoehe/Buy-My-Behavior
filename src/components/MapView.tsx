@@ -49,7 +49,7 @@ export default function MapView() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // стабільно визначаємо режим
+  // стабілізуємо визначення режиму
   const isSelectMode = useMemo(() => {
     const params = new URLSearchParams(location.search);
     return location.pathname === '/map/select' || params.get('pick') === '1';
@@ -63,10 +63,11 @@ export default function MapView() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
 
-  // один і той самий екземпляр StoryBar, щоб не «мигав»
+  // єдиний екземпляр сторісбару (щоб не перемонтовувався)
   const storyBarElRef = useRef<JSX.Element | null>(null);
   if (!storyBarElRef.current) storyBarElRef.current = <StoryBar />;
 
+  // drawer (шторка)
   const drawerWidth = 340;
   const panelRef = useRef<HTMLDivElement | null>(null);
   const backdropRef = useRef<HTMLDivElement | null>(null);
@@ -91,40 +92,29 @@ export default function MapView() {
   };
 
   const setTransition = (enabled: boolean) => {
-    const el = panelRef.current;
-    if (!el) return;
+    const el = panelRef.current; if (!el) return;
     el.style.transition = enabled ? 'transform 200ms cubic-bezier(.2,.8,.2,1)' : 'none';
   };
 
   const onTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-    lastX.current = touchStartX.current;
-    setTransition(false);
+    touchStartX.current = e.touches[0].clientX; lastX.current = touchStartX.current; setTransition(false);
   };
-
   const onTouchMove = (e: React.TouchEvent) => {
     if (touchStartX.current == null) return;
     const x = e.touches[0].clientX; lastX.current = x;
     const next = Math.max(0, Math.min(x - touchStartX.current, drawerWidth));
     setTransform(next);
   };
-
   const onTouchEnd = () => {
-    if (touchStartX.current == null || lastX.current == null) {
-      touchStartX.current = null; lastX.current = null; return;
-    }
+    if (touchStartX.current == null || lastX.current == null) { touchStartX.current = null; lastX.current = null; return; }
     const deltaX = lastX.current - touchStartX.current;
     setTransition(true);
-    if (deltaX > 80) {
-      setTransform(drawerWidth);
-      setTimeout(() => { setTransform(0); setSelectedProfile(null); }, 180);
-    } else {
-      setTransform(0);
-    }
+    if (deltaX > 80) { setTransform(drawerWidth); setTimeout(() => { setTransform(0); setSelectedProfile(null); }, 180); }
+    else { setTransform(0); }
     touchStartX.current = null; lastX.current = null;
   };
 
-  // стартове завантаження
+  // стартові дані
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -134,10 +124,8 @@ export default function MapView() {
           .not('longitude', 'is', null),
         supabase.auth.getUser(),
       ]);
-
       if (!alive) return;
       if (!pErr && profiles) setUsers(profiles as unknown as User[]);
-
       const user = auth?.user;
       if (user) {
         const { data: coords } = await supabase
@@ -145,15 +133,12 @@ export default function MapView() {
           .select('latitude, longitude')
           .eq('user_id', user.id)
           .single();
-        if (coords?.latitude && coords?.longitude) {
-          setCenter([coords.latitude, coords.longitude]);
-        }
+        if (coords?.latitude && coords?.longitude) setCenter([coords.latitude, coords.longitude]);
       }
     })();
     return () => { alive = false; };
   }, []);
 
-  // режим вибору точки
   useEffect(() => {
     if (!isSelectMode) return;
     const lat = Number(localStorage.getItem('latitude'));
@@ -169,7 +154,6 @@ export default function MapView() {
     setReviewsOpen(false);
   }, [isSelectMode]);
 
-  // якщо прийшли зі сторінки профілю
   useEffect(() => {
     if (isSelectMode) return;
     const profileId = (location.state as any)?.profile;
@@ -253,11 +237,9 @@ export default function MapView() {
 
   return (
     <div className="map-view-container" onClick={handleMapClick}>
+      {/* ⬇️ СТОРІСБАР: локальний оверлей усередині контейнера (НЕ fixed по всій сторінці) */}
       {!isSelectMode && (
-        <div
-          className="storybar-overlay"
-          style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
-        >
+        <div className="storybar-overlay">
           {storyBarElRef.current}
         </div>
       )}
