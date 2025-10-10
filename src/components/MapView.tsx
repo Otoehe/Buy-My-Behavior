@@ -33,7 +33,9 @@ interface Scenario { id: string; description: string; price: number }
 
 const CenterMap: React.FC<{ center: [number, number] }> = ({ center }) => {
   const map = useMap();
-  useEffect(() => { map.setView(center, map.getZoom(), { animate: false }); }, [center, map]);
+  useEffect(() => {
+    map.setView(center, map.getZoom(), { animate: false });
+  }, [center, map]);
   return null;
 };
 
@@ -62,7 +64,7 @@ export default function MapView() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
 
-  // зафіксований інстанс StoryBar, щоб не мерехтів
+  // Зафіксований екземпляр StoryBar (щоб не мерехтів)
   const storyBarElRef = useRef<JSX.Element | null>(null);
   if (!storyBarElRef.current) storyBarElRef.current = <StoryBar />;
 
@@ -100,30 +102,24 @@ export default function MapView() {
     lastX.current = touchStartX.current;
     setTransition(false);
   };
-
   const onTouchMove = (e: React.TouchEvent) => {
     if (touchStartX.current == null) return;
-    const x = e.touches[0].clientX;
-    lastX.current = x;
+    const x = e.touches[0].clientX; lastX.current = x;
     const next = Math.max(0, Math.min(x - touchStartX.current, drawerWidth));
     setTransform(next);
   };
-
   const onTouchEnd = () => {
     if (touchStartX.current == null || lastX.current == null) {
       touchStartX.current = null; lastX.current = null; return;
     }
     const deltaX = lastX.current - touchStartX.current;
     setTransition(true);
-    if (deltaX > 80) {
-      setTransform(drawerWidth);
-      setTimeout(() => { setTransform(0); setSelectedProfile(null); }, 180);
-    } else {
-      setTransform(0);
-    }
+    if (deltaX > 80) { setTransform(drawerWidth); setTimeout(() => { setTransform(0); setSelectedProfile(null); }, 180); }
+    else { setTransform(0); }
     touchStartX.current = null; lastX.current = null;
   };
 
+  // стартові дані (одним «пакетом»)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -138,8 +134,13 @@ export default function MapView() {
       const user = auth?.user;
       if (user) {
         const { data: coords } = await supabase
-          .from('profiles').select('latitude, longitude').eq('user_id', user.id).single();
-        if (coords?.latitude && coords?.longitude) setCenter([coords.latitude, coords.longitude]);
+          .from('profiles')
+          .select('latitude, longitude')
+          .eq('user_id', user.id)
+          .single();
+        if (coords?.latitude && coords?.longitude) {
+          setCenter([coords.latitude, coords.longitude]);
+        }
       }
     })();
     return () => { alive = false; };
@@ -152,7 +153,8 @@ export default function MapView() {
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
       setCenter([lat, lng]);
       requestAnimationFrame(() => {
-        const m = mapRef.current; if (m) m.setView({ lat, lng }, m.getZoom(), { animate: false });
+        const m = mapRef.current;
+        if (m) m.setView({ lat, lng }, m.getZoom(), { animate: false });
       });
     }
     setSelectedProfile(null);
@@ -243,7 +245,10 @@ export default function MapView() {
   return (
     <div className="map-view-container" onClick={handleMapClick}>
       {!isSelectMode && (
-        <div className="storybar-overlay" style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}>
+        <div
+          className="storybar-overlay"
+          style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
+        >
           {storyBarElRef.current}
         </div>
       )}
