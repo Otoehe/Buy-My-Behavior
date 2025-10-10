@@ -33,9 +33,7 @@ interface Scenario { id: string; description: string; price: number }
 
 const CenterMap: React.FC<{ center: [number, number] }> = ({ center }) => {
   const map = useMap();
-  useEffect(() => {
-    map.setView(center, map.getZoom(), { animate: false });
-  }, [center, map]);
+  useEffect(() => { map.setView(center, map.getZoom(), { animate: false }); }, [center, map]);
   return null;
 };
 
@@ -51,6 +49,7 @@ export default function MapView() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // стабільно визначаємо режим
   const isSelectMode = useMemo(() => {
     const params = new URLSearchParams(location.search);
     return location.pathname === '/map/select' || params.get('pick') === '1';
@@ -64,7 +63,7 @@ export default function MapView() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
 
-  // Зафіксований екземпляр StoryBar (щоб не мерехтів)
+  // один і той самий екземпляр StoryBar, щоб не «мигав»
   const storyBarElRef = useRef<JSX.Element | null>(null);
   if (!storyBarElRef.current) storyBarElRef.current = <StoryBar />;
 
@@ -102,24 +101,30 @@ export default function MapView() {
     lastX.current = touchStartX.current;
     setTransition(false);
   };
+
   const onTouchMove = (e: React.TouchEvent) => {
     if (touchStartX.current == null) return;
     const x = e.touches[0].clientX; lastX.current = x;
     const next = Math.max(0, Math.min(x - touchStartX.current, drawerWidth));
     setTransform(next);
   };
+
   const onTouchEnd = () => {
     if (touchStartX.current == null || lastX.current == null) {
       touchStartX.current = null; lastX.current = null; return;
     }
     const deltaX = lastX.current - touchStartX.current;
     setTransition(true);
-    if (deltaX > 80) { setTransform(drawerWidth); setTimeout(() => { setTransform(0); setSelectedProfile(null); }, 180); }
-    else { setTransform(0); }
+    if (deltaX > 80) {
+      setTransform(drawerWidth);
+      setTimeout(() => { setTransform(0); setSelectedProfile(null); }, 180);
+    } else {
+      setTransform(0);
+    }
     touchStartX.current = null; lastX.current = null;
   };
 
-  // стартові дані (одним «пакетом»)
+  // стартове завантаження
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -129,8 +134,10 @@ export default function MapView() {
           .not('longitude', 'is', null),
         supabase.auth.getUser(),
       ]);
+
       if (!alive) return;
       if (!pErr && profiles) setUsers(profiles as unknown as User[]);
+
       const user = auth?.user;
       if (user) {
         const { data: coords } = await supabase
@@ -146,6 +153,7 @@ export default function MapView() {
     return () => { alive = false; };
   }, []);
 
+  // режим вибору точки
   useEffect(() => {
     if (!isSelectMode) return;
     const lat = Number(localStorage.getItem('latitude'));
@@ -161,6 +169,7 @@ export default function MapView() {
     setReviewsOpen(false);
   }, [isSelectMode]);
 
+  // якщо прийшли зі сторінки профілю
   useEffect(() => {
     if (isSelectMode) return;
     const profileId = (location.state as any)?.profile;
