@@ -216,7 +216,7 @@ export default function MyOrders() {
       if (error) console.error(error);
       const items = ((data || []) as Scenario[])
         .filter((s) => s.creator_id === uid)
-        .map(withAmountCompat); // ⬅️ додали amount-дзеркало
+        .map(withAmountCompat);
       setList(items);
       items.forEach((s) => { if (s.escrow_tx_hash) refreshLocked(s.id); });
     },
@@ -253,7 +253,7 @@ export default function MyOrders() {
           async (p) => {
             const ev = p.eventType as "INSERT" | "UPDATE" | "DELETE";
             const raw = (p as any).new as Scenario | undefined;
-            const s = raw ? withAmountCompat(raw) : undefined; // ⬅️ сумісність тут
+            const s = raw ? withAmountCompat(raw) : undefined;
             const oldId = (p as any).old?.id as string | undefined;
 
             setList((prev) => {
@@ -589,9 +589,10 @@ export default function MyOrders() {
           <div key={s.id} style={{ marginBottom: 18 }}>
             <StatusStrip s={s} />
 
+            {/* s уже містить поле amount (дзеркало donation_amount_usdt) */}
             <ScenarioCard
               role="customer"
-              s={s as any}               {/* ⬅️ s вже має поле amount */}
+              s={s as any}
               onChangeDesc={(v) => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async (v) => {
                 if (!fieldsEditable) return;
@@ -605,10 +606,10 @@ export default function MyOrders() {
                   })
                   .eq("id", s.id);
               }}
-              onChangeAmount={(v) => {          // ⬅️ дзеркалимо локально
+              onChangeAmount={(v) => {
                 if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v, amount: v ?? null } as any);
               }}
-              onCommitAmount={async (v) => {    // ⬅️ дзеркалимо після коміту
+              onCommitAmount={async (v) => {
                 if (!fieldsEditable) return;
                 if (v !== null && (!Number.isFinite(v) || v <= 0)) {
                   alert("Сума має бути > 0");
