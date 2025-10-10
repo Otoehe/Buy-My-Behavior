@@ -33,9 +33,7 @@ interface Scenario { id: string; description: string; price: number }
 
 const CenterMap: React.FC<{ center: [number, number] }> = ({ center }) => {
   const map = useMap();
-  useEffect(() => {
-    map.setView(center, map.getZoom(), { animate: false });
-  }, [center, map]);
+  useEffect(() => { map.setView(center, map.getZoom(), { animate: false }); }, [center, map]);
   return null;
 };
 
@@ -51,6 +49,7 @@ export default function MapView() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // стабілізуємо режим
   const isSelectMode = useMemo(() => {
     const params = new URLSearchParams(location.search);
     return location.pathname === '/map/select' || params.get('pick') === '1';
@@ -64,7 +63,7 @@ export default function MapView() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
 
-  // фіксуємо екземпляр StoryBar, щоб його не ремонтувало на кожен ререндер батька
+  // ⬇️ фіксуємо екземпляр StoryBar (без перемонтувань)
   const storyBarElRef = useRef<JSX.Element | null>(null);
   if (!storyBarElRef.current) storyBarElRef.current = <StoryBar />;
 
@@ -112,7 +111,7 @@ export default function MapView() {
     touchStartX.current = null; lastX.current = null;
   };
 
-  // один ефект — один «пакет» оновлень (менше стартових ререндерів)
+  // первинне завантаження (єдиний “пакет”)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -238,19 +237,17 @@ export default function MapView() {
   const avg = selectedProfile?.avg_rating ?? 10;
 
   return (
-    // ⬅️ робимо контейнер позиційним, щоб усі оверлеї були ЛОКАЛЬНІ
-    <div className="map-view-container" onClick={handleMapClick} style={{ position: 'relative' }}>
+    <div className="map-view-container" onClick={handleMapClick}>
       {/* сторісбар під навбаром */}
       {!isSelectMode && (
-        <div
-          className="storybar-overlay"
-          style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
-        >
+        <div className="storybar-overlay">
           {storyBarElRef.current}
         </div>
       )}
 
       <MapContainer
+        // дубль-страховка висоти/позиції навіть якщо CSS не підхопився
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 1 }}
         center={center}
         zoom={15}
         className="map-container"
@@ -331,13 +328,12 @@ export default function MapView() {
         </>
       )}
 
-      {/* ⬇️ ГОЛОВНЕ: оверлеї тепер absolute, не fixed */}
       {!isSelectMode && selectedProfile && (
         <div
           ref={backdropRef}
           onClick={() => setSelectedProfile(null)}
           style={{
-            position: 'absolute', inset: 0, zIndex: 1999,
+            position: 'fixed', inset: 0, zIndex: 1999,
             background: 'rgba(0,0,0,0.35)', opacity: 0.35, transition: 'opacity 200ms ease',
           }}
         />
@@ -348,7 +344,7 @@ export default function MapView() {
           ref={panelRef}
           className="drawer-overlay"
           style={{
-            position: 'absolute', zIndex: 2000, top: 0, right: 0, bottom: 0,
+            position: 'fixed', zIndex: 2000, top: 0, right: 0, bottom: 0,
             width: drawerWidth,
             background: '#fff', boxShadow: '-8px 0 24px rgba(0,0,0,0.22)',
             padding: 20, overflowY: 'auto',
