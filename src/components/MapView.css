@@ -1,31 +1,68 @@
-/* ===== Контейнер мапи: стабільна висота ===== */
-.map-view-container{
-  /* висота сторісбару: кружок 64 + падинги 8*2 */
-  --sb-h: 80px;
+/* ===========================
+   MapView.css — стабільна карта + сторісбар
+   =========================== */
 
-  position: relative;
-  width: 100%;
-  height: calc(var(--app-vh, 1vh) * 100);
-  min-height: 100vh;
-  overscroll-behavior: none;
-  overflow: hidden;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+/* Рекомендація (глобально, якщо ще нема):
+html, body, #root { height: 100%; }
+*/
+
+:root{
+  /* висота твого хедера/навігації */
+  --nav-h: 64px;
+  /* висота сторісбару (кружок 64 + падинги 8*2) */
+  --sb-h: 80px;
 }
 
-/* Мапа займає весь простір */
-.map-container{ width: 100%; height: 100%; z-index: 1; }
+/* ===== Контейнер мапи: стабільна висота ===== */
+.map-view-container{
+  position: relative;
+  width: 100%;
+
+  /* сучасні мобільні: точний viewport */
+  height: 100dvh;
+
+  /* fallback + підтримка кастомної змінної */
+  height: calc(var(--app-vh, 1vh) * 100);
+  min-height: 100vh;
+
+  overscroll-behavior: none;
+  overflow: hidden;
+
+  /* ізолюємо стек контекст, щоб сторонні оверлеї не ламали z-index */
+  isolation: isolate;
+
+  /* дрібне згладжування скролу/композиції */
+  will-change: transform;
+  backface-visibility: hidden;
+
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: #fff;
+}
+
+/* Мапа займає весь простір контейнера гарантовано */
+.map-container{
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
 
 /* ===== СТОРІСБАР — ПІД НАВБАРОМ І НИЖЧЕ ШТОРКИ ===== */
 .storybar-overlay{
   position: fixed;
   left: 0; right: 0;
-  top: calc(var(--nav-h, 64px)); /* впритул під навбар */
+  top: var(--nav-h);             /* впритул під навбар */
   z-index: 1500;                 /* нижче backdrop:1999 і drawer:2000 */
-  pointer-events: none;          /* не блокує карту */
+  pointer-events: none;          /* сам контейнер прозорий для кліків по карті */
+  transform: translateZ(0);      /* прибирає мікро-мерехтіння на мобільних */
+  backface-visibility: hidden;
 }
+
+/* Внутрішня смужка сторісів клікобільна */
 .storybar-overlay .story-bar{ pointer-events: auto; }
 
-/* Внутрішня стрічка */
+/* Базовий вигляд сторіс-стрічки */
 .story-bar{
   display: flex; align-items: center; gap: 12px;
   padding: 8px 12px;
@@ -33,11 +70,12 @@
   overflow-x: auto; overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
+  box-shadow: 0 1px 0 rgba(0,0,0,.06);
 }
 
 /* ===== Ліфлет-контроли — опустити під сторісбар ===== */
 .map-view-container .leaflet-top.leaflet-left{
-  top: calc(var(--nav-h, 64px) + var(--sb-h));
+  top: calc(var(--nav-h) + var(--sb-h));
 }
 
 /* ===== Маячки на карті (аватар з білим кільцем) ===== */
