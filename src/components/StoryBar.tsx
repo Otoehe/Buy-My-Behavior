@@ -40,12 +40,10 @@ const readCache = (): Behavior[] => {
 };
 
 const writeCache = (items: Behavior[]) => {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(items));
-  } catch {}
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(items)); } catch {}
 };
 
-// швидка перевірка рівності списків (довжина + перші/останні id)
+// груба, але швидка перевірка рівності списків
 function listsEqual(a: Behavior[], b: Behavior[]): boolean {
   if (a === b) return true;
   if (a.length !== b.length) return false;
@@ -55,6 +53,39 @@ function listsEqual(a: Behavior[], b: Behavior[]): boolean {
   return true;
 }
 
+// Ледача підвантажка відео (економить мережу/CPU поза екраном)
+function LazyVideo({
+  src, onError, width = 64, height = 64,
+}: { src: string; onError?: () => void; width?: number; height?: number }) {
+  const ref = React.useRef<HTMLVideoElement | null>(null);
+  const [visible, setVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([e]) => setVisible(e.isIntersecting), {
+      rootMargin: '200px',
+      threshold: 0.01,
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  return (
+    <video
+      ref={ref}
+      className="sb-media"
+      src={src}
+      preload={visible ? 'metadata' : 'none'}
+      muted
+      playsInline
+      width={width}
+      height={height}
+      onError={onError}
+    />
+  );
+}
+
 // ---------- component ----------
 function StoryBarInner() {
   const navigate = useNavigate();
@@ -62,12 +93,12 @@ function StoryBarInner() {
   const [broken, setBroken] = useState<Set<number>>(new Set());
   const [isUploadOpen, setIsUploadOpen] = useState(false);
 
-  // refs для контролю життєвого циклу/дедупу
+  // життєвий цикл/дедуп
   const mountedRef = useRef(true);
   const lastListRef = useRef<Behavior[]>(items);
-  const insertSeenRef = useRef<Set<number>>(new Set()); // уникаємо дубляжів INSERT
+  const insertSeenRef = useRef<Set<number>>(new Set(items.map(x => x.id)));
 
-  // refresh from DB — обережно оновлюємо стан лише якщо реально щось змінилося
+  // refresh from DB
   const refresh = useCallback(async () => {
     const { data, error } = await supabase
       .from('behaviors')
@@ -88,8 +119,6 @@ function StoryBarInner() {
       setItems(next);
       lastListRef.current = next;
       writeCache(next);
-
-      // оновимо «seen» для дедупу realtime
       insertSeenRef.current = new Set(next.map(x => x.id));
     }
   }, []);
@@ -97,11 +126,10 @@ function StoryBarInner() {
   useEffect(() => {
     mountedRef.current = true;
 
-    // 1) кеш уже відмальований в useState
-    // 2) свіжі дані — у наступний тік, щоб не блокувати перший кадр
+    // кеш уже відмальований; довантажимо свіжі дані у наступний тік
     const t = setTimeout(() => { refresh(); }, 0);
 
-    // 3) realtime INSERT — з дедупом
+    // realtime INSERT з дедупом
     const ch = supabase
       .channel('sb_behaviors')
       .on(
@@ -111,14 +139,11 @@ function StoryBarInner() {
           if (!mountedRef.current) return;
           const row = payload?.new as Behavior | undefined;
           if (!row || typeof row.id !== 'number') return;
-
-          // якщо вже бачили цей id (або прийшов з initial refresh) — пропускаємо
-          if (insertSeenRef.current.has(row.id)) return;
+          if (insertSeenRef.current.has(row.id)) return; // дедуп
           insertSeenRef.current.add(row.id);
 
           setItems(prev => {
-            const exists = prev.some(x => x.id === row.id);
-            if (exists) return prev;
+            if (prev.some(x => x.id === row.id)) return prev;
             const next = [row, ...prev].slice(0, MAX_ITEMS);
             lastListRef.current = next;
             writeCache(next);
@@ -128,7 +153,7 @@ function StoryBarInner() {
       )
       .subscribe();
 
-    // 4) локальна подія від UploadBehavior (страхуємо дубль)
+    // локальна подія від UploadBehavior
     const onUploaded = () => refresh();
     window.addEventListener('behaviorUploaded', onUploaded as any);
 
@@ -140,7 +165,6 @@ function StoryBarInner() {
     };
   }, [refresh]);
 
-  // позначаємо зламане джерело, щоб не мигтіло endless onError
   const markBroken = useCallback((id: number) => {
     setBroken(prev => {
       const next = new Set(prev);
@@ -149,12 +173,10 @@ function StoryBarInner() {
     });
   }, []);
 
-  // стабільний onClick (SPA-перехід — без повного reload)
   const handleOpenBehaviors = useCallback(() => {
     navigate('/behaviors');
   }, [navigate]);
 
-  // Обчислюємо відмальовку елементів стабільно
   const circles = useMemo(() => {
     return items.map((b) => {
       const src = buildSrc(b);
@@ -169,16 +191,7 @@ function StoryBarInner() {
         >
           {src && !isBroken ? (
             isVideo(src) ? (
-              <video
-                className="sb-media"
-                src={`${src}#t=0.001`}
-                preload="metadata"
-                muted
-                playsInline
-                width={64}
-                height={64}
-                onError={() => markBroken(b.id)}
-              />
+              <LazyVideo src={`${src}#t=0.001`} onError={() => markBroken(b.id)} />
             ) : (
               <img
                 className="sb-media"
@@ -224,5 +237,5 @@ function StoryBarInner() {
   );
 }
 
-// ⬇️ Ізоляція від ререндерів батька (MapView) — без зміни поведінки
+// Ізоляція від зайвих ререндерів батьків
 export default React.memo(StoryBarInner);
