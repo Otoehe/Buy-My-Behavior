@@ -3,22 +3,27 @@ import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 /**
- * Поки sessionStorage.bmb.lockIntent === "1",
- * примусово тримає користувача на /escrow/confirm?sid=...&amt=...
+ * Глобовий сторож маршрутизації:
+ * якщо активний намір (bmb.lockIntent === "1"), ми не даємо піти на інші екрани,
+ * а повертаємо користувача на /escrow/confirm із актуальними sid/amt.
  */
 export default function RouterGuard() {
   const nav = useNavigate();
   const loc = useLocation();
 
   useEffect(() => {
-    if (sessionStorage.getItem("bmb.lockIntent") === "1") {
-      const sid = sessionStorage.getItem("bmb.sid") || "";
-      const amt = sessionStorage.getItem("bmb.amt") || "";
-      const onConfirm = loc.pathname === "/escrow/confirm";
-      if (sid && amt && !onConfirm) {
-        const url = `/escrow/confirm?sid=${encodeURIComponent(sid)}&amt=${encodeURIComponent(amt)}`;
-        nav(url, { replace: true });
-      }
+    const intent = sessionStorage.getItem("bmb.lockIntent") === "1";
+    if (!intent) return;
+
+    const sid = sessionStorage.getItem("bmb.sid") || "";
+    const amt = sessionStorage.getItem("bmb.amt") || "";
+    if (!sid || !amt) return;
+
+    const target = `/escrow/confirm?sid=${encodeURIComponent(sid)}&amt=${encodeURIComponent(amt)}`;
+
+    // якщо ми НЕ на цільовій сторінці — повертаємо
+    if (loc.pathname !== "/escrow/confirm") {
+      nav(target, { replace: true });
     }
   }, [loc.pathname, nav]);
 

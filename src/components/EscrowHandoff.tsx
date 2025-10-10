@@ -1,40 +1,53 @@
-// src/components/EscrowHandoff.tsx
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import { isMetaMaskInApp } from "../lib/isMetaMaskBrowser";
 
-function parseSess():
-  | { at?: string | null; rt?: string | null; next?: string }
-  | null {
-  try {
-    const m = (location.hash || "").match(/bmbSess=([^&]+)/);
-    if (!m) return null;
-    const json = atob(decodeURIComponent(m[1]));
-    const o = JSON.parse(json);
-    return {
-      at: o?.at ?? null,
-      rt: o?.rt ?? null,
-      next: typeof o?.next === "string" ? o.next : "/escrow/confirm",
-    };
-  } catch { return null; }
-}
-
+/**
+ * Екран-вхід у MetaMask. Тут ми:
+ *  - відновлюємо сесію (якщо треба),
+ *  - і ГОЛОВНЕ: якщо є намір забронювати (bmb.lockIntent) або sid/amt у URL —
+ *    миттєво переадресовуємо на /escrow/confirm (кнопка бронювання).
+ */
 export default function EscrowHandoff() {
+  const [sp] = useSearchParams();
   const navigate = useNavigate();
 
   useEffect(() => {
     (async () => {
-      const sess = parseSess();
-      history.replaceState(null, document.title, location.pathname + location.search);
+      // 1) Спробуємо відновити сесію Supabase (щоб сторінка /escrow/confirm була вже авторизована)
       try {
-        if (sess?.at) {
-          await supabase.auth.setSession({ access_token: sess.at!, refresh_token: sess.rt ?? undefined });
+        const { data } = await supabase.auth.getSession();
+        if (!data?.session && isMetaMaskInApp()) {
+          // якщо потрібно — тут можна вставити ваш cookie-брідж
         }
       } catch {}
-      navigate(sess?.next || "/escrow/confirm", { replace: true });
+
+      // 2) Прочитати намір/параметри
+      const lockIntent = sessionStorage.getItem("bmb.lockIntent") === "1";
+      const sid = sp.get("sid") || sessionStorage.getItem("bmb.sid") || "";
+      const amt = sp.get("amt") || sessionStorage.getItem("bmb.amt") || "";
+
+      // 3) Якщо є намір або параметри — одразу ведемо на сторінку з кнопкою
+      if ((lockIntent || (sid && amt)) && sid && amt) {
+        // збережемо для надійності
+        try {
+          sessionStorage.setItem("bmb.lockIntent", "1");
+          sessionStorage.setItem("bmb.sid", sid);
+          sessionStorage.setItem("bmb.amt", amt);
+        } catch {}
+
+        navigate(`/escrow/confirm?sid=${encodeURIComponent(sid)}&amt=${encodeURIComponent(amt)}`, {
+          replace: true,
+        });
+        return;
+      }
+
+      // 4) Фолбек — якщо нічого не відомо, відправляємо на /my-orders (як раніше)
+      navigate("/my-orders", { replace: true });
     })();
-  }, [navigate]);
+  }, [navigate, sp]);
 
   return null;
 }
