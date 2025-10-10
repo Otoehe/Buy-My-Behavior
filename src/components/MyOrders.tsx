@@ -66,12 +66,11 @@ const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed
 const canEditFields = (s: Scenario) =>
   !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== "confirmed";
 
-/** 0:None/Init, 1:Agreed, 2:Locked, 3:Confirmed — як у контракті */
+/** 0:None/Init, 1:Agreed, 2:Locked, 3:Confirmed */
 function asStatusNum(x: any): number {
   const n = Number((x ?? {}).status);
   return Number.isFinite(n) ? n : -1;
 }
-/** очікуємо цільовий статус у ланцюгу */
 async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 120_000, stepMs = 3_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -84,7 +83,7 @@ async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 12
   return false;
 }
 
-/* ========== Сумісність: забезпечуємо s.amount для UI ========== */
+/* ===== сумісність: гарантуємо поле s.amount для UI ===== */
 const pickAmount = (s: any): number | null => {
   const v = s?.donation_amount_usdt ?? s?.amount ?? null;
   const n = Number(v);
@@ -98,7 +97,7 @@ const mirrorAmountPatch = (patch: Partial<Scenario>): Partial<Scenario & { amoun
   "donation_amount_usdt" in patch
     ? { ...patch, amount: pickAmount(patch) }
     : (patch as any);
-/* ============================================================= */
+/* ======================================================= */
 
 function StatusStrip({ s }: { s: Scenario }) {
   const stage =
@@ -138,7 +137,7 @@ export default function MyOrders() {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
 
-  // ГАРД: під час бронювання тримаємо користувача на /escrow/confirm
+  // guard: під час бронювання тримаємо користувача на /escrow/confirm
   useEffect(() => {
     if (sessionStorage.getItem("bmb.lockIntent") === "1") {
       const sid = sessionStorage.getItem("bmb.sid") || sp.get("sid") || "";
