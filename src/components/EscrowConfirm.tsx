@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { ethers } from "ethers";
 import { ensureBSC } from "../lib/providerBridge";
-import { approveIfNeeded, lockFunds } from "../lib/escrowContract";
+import { quickOneClickSetup, lockFunds } from "../lib/escrowContract";
 import { supabase } from "../lib/supabase";
 
 export default function EscrowConfirm() {
@@ -15,13 +15,15 @@ export default function EscrowConfirm() {
 
   const [scenarioId, setScenarioId] = useState("");
   const [amountStr, setAmountStr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-  // маркер наміру бронювання (для гардa)
+  // Маркер наміру бронювання — поки він активний, RouterGuard тримає нас на цій сторінці
   useEffect(() => {
     sessionStorage.setItem("bmb.lockIntent", "1");
   }, []);
 
-  // зберігати sid/amt між переходами
+  // Не губимо sid/amt між переходами та в різних браузерах
   useEffect(() => {
     const sid = sidUrl || sessionStorage.getItem("bmb.sid") || "";
     const amt = amtUrl || sessionStorage.getItem("bmb.amt") || "";
@@ -30,9 +32,6 @@ export default function EscrowConfirm() {
     setScenarioId(sid);
     setAmountStr(amt);
   }, [sidUrl, amtUrl]);
-
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
   const amount = useMemo(() => {
     if (!amountStr) return null;
@@ -43,27 +42,36 @@ export default function EscrowConfirm() {
     setErr(null);
     setBusy(true);
     try {
-      // Якщо сторінка НЕ в MetaMask — відкриваємо цю ж сторінку в MetaMask in-app browser
+      // Якщо відкрито не у MetaMask — відкрити цю ж сторінку у MetaMask (той же таб)
       if (!(window as any).ethereum) {
-        const base = `https://metamask.app.link/dapp/${location.host}/escrow/confirm`;
+        const host = location.host;
+        const base = `https://metamask.app.link/dapp/${host}/escrow/confirm`;
         const url  = `${base}?sid=${encodeURIComponent(scenarioId)}&amt=${encodeURIComponent(amountStr)}`;
-        location.href = url; // той самий таб
+        location.href = url;
         return;
       }
 
-      const web3 = new ethers.providers.Web3Provider((window as any).ethereum, "any");
+      // 1) Запросити акаунт і перемкнути мережу на BSC
+      const eip1193 = (window as any).ethereum;
+      const web3 = new ethers.providers.Web3Provider(eip1193, "any");
       await web3.send("eth_requestAccounts", []);
-      // ensureBSC — саме на EIP-1193 провайдері
-      await ensureBSC((window as any).ethereum);
+      await ensureBSC(eip1193);
 
+      // 2) Валідація параметрів
       if (!scenarioId || !amount) throw new Error("Невірні параметри сценарію або суми.");
 
-      await approveIfNeeded(web3, amount);
-      await lockFunds(web3, { scenarioId, amount });
+      // 3) Гарантований allowance (unlimited approve, якщо потрібен)
+      await quickOneClickSetup();
 
-      try { await supabase.from("escrow_events").insert({ scenario_id: scenarioId, kind: "LOCKED" }); } catch {}
+      // 4) Власне бронювання коштів в ескроу
+      await lockFunds({ amount: amountStr, scenarioId });
 
-      // очистити намір і повернути на Мої замовлення
+      // 5) Лог для бекенду (не критично)
+      try {
+        await supabase.from("escrow_events").insert({ scenario_id: scenarioId, kind: "LOCKED" });
+      } catch {}
+
+      // 6) Успіх — чистимо намір і повертаємось на Мої замовлення
       sessionStorage.removeItem("bmb.lockIntent");
       navigate(`/my-orders?sid=${encodeURIComponent(scenarioId)}&locked=1`, { replace: true });
     } catch (e: any) {
@@ -76,7 +84,9 @@ export default function EscrowConfirm() {
   return (
     <div className="max-w-screen-sm mx-auto px-4 py-8">
       <h1 className="text-3xl font-extrabold mb-2">Підтвердження ескроу</h1>
-      <p className="text-slate-600 mb-4">Після підтвердження у MetaMask повернемось на “Мої замовлення”.</p>
+      <p className="text-slate-600 mb-4">
+        Натисніть кнопку нижче, підтвердіть транзакцію у MetaMask — і ми повернемось на “Мої замовлення”.
+      </p>
 
       <div className="rounded-xl border border-slate-200 p-4 mb-4">
         <div className="text-sm text-slate-500">Сценарій</div>
