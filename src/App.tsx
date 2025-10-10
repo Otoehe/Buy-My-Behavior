@@ -17,7 +17,7 @@ import SWUpdateToast        from "./components/SWUpdateToast";
 import BmbModalHost         from "./components/BmbModalHost";
 import { isMetaMaskInApp }  from "./lib/isMetaMaskBrowser";
 
-// ⬇ сторож редиректів під час ескроу
+// Сторож редиректів під час ескроу
 import RouterGuard from "./components/RouterGuard";
 
 // lazy-екрани
@@ -29,8 +29,8 @@ const ScenarioForm      = lazy(() => import("./components/ScenarioForm"));
 const ScenarioLocation  = lazy(() => import("./components/ScenarioLocation"));
 const BmbModalsDemo     = lazy(() => import("./components/BmbModalsDemo"));
 const EscrowHandoff     = lazy(() => import("./components/EscrowHandoff"));
-// ⬇ сторінка підтвердження ескроу з кнопкою
-const EscrowConfirm     = lazy(() => import("./pages/EscrowConfirm"));
+// ✅ виправлено: правильний шлях
+const EscrowConfirm     = lazy(() => import("./components/EscrowConfirm"));
 
 /** Гейт для приватних маршрутів */
 function RequireAuth({
@@ -102,7 +102,7 @@ export default function App() {
   const HIDE_UI_ROUTES = new Set<string>([
     "/map/select",
     "/escrow/approve",
-    "/escrow/confirm", // ⬅ додано
+    "/escrow/confirm",
   ]);
   const pathname = location.pathname;
   const hideNavAndA2HS = HIDE_UI_ROUTES.has(pathname);
