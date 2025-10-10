@@ -24,18 +24,15 @@ import { lockFundsMobileFlow } from "../lib/escrowMobile";
 import { writeSupabaseSessionCookie } from "../lib/supabaseSessionBridge";
 
 /* ----------------------------------------- */
-const isMobileUA = (): boolean =>
-  /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
-const isMetaMaskInApp = (): boolean =>
-  /MetaMaskMobile/i.test(navigator.userAgent || "");
+const isMobileUA = (): boolean => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+const isMetaMaskInApp = (): boolean => /MetaMaskMobile/i.test(navigator.userAgent || "");
 
 function openInMetaMaskDapp(
   nextPath: string,
   handoff?: { at?: string | null; rt?: string | null; next?: string }
 ) {
   const publicUrl =
-    (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ||
-    window.location.origin;
+    (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) || window.location.origin;
   const host = publicUrl.replace(/^https?:\/\//i, "").replace(/\/+$/g, "");
   const base = `https://metamask.app.link/dapp/${host}`;
 
@@ -44,8 +41,9 @@ function openInMetaMaskDapp(
     const payload = encodeURIComponent(btoa(JSON.stringify(handoff)));
     url += `#bmbSess=${payload}`;
   }
-  window.location.href = url; // відкриваємо в тій самій вкладці
+  window.location.href = url;
 }
+/* ----------------------------------------- */
 
 const SOUND = new Audio("/notification.wav");
 SOUND.volume = 0.8;
@@ -56,6 +54,7 @@ async function withTimeout<T>(p: Promise<T>, ms = 8000, label = "op"): Promise<T
     new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Timeout:${label}`)), ms)) as any,
   ])) as T;
 }
+
 async function ensureProviderReady() {
   const { provider } = await connectWallet();
   await ensureBSC(provider);
@@ -66,11 +65,13 @@ const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed
 const canEditFields = (s: Scenario) =>
   !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== "confirmed";
 
-/** 0:None/Init, 1:Agreed, 2:Locked, 3:Confirmed */
+/** 0:None/Init, 1:Agreed, 2:Locked, 3:Confirmed — як у контракті */
 function asStatusNum(x: any): number {
   const n = Number((x ?? {}).status);
   return Number.isFinite(n) ? n : -1;
 }
+
+/** очікуємо цільовий статус у ланцюгу */
 async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 120_000, stepMs = 3_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -83,22 +84,6 @@ async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 12
   return false;
 }
 
-/* ===== сумісність: гарантуємо поле s.amount для UI ===== */
-const pickAmount = (s: any): number | null => {
-  const v = s?.donation_amount_usdt ?? s?.amount ?? null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
-const withAmountCompat = <T extends Record<string, any>>(s: T): T & { amount: number | null } => ({
-  ...s,
-  amount: pickAmount(s),
-});
-const mirrorAmountPatch = (patch: Partial<Scenario>): Partial<Scenario & { amount: number | null }> =>
-  "donation_amount_usdt" in patch
-    ? { ...patch, amount: pickAmount(patch) }
-    : (patch as any);
-/* ======================================================= */
-
 function StatusStrip({ s }: { s: Scenario }) {
   const stage =
     s.status === "confirmed" ? 3 : s.escrow_tx_hash ? 2 : isBothAgreed(s) ? 1 : 0;
@@ -106,8 +91,8 @@ function StatusStrip({ s }: { s: Scenario }) {
   const Dot = ({ active }: { active: boolean }) => (
     <span
       style={{
-        width: 10, height: 10, borderRadius: 9999, display: "inline-block",
-        margin: "0 6px", background: active ? "#111" : "#e5e7eb",
+        width: 10, height: 10, borderRadius: 9999, display: "inline-block", margin: "0 6px",
+        background: active ? "#111" : "#e5e7eb",
       }}
     />
   );
@@ -118,10 +103,7 @@ function StatusStrip({ s }: { s: Scenario }) {
         borderRadius: 10, background: "rgba(0,0,0,0.035)", margin: "6px 0 10px",
       }}
     >
-      <Dot active={stage >= 0} />
-      <Dot active={stage >= 1} />
-      <Dot active={stage >= 2} />
-      <Dot active={stage >= 3} />
+      <Dot active={stage >= 0} /><Dot active={stage >= 1} /><Dot active={stage >= 2} /><Dot active={stage >= 3} />
       <div style={{ fontSize: 12, color: "#6b7280", marginLeft: 8 }}>
         {stage === 0 && "• Угоду погоджено → далі кошти в Escrow"}
         {stage === 1 && "• Погоджено → кошти ще не заблоковані"}
@@ -137,7 +119,7 @@ export default function MyOrders() {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
 
-  // guard: під час бронювання тримаємо користувача на /escrow/confirm
+  /** ГАРД: під час бронювання тримаємо користувача на /escrow/confirm */
   useEffect(() => {
     if (sessionStorage.getItem("bmb.lockIntent") === "1") {
       const sid = sessionStorage.getItem("bmb.sid") || sp.get("sid") || "";
@@ -149,7 +131,7 @@ export default function MyOrders() {
   }, [navigate, sp, location.pathname]);
 
   const [userId, setUserId] = useState("");
-  const [list, setList] = useState<(Scenario & { amount?: number | null })[]>([]);
+  const [list, setList] = useState<Scenario[]>([]);
   const [agreeBusy, setAgreeBusy] = useState<Record<string, boolean>>({});
   const [confirmBusy, setConfirmBusy] = useState<Record<string, boolean>>({});
   const [lockBusy, setLockBusy] = useState<Record<string, boolean>>({});
@@ -168,7 +150,7 @@ export default function MyOrders() {
   const rt = useRealtimeNotifications(userId);
 
   const setLocal = (id: string, patch: Partial<Scenario>) =>
-    setList((prev) => prev.map((x) => (x.id === id ? { ...x, ...mirrorAmountPatch(patch) } : x)));
+    setList((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
 
   const hasCoords = (s: Scenario) =>
     typeof s.latitude === "number" && Number.isFinite(s.latitude) &&
@@ -213,9 +195,7 @@ export default function MyOrders() {
         .eq("creator_id", uid)
         .order("created_at", { ascending: false });
       if (error) console.error(error);
-      const items = ((data || []) as Scenario[])
-        .filter((s) => s.creator_id === uid)
-        .map(withAmountCompat);
+      const items = ((data || []) as Scenario[]).filter((s) => s.creator_id === uid);
       setList(items);
       items.forEach((s) => { if (s.escrow_tx_hash) refreshLocked(s.id); });
     },
@@ -223,16 +203,9 @@ export default function MyOrders() {
   );
 
   const refreshRated = useCallback(async (uid: string, items: Scenario[]) => {
-    if (!uid || items.length === 0) {
-      setRatedOrders(new Set());
-      return;
-    }
+    if (!uid || items.length === 0) { setRatedOrders(new Set()); return; }
     const ids = items.map((s) => s.id);
-    const { data } = await supabase
-      .from("ratings")
-      .select("order_id")
-      .eq("rater_id", uid)
-      .in("order_id", ids);
+    const { data } = await supabase.from("ratings").select("order_id").eq("rater_id", uid).in("order_id", ids);
     setRatedOrders(new Set((data || []).map((r: any) => r.order_id)));
   }, []);
 
@@ -251,8 +224,7 @@ export default function MyOrders() {
           { event: "*", schema: "public", table: "scenarios" },
           async (p) => {
             const ev = p.eventType as "INSERT" | "UPDATE" | "DELETE";
-            const raw = (p as any).new as Scenario | undefined;
-            const s = raw ? withAmountCompat(raw) : undefined;
+            const s = (p as any).new as Scenario | undefined;
             const oldId = (p as any).old?.id as string | undefined;
 
             setList((prev) => {
@@ -287,8 +259,7 @@ export default function MyOrders() {
                 const bothAgreed = !!after.is_agreed_by_customer && !!after.is_agreed_by_executor;
                 const needLock = bothAgreed && !after.escrow_tx_hash && after.creator_id === uid;
 
-                const cp = [...prev];
-                cp[i] = after;
+                const cp = [...prev]; cp[i] = after;
 
                 if (after.escrow_tx_hash) refreshLocked(after.id);
 
@@ -296,6 +267,7 @@ export default function MyOrders() {
                   (window as any).__locking = true;
                   setTimeout(() => handleLock(after).finally(() => ((window as any).__locking = false)), 0);
                 }
+
                 return cp;
               }
               return prev;
@@ -353,41 +325,31 @@ export default function MyOrders() {
 
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = "0x0000000000000000000000000000000000000000";
+
     let executor =
       (s as any).executor_wallet || (s as any).executorAddress || (s as any).executor || null;
 
     if (!executor && (s as any).executor_id) {
       const execId = (s as any).executor_id as string;
-      const { data: prof } = await supabase
-        .from("profiles")
-        .select("wallet")
-        .eq("user_id", execId)
-        .single();
+      const { data: prof } = await supabase.from("profiles").select("wallet").eq("user_id", execId).single();
       executor = prof?.wallet ?? null;
     }
+
     if (!executor || typeof executor !== "string" || !/^0x[a-fA-F0-9]{40}$/.test(executor)) {
       throw new Error("Не знайдено адресу гаманця виконавця для цієї угоди.");
     }
+
     const referrer = (s as any).referrer_wallet ?? ZERO;
     return { executor, referrer };
   }
 
   const handleLock = async (s: Scenario) => {
     if (lockBusy[s.id]) return;
-
-    const amountNum = Number(s.donation_amount_usdt ?? (s as any).amount);
-    if (!Number.isFinite(amountNum) || amountNum <= 0) {
-      alert("Сума має бути > 0");
-      return;
+    if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) {
+      alert("Сума має бути > 0"); return;
     }
-    if (!isBothAgreed(s)) {
-      alert("Спершу потрібні дві згоди.");
-      return;
-    }
-    if (s.escrow_tx_hash) {
-      refreshLocked(s.id);
-      return;
-    }
+    if (!isBothAgreed(s)) { alert("Спершу потрібні дві згоди."); return; }
+    if (s.escrow_tx_hash) { refreshLocked(s.id); return; }
 
     setLockBusy((p) => ({ ...p, [s.id]: true }));
     try {
@@ -397,20 +359,14 @@ export default function MyOrders() {
         scenarioId: s.id,
         executor,
         referrer,
-        amount: amountNum,
+        amount: Number(s.donation_amount_usdt),
         onStatus: () => {},
       });
 
       const ok = await waitDealStatus(s.id, 2, 120_000, 3_000);
-      if (!ok) {
-        alert("Транзакція ще не зафіксована як Locked. Спробуйте оновити сторінку пізніше.");
-        return;
-      }
+      if (!ok) { alert("Транзакція ще не зафіксована як Locked. Спробуйте оновити сторінку пізніше."); return; }
 
-      await supabase.from("scenarios")
-        .update({ escrow_tx_hash: txHash, status: "agreed" as Status })
-        .eq("id", s.id);
-
+      await supabase.from("scenarios").update({ escrow_tx_hash: txHash, status: "agreed" as Status }).eq("id", s.id);
       setLocal(s.id, { escrow_tx_hash: txHash as any, status: "agreed" });
       markLockedLocal(s.id, true);
     } catch (e: any) {
@@ -433,13 +389,13 @@ export default function MyOrders() {
 
       try { writeSupabaseSessionCookie?.(data?.session ?? null, 300); } catch {}
 
-      const amtStr = String(s.donation_amount_usdt ?? (s as any).amount ?? "");
-      const next = `/escrow/confirm?sid=${encodeURIComponent(s.id)}&amt=${encodeURIComponent(amtStr)}`;
+      const amt = String(s.donation_amount_usdt ?? "");
+      const next = `/escrow/confirm?sid=${encodeURIComponent(s.id)}&amt=${encodeURIComponent(amt)}`;
 
       try {
         sessionStorage.setItem("bmb.lockIntent", "1");
         sessionStorage.setItem("bmb.sid", s.id);
-        sessionStorage.setItem("bmb.amt", amtStr);
+        sessionStorage.setItem("bmb.amt", amt);
       } catch {}
 
       openInMetaMaskDapp(next, { at, rt, next });
@@ -467,7 +423,6 @@ export default function MyOrders() {
     setConfirmBusy((p) => ({ ...p, [s.id]: true }));
     try {
       const eth = await ensureProviderReady();
-
       try { await withTimeout(eth.request({ method: "eth_chainId" }), 4000, "poke4"); } catch {}
       try { await withTimeout(eth.request({ method: "eth_accounts" }), 4000, "poke5"); } catch {}
       try { await waitForReturn(15000); } catch {}
@@ -475,8 +430,7 @@ export default function MyOrders() {
       await confirmCompletionOnChain({ scenarioId: s.id });
       setLocal(s.id, { is_completed_by_customer: true });
 
-      await supabase
-        .from("scenarios")
+      await supabase.from("scenarios")
         .update({ is_completed_by_customer: true })
         .eq("id", s.id)
         .eq("is_completed_by_customer", false);
@@ -544,9 +498,7 @@ export default function MyOrders() {
         </span>
         <span>📡 {rt.isListening ? `${rt.method} активний` : "Не підключено"}</span>
         {permissionStatus !== "granted" && (
-          <button className="notify-btn" onClick={requestPermission}>
-            🔔 Дозволити
-          </button>
+          <button className="notify-btn" onClick={requestPermission}>🔔 Дозволити</button>
         )}
       </div>
     ),
@@ -588,10 +540,9 @@ export default function MyOrders() {
           <div key={s.id} style={{ marginBottom: 18 }}>
             <StatusStrip s={s} />
 
-            {/* s уже містить поле amount (дзеркало donation_amount_usdt) */}
             <ScenarioCard
               role="customer"
-              s={s as any}
+              s={s as any} /* s вже має поле amount */
               onChangeDesc={(v) => { if (fieldsEditable) setLocal(s.id, { description: v }); }}
               onCommitDesc={async (v) => {
                 if (!fieldsEditable) return;
@@ -605,14 +556,12 @@ export default function MyOrders() {
                   })
                   .eq("id", s.id);
               }}
-              onChangeAmount={(v) => {
-                if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v, amount: v ?? null } as any);
-              }}
+              onChangeAmount={(v) => { if (fieldsEditable) setLocal(s.id, { donation_amount_usdt: v }); }}
               onCommitAmount={async (v) => {
                 if (!fieldsEditable) return;
                 if (v !== null && (!Number.isFinite(v) || v <= 0)) {
                   alert("Сума має бути > 0");
-                  setLocal(s.id, { donation_amount_usdt: null, amount: null } as any);
+                  setLocal(s.id, { donation_amount_usdt: null });
                   return;
                 }
                 await supabase
@@ -624,7 +573,6 @@ export default function MyOrders() {
                     is_agreed_by_executor: false,
                   })
                   .eq("id", s.id);
-                setLocal(s.id, { donation_amount_usdt: v, amount: v ?? null } as any);
               }}
               onAgree={() => handleAgree(s)}
               onLock={() => handleLockEntry(s)}
@@ -640,9 +588,7 @@ export default function MyOrders() {
               canAgree={canAgree(s)}
               canLock={bothAgreed && !s.escrow_tx_hash}
               canConfirm={canConfirm(s)}
-              canDispute={
-                s.status !== "confirmed" && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id
-              }
+              canDispute={s.status !== "confirmed" && !!s.escrow_tx_hash && !openDisputes[s.id] && userId === s.creator_id}
               hasCoords={true}
               isRated={rated}
               onOpenRate={() => openRateFor(s)}
@@ -655,9 +601,8 @@ export default function MyOrders() {
                   onClick={() => openRateFor(s)}
                   style={{
                     width: "100%", maxWidth: 520, marginTop: 10, padding: "12px 18px",
-                    borderRadius: 999, background: "#ffd7e0", color: "#111",
-                    fontWeight: 800, border: "1px solid #f3c0ca", cursor: "pointer",
-                    boxShadow: "inset 0 0 0 1px rgba(255,255,255,.7)",
+                    borderRadius: 999, background: "#ffd7e0", color: "#111", fontWeight: 800,
+                    border: "1px solid #f3c0ca", cursor: "pointer", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.7)",
                   }}
                 >
                   ⭐ Оцінити виконавця
