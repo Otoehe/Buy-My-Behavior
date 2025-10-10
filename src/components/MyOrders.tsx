@@ -2,7 +2,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
-import EscrowButton from "./EscrowButton";
+
+// import EscrowButton from "./EscrowButton"; // не використовується — прибрав
 
 import { confirmCompletionOnChain, getDealOnChain } from "../lib/escrowContract";
 import {
@@ -145,7 +146,10 @@ export default function MyOrders() {
       const sid = sessionStorage.getItem("bmb.sid") || sp.get("sid") || "";
       const amt = sessionStorage.getItem("bmb.amt") || sp.get("amt") || "";
       if (sid && amt && location.pathname !== "/escrow/confirm") {
-        navigate(`/escrow/confirm?sid=${encodeURIComponent(sid)}&amt=${encodeURIComponent(amt)}`, { replace: true });
+        navigate(
+          `/escrow/confirm?sid=${encodeURIComponent(sid)}&amt=${encodeURIComponent(amt)}`,
+          { replace: true }
+        );
       }
     }
   }, [navigate, sp, location.pathname]);

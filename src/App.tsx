@@ -1,4 +1,3 @@
-// src/App.tsx
 import React, { useEffect, useState, Suspense, lazy } from "react";
 import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import type { User } from "@supabase/supabase-js";
@@ -17,7 +16,7 @@ import SWUpdateToast        from "./components/SWUpdateToast";
 import BmbModalHost         from "./components/BmbModalHost";
 import { isMetaMaskInApp }  from "./lib/isMetaMaskBrowser";
 
-// Сторож редиректів під час ескроу
+// ⬇ сторож редиректів під час ескроу (ШЛЯХ У COMPONENTS!)
 import RouterGuard from "./components/RouterGuard";
 
 // lazy-екрани
@@ -29,7 +28,7 @@ const ScenarioForm      = lazy(() => import("./components/ScenarioForm"));
 const ScenarioLocation  = lazy(() => import("./components/ScenarioLocation"));
 const BmbModalsDemo     = lazy(() => import("./components/BmbModalsDemo"));
 const EscrowHandoff     = lazy(() => import("./components/EscrowHandoff"));
-// ✅ виправлено: правильний шлях
+// ⬇ сторінка підтвердження ескроу (ТЕЖ У COMPONENTS!)
 const EscrowConfirm     = lazy(() => import("./components/EscrowConfirm"));
 
 /** Гейт для приватних маршрутів */
@@ -102,7 +101,7 @@ export default function App() {
   const HIDE_UI_ROUTES = new Set<string>([
     "/map/select",
     "/escrow/approve",
-    "/escrow/confirm",
+    "/escrow/confirm", // тут теж ховаємо
   ]);
   const pathname = location.pathname;
   const hideNavAndA2HS = HIDE_UI_ROUTES.has(pathname);
@@ -116,7 +115,7 @@ export default function App() {
       {!hideNavAndA2HS && <NavigationBar />}
       <BmbModalHost />
 
-      {/* Глобальний сторож, що тримає користувача на /escrow/confirm під час бронювання */}
+      {/* глобальний сторож, який під час lockIntent повертає на /escrow/confirm */}
       <RouterGuard />
 
       <Suspense fallback={null}>
@@ -127,6 +126,8 @@ export default function App() {
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/escrow/approve" element={<EscrowHandoff />} />
           <Route path="/escrow/confirm" element={<EscrowConfirm />} />
+
+          {/* /register прибрали — редіректимо на escrow */}
           <Route
             path="/register"
             element={<Navigate to="/escrow/approve?next=/my-orders" replace />}

@@ -3,8 +3,8 @@ import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 /**
- * Поки sessionStorage.bmb.lockIntent === "1", утримує користувача на
- * /escrow/confirm?sid=...&amt=...
+ * Поки sessionStorage.bmb.lockIntent === "1",
+ * примусово тримає користувача на /escrow/confirm?sid=...&amt=...
  */
 export default function RouterGuard() {
   const nav = useNavigate();

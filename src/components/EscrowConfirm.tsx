@@ -18,12 +18,12 @@ export default function EscrowConfirm() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Маркер наміру бронювання — поки він активний, RouterGuard тримає нас на цій сторінці
+  // Маркер наміру: поки активний — RouterGuard не дасть злетіти з цієї сторінки
   useEffect(() => {
     sessionStorage.setItem("bmb.lockIntent", "1");
   }, []);
 
-  // Не губимо sid/amt між переходами та в різних браузерах
+  // Не губимо sid/amt
   useEffect(() => {
     const sid = sidUrl || sessionStorage.getItem("bmb.sid") || "";
     const amt = amtUrl || sessionStorage.getItem("bmb.amt") || "";
@@ -42,36 +42,35 @@ export default function EscrowConfirm() {
     setErr(null);
     setBusy(true);
     try {
-      // Якщо відкрито не у MetaMask — відкрити цю ж сторінку у MetaMask (той же таб)
+      // Якщо не в MetaMask — відкрити цей самий шлях у MetaMask (той самий таб)
       if (!(window as any).ethereum) {
         const host = location.host;
-        const base = `https://metamask.app.link/dapp/${host}/escrow/confirm`;
-        const url  = `${base}?sid=${encodeURIComponent(scenarioId)}&amt=${encodeURIComponent(amountStr)}`;
+        const url  = `https://metamask.app.link/dapp/${host}/escrow/confirm?sid=${encodeURIComponent(scenarioId)}&amt=${encodeURIComponent(amountStr)}`;
         location.href = url;
         return;
       }
 
-      // 1) Запросити акаунт і перемкнути мережу на BSC
+      // 1) Підключення та мережа BSC
       const eip1193 = (window as any).ethereum;
       const web3 = new ethers.providers.Web3Provider(eip1193, "any");
       await web3.send("eth_requestAccounts", []);
       await ensureBSC(eip1193);
 
-      // 2) Валідація параметрів
+      // 2) Перевірка параметрів
       if (!scenarioId || !amount) throw new Error("Невірні параметри сценарію або суми.");
 
-      // 3) Гарантований allowance (unlimited approve, якщо потрібен)
+      // 3) Забезпечити allowance (unlimited approve якщо потрібно)
       await quickOneClickSetup();
 
-      // 4) Власне бронювання коштів в ескроу
+      // 4) Бронювання коштів (он-чейн)
       await lockFunds({ amount: amountStr, scenarioId });
 
-      // 5) Лог для бекенду (не критично)
+      // 5) Необов'язковий бекенд-лог
       try {
         await supabase.from("escrow_events").insert({ scenario_id: scenarioId, kind: "LOCKED" });
       } catch {}
 
-      // 6) Успіх — чистимо намір і повертаємось на Мої замовлення
+      // 6) Успіх → очистка наміру → повернення на сайт
       sessionStorage.removeItem("bmb.lockIntent");
       navigate(`/my-orders?sid=${encodeURIComponent(scenarioId)}&locked=1`, { replace: true });
     } catch (e: any) {
