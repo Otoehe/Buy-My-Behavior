@@ -1,7 +1,7 @@
-/* ===== Контейнер мапи: стабільна висота ===== */
+/* ===== Контейнер мапи: стабільна висота та відступ під навбар ===== */
 .map-view-container{
-  --sb-h: 80px;                 /* висота сторісбару */
-  --nav-h: 64px;                /* висота навбара (fallback) */
+  /* висота сторісбару: кружок 64 + падинги 8*2 */
+  --sb-h: 80px;
 
   position: relative;
   width: 100%;
@@ -11,30 +11,41 @@
   overflow: hidden;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 
-  /* щоб контент мапи не «зайшов» під навбар + сторісбар */
-  padding-top: calc(var(--nav-h, 64px) + var(--sb-h));
+  /* ▼ головна правка: звільняємо місце під навбар, щоб ніщо його не перекривало */
+  padding-top: var(--nav-h, 64px);
+  z-index: 0;
 }
 
-/* Мапа займає весь простір під навбаром + сторісбаром */
-.map-container{
-  position: absolute;
-  inset: calc(var(--nav-h, 64px) + var(--sb-h)) 0 0 0; /* не перекриває навбар */
-  z-index: 1;
-}
+/* Мапа займає весь простір контейнера */
+.map-container{ width: 100%; height: 100%; z-index: 1; }
 
-/* ===== СТОРІСБАР — всередині контейнера, без fixed ===== */
+/* ===== СТОРІСБАР — ПІД НАВБАРОМ І НИЖЧЕ ШТОРКИ ===== */
 .storybar-overlay{
-  position: absolute;
-  left: 0; right: 0; top: var(--nav-h, 64px);
-  height: var(--sb-h);
-  z-index: 2;                    /* нижче будь-яких модалок/шторок */
-  pointer-events: none;          /* сам шар не ловить кліки */
+  position: fixed;
+  left: 0; right: 0;
+  top: calc(var(--nav-h, 64px)); /* впритул під навбар */
+  height: var(--sb-h, 80px);     /* ▼ явна висота, щоб не було «роздутої» клікової площі */
+  z-index: 1500;                 /* нижче backdrop:1999 і drawer:2000 */
+  pointer-events: none;          /* не блокує карту */
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 .storybar-overlay .story-bar{ pointer-events: auto; }
 
-/* ===== Ліфлет-контроли — вони вже нижче сторісбару ===== */
+/* Внутрішня стрічка (сам компонент StoryBar рендерить .story-bar) */
+.story-bar{
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px;
+  background: #fff;
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  box-shadow: 0 1px 0 rgba(0,0,0,.06);
+}
+
+/* ===== Ліфлет-контроли — опустити під сторісбар ===== */
 .map-view-container .leaflet-top.leaflet-left{
-  top: calc(var(--nav-h, 64px) + var(--sb-h) + 8px);
+  top: calc(var(--nav-h, 64px) + var(--sb-h, 80px));
 }
 
 /* ===== Маячки на карті (аватар з білим кільцем) ===== */

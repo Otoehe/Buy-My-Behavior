@@ -33,7 +33,9 @@ interface Scenario { id: string; description: string; price: number }
 
 const CenterMap: React.FC<{ center: [number, number] }> = ({ center }) => {
   const map = useMap();
-  useEffect(() => { map.setView(center, map.getZoom(), { animate: false }); }, [center, map]);
+  useEffect(() => {
+    map.setView(center, map.getZoom(), { animate: false });
+  }, [center, map]);
   return null;
 };
 
@@ -42,7 +44,6 @@ function MoveOnClickLayer() {
   useMapEvents({ click(e) { map.setView(e.latlng); } });
   return null;
 }
-
 function pctFrom10(v: number) { const x = Math.max(0, Math.min(10, v)); return (x / 10) * 100; }
 
 export default function MapView() {
@@ -62,11 +63,10 @@ export default function MapView() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
 
-  // один постійний екземпляр сторісбару (без перемонтувань)
+  // зафіксуємо екземпляр сторісбару, щоб не ремонтувався на кожен ререндер
   const storyBarElRef = useRef<JSX.Element | null>(null);
   if (!storyBarElRef.current) storyBarElRef.current = <StoryBar />;
 
-  // drawer
   const drawerWidth = 340;
   const panelRef = useRef<HTMLDivElement | null>(null);
   const backdropRef = useRef<HTMLDivElement | null>(null);
@@ -111,7 +111,7 @@ export default function MapView() {
     touchStartX.current = null; lastX.current = null;
   };
 
-  // стартові дані
+  // початкове завантаження
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -121,8 +121,10 @@ export default function MapView() {
           .not('longitude', 'is', null),
         supabase.auth.getUser(),
       ]);
+
       if (!alive) return;
       if (!pErr && profiles) setUsers(profiles as unknown as User[]);
+
       const user = auth?.user;
       if (user) {
         const { data: coords } = await supabase
@@ -130,12 +132,15 @@ export default function MapView() {
           .select('latitude, longitude')
           .eq('user_id', user.id)
           .single();
-        if (coords?.latitude && coords?.longitude) setCenter([coords.latitude, coords.longitude]);
+        if (coords?.latitude && coords?.longitude) {
+          setCenter([coords.latitude, coords.longitude]);
+        }
       }
     })();
     return () => { alive = false; };
   }, []);
 
+  // select mode — центруємо
   useEffect(() => {
     if (!isSelectMode) return;
     const lat = Number(localStorage.getItem('latitude'));
@@ -151,6 +156,7 @@ export default function MapView() {
     setReviewsOpen(false);
   }, [isSelectMode]);
 
+  // прихід із state.profile
   useEffect(() => {
     if (isSelectMode) return;
     const profileId = (location.state as any)?.profile;
@@ -234,9 +240,12 @@ export default function MapView() {
 
   return (
     <div className="map-view-container" onClick={handleMapClick}>
-      {/* Сторісбар у нормальному потоці над мапою */}
+      {/* сторісбар — під навбаром */}
       {!isSelectMode && (
-        <div className="storybar-row">
+        <div
+          className="storybar-overlay"
+          style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
+        >
           {storyBarElRef.current}
         </div>
       )}
@@ -246,7 +255,7 @@ export default function MapView() {
         zoom={15}
         className="map-container"
         whenCreated={(m) => { mapRef.current = m; }}
-        updateWhenIdle
+        updateWhenIdle={true}
         preferCanvas={false}
         inertia={false}
         zoomAnimation={false}
