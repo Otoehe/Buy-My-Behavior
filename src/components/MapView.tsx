@@ -1,5 +1,5 @@
 // src/components/MapView.tsx
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -44,12 +44,14 @@ function MoveOnClickLayer() {
   useMapEvents({ click(e) { map.setView(e.latlng); } });
   return null;
 }
+
 function pctFrom10(v: number) { const x = Math.max(0, Math.min(10, v)); return (x / 10) * 100; }
 
 export default function MapView() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // стабільне визначення режиму
   const isSelectMode = useMemo(() => {
     const params = new URLSearchParams(location.search);
     return location.pathname === '/map/select' || params.get('pick') === '1';
@@ -63,55 +65,11 @@ export default function MapView() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // 🧊 1) Стабілізуємо StoryBar (уникання повторних створень елемента)
+  // StoryBar фіксуємо, щоб не ремонтувався
   const storyBarElRef = useRef<JSX.Element | null>(null);
   if (!storyBarElRef.current) storyBarElRef.current = <StoryBar />;
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // 🧊 2) Кеш іконок для маркерів, щоб НЕ створювати L.divIcon на кожен ререндер
-  const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
-  const getAvatarIcon = useCallback((avatarUrl: string) => {
-    if (!avatarUrl) avatarUrl = '';
-    const cache = iconCacheRef.current;
-    let ic = cache.get(avatarUrl);
-    if (!ic) {
-      ic = L.divIcon({
-        html: `<div class="custom-marker small"><img src="${avatarUrl}" class="marker-img" loading="lazy"/></div>`,
-        className: '',
-        iconSize: [60, 60],
-        iconAnchor: [10, 10],
-      });
-      cache.set(avatarUrl, ic);
-    }
-    return ic;
-  }, []);
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // 🧊 3) Віртуалізація маркерів: показуємо тільки користувачів у межах карти
-  const [visibleUsers, setVisibleUsers] = useState<User[]>([]);
-  const recomputeVisible = useCallback(() => {
-    const m = mapRef.current;
-    if (!m) { setVisibleUsers(users); return; }
-    const b = m.getBounds();
-    const vis = users.filter(u =>
-      Number.isFinite(u.latitude) &&
-      Number.isFinite(u.longitude) &&
-      b.contains([u.latitude, u.longitude])
-    );
-    setVisibleUsers(vis);
-  }, [users]);
-  useEffect(() => { recomputeVisible(); }, [recomputeVisible]);
-  useEffect(() => {
-    const m = mapRef.current;
-    if (!m) return;
-    const onMove = () => recomputeVisible();
-    m.on('moveend zoomend', onMove);
-    return () => { m.off('moveend zoomend', onMove); };
-  }, [recomputeVisible]);
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // drawer жест
+  // ————— дровер (свайп) —————
   const drawerWidth = 340;
   const panelRef = useRef<HTMLDivElement | null>(null);
   const backdropRef = useRef<HTMLDivElement | null>(null);
@@ -156,22 +114,25 @@ export default function MapView() {
     touchStartX.current = null; lastX.current = null;
   };
 
-  // cleanup RAF
-  useEffect(() => () => { if (rafRef.current != null) cancelAnimationFrame(rafRef.current); }, []);
-
-  // початкове завантаження
+  // ————— завантаження даних —————
   useEffect(() => {
     let alive = true;
     (async () => {
       const [{ data: profiles, error: pErr }, { data: auth }] = await Promise.all([
-        supabase.from('profiles').select('*')
+        supabase
+          .from('profiles')
+          .select('id,user_id,name,role,description,avatar_url,latitude,longitude,wallet,avg_rating,rating_count')
           .not('latitude', 'is', null)
-          .not('longitude', 'is', null),
+          .not('longitude', 'is', null)
+          .limit(300), // важливо: не рендеримо тисячі маркерів
         supabase.auth.getUser(),
       ]);
 
       if (!alive) return;
-      if (!pErr && profiles) setUsers(profiles as unknown as User[]);
+
+      if (!pErr && profiles) {
+        setUsers((profiles as unknown as User[]).slice(0, 300));
+      }
 
       const user = auth?.user;
       if (user) {
@@ -180,13 +141,15 @@ export default function MapView() {
           .select('latitude, longitude')
           .eq('user_id', user.id)
           .single();
-        if (coords?.latitude && coords?.longitude) setCenter([coords.latitude, coords.longitude]);
+        if (coords?.latitude && coords?.longitude) {
+          setCenter([coords.latitude, coords.longitude]);
+        }
       }
     })();
     return () => { alive = false; };
   }, []);
 
-  // select mode — центруємо
+  // ————— режим вибору точки —————
   useEffect(() => {
     if (!isSelectMode) return;
     const lat = Number(localStorage.getItem('latitude'));
@@ -202,20 +165,25 @@ export default function MapView() {
     setReviewsOpen(false);
   }, [isSelectMode]);
 
-  // прихід із state.profile
+  // ————— ОЧОЛОВНИЙ ФІКС: читаємо profileId лише 1 раз —————
+  const profileIdOnceRef = useRef<string | null>((location.state as any)?.profile ?? null);
+
   useEffect(() => {
     if (isSelectMode) return;
-    const profileId = (location.state as any)?.profile;
-    if (profileId && users.length > 0) {
-      const u = users.find((x) => x.user_id === profileId);
-      if (u) {
-        setSelectedProfile(u);
-        setCenter([u.latitude, u.longitude]);
-        fetchScenarios(u);
-        setReviewsOpen(false);
-      }
-    }
-  }, [location.state, users, isSelectMode]);
+    const profileId = profileIdOnceRef.current;
+    if (!profileId || users.length === 0) return;
+
+    const u = users.find((x) => x.user_id === profileId);
+    if (!u) { profileIdOnceRef.current = null; return; }
+
+    setSelectedProfile(u);
+    setCenter([u.latitude, u.longitude]);
+    fetchScenarios(u);
+    setReviewsOpen(false);
+
+    // «спалюємо» значення — більше не реагуємо
+    profileIdOnceRef.current = null;
+  }, [users, isSelectMode]);
 
   async function fetchScenarios(u: User) {
     const { data } = await supabase
@@ -226,13 +194,22 @@ export default function MapView() {
     setScenarios((data || []) as unknown as Scenario[]);
   }
 
-  const handleMarkerClick = useCallback((u: User) => {
+  function createAvatarIcon(avatarUrl: string) {
+    return L.divIcon({
+      html: `<div class="custom-marker small"><img src="${avatarUrl}" class="marker-img"/></div>`,
+      className: '',
+      iconSize: [60, 60],
+      iconAnchor: [10, 10],
+    });
+  }
+
+  function handleMarkerClick(u: User) {
     if (isSelectMode) return;
     setSelectedProfile(u);
     fetchScenarios(u);
     setReviewsOpen(false);
     setTimeout(() => { setTransform(0); setTransition(true); }, 0);
-  }, [isSelectMode]);
+  }
 
   function handleMapClick() {
     if (isSelectMode) return;
@@ -242,6 +219,7 @@ export default function MapView() {
   function handleOrderClick(e?: React.MouseEvent) {
     e?.preventDefault(); e?.stopPropagation();
     if (!selectedProfile) return;
+    // ⚠️ не ламати рядок — саме так, з обома лапками :)
     localStorage.setItem('scenario_receiverId', selectedProfile.user_id);
     if (selectedProfile.latitude && selectedProfile.longitude) {
       localStorage.setItem('latitude', String(selectedProfile.latitude));
@@ -267,8 +245,7 @@ export default function MapView() {
       sessionStorage.setItem('scenario_visited_map', '1');
     } catch {}
     const params = new URLSearchParams(location.search);
-    const executorId =
-      params.get('executor_id') || localStorage.getItem('scenario_receiverId') || '';
+    const executorId = params.get('executor_id') || localStorage.getItem('scenario_receiverId') || '';
     navigate(
       `/scenario/new${executorId ? `?executor_id=${encodeURIComponent(executorId)}` : ''}`,
       { replace: true, state: { from: '/map/select' } }
@@ -279,7 +256,6 @@ export default function MapView() {
 
   return (
     <div className="map-view-container" onClick={handleMapClick}>
-      {/* сторісбар — під навбаром і не блокує карту */}
       {!isSelectMode && (
         <div className="storybar-overlay" style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}>
           {storyBarElRef.current}
@@ -308,14 +284,12 @@ export default function MapView() {
 
         {isSelectMode && <MoveOnClickLayer />}
 
-        {!isSelectMode && visibleUsers.map((u, idx) => (
+        {!isSelectMode && (users.slice(0, 300)).map((u, idx) => (
           <Marker
             key={u.user_id || u.id || idx}
             position={[u.latitude + idx * 0.00015, u.longitude + idx * 0.00015]}
-            icon={getAvatarIcon(u.avatar_url)}
-            eventHandlers={{
-              click: (e) => { e.originalEvent.stopPropagation(); handleMarkerClick(u); }
-            }}
+            icon={createAvatarIcon(u.avatar_url)}
+            eventHandlers={{ click: (e) => { e.originalEvent.stopPropagation(); handleMarkerClick(u); } }}
           />
         ))}
       </MapContainer>

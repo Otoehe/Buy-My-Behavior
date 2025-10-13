@@ -7,7 +7,6 @@
   width: 100%;
   background: #fff;
   margin: 0;
-  /* анти-миготіння при першому кадрі */
   will-change: transform, opacity;
   transform: translateZ(0);
 }
@@ -30,9 +29,9 @@
 .sb-item{
   width:64px; height:64px; flex:0 0 auto;
   border-radius:9999px;
-  border:2px solid #fff;           /* біла обводка */
-  background:#f6f7f9;              /* сірий фон усередині */
-  box-shadow:0 4px 12px rgba(0,0,0,.15); /* тінь */
+  border:2px solid #fff;
+  background:#f6f7f9;
+  box-shadow:0 4px 12px rgba(0,0,0,.15);
   display:inline-flex; align-items:center; justify-content:center;
   padding:0; cursor:pointer; position:relative;
   transition:transform .12s ease, box-shadow .12s ease;
@@ -56,7 +55,7 @@
     repeating-linear-gradient(45deg,#eee,#eee 6px,#f7f7f7 6px,#f7f7f7 12px);
 }
 
-/* Дрібна оптимізація рендерингу (без зміни вигляду) */
+/* Рендер-оптимізація */
 .story-bar,
 .sb-container{
   contain: content;

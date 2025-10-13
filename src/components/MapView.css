@@ -1,24 +1,16 @@
-/* src/components/MapView.css */
-
 /* ===== Контейнер мапи: стабільна висота та відступ під навбар ===== */
 .map-view-container{
-  /* висота сторісбару: кружок 64 + падинги 8*2 */
-  --sb-h: 80px;
-
+  --sb-h: 80px;               /* висота сторісбару */
   position: relative;
   width: 100%;
-
-  /* ▼ Контейнер ПОЧИНАЄТЬСЯ під навбаром */
-  margin-top: var(--nav-h, 64px);
-
-  /* ▼ Висота = висота екрана мінус навбар */
-  height: calc(var(--app-vh, 1vh) * 100 - var(--nav-h, 64px));
-  min-height: 0;
+  height: calc(var(--app-vh, 1vh) * 100);
+  min-height: 100vh;
   overscroll-behavior: none;
   overflow: hidden;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 
-  /* (було) padding-top: var(--nav-h, 64px);  — ВИДАЛЕНО */
+  /* звільняємо місце під навбар */
+  padding-top: var(--nav-h, 64px);
   z-index: 0;
 }
 
@@ -29,16 +21,16 @@
 .storybar-overlay{
   position: fixed;
   left: 0; right: 0;
-  top: calc(var(--nav-h, 64px)); /* впритул під навбар */
-  height: var(--sb-h, 80px);     /* явна висота, щоб не роздувалась клікова площа */
-  z-index: 1500;                 /* нижче backdrop:1999 і drawer:2000 */
-  pointer-events: none;          /* не блокує карту */
+  top: calc(var(--nav-h, 64px));  /* впритул під навбар */
+  height: var(--sb-h, 80px);      /* явна висота, щоб не було великої клікової площі */
+  z-index: 1500;                  /* нижче backdrop:1999 і drawer:2000 */
+  pointer-events: none;           /* не блокує карту */
   transform: translateZ(0);
   backface-visibility: hidden;
 }
 .storybar-overlay .story-bar{ pointer-events: auto; }
 
-/* Внутрішня стрічка (додатково, якщо StoryBar.css не підключений) */
+/* Внутрішня стрічка (сам компонент StoryBar рендерить .story-bar) */
 .story-bar{
   display: flex; align-items: center; gap: 12px;
   padding: 8px 12px;
