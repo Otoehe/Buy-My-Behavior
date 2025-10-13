@@ -26,36 +26,37 @@ export interface NotificationEvent {
 // === Клас для управління realtime сповіщеннями ===
 class RealtimeNotificationManager {
   private currentUserId: string | null = null;
-  private isListening: boolean = false;
+  private isListening = false;
 
-  // 🔒 Тримаємо єдиний канал, замість масиву — щоб не плодити підписок
+  // Єдиний канал Realtime
   private scenariosChannel: ReturnType<typeof supabase.channel> | null = null;
 
+  // Защита від спаму сповіщеннями
   private lastNotificationTime: Map<string, number> = new Map();
   private readonly COOLDOWN_MS = 5000;
 
-  // Використовуємо ReturnType<typeof setInterval> — коректно для браузера/TS
+  // Fallback-полінг
   private pollingInterval: ReturnType<typeof setInterval> | null = null;
   private lastPollingData: Record<string, any> | null = null;
   private pollingIntervalTime = 15000;
 
+  // Реконект
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
-  private reconnectDelay = 2000; // початкова затримка відновлення
+  private reconnectDelay = 2000;
 
   // === Ініціалізація менеджера ===
   public async initialize(userId: string): Promise<boolean> {
-    // Якщо вже ініціалізовано для цього ж користувача — нічого не робимо
     if (this.currentUserId === userId && this.isListening) {
-      console.log('🔄 Realtime вже ініціалізовано для користувача:', userId);
+      console.log(`🔄 Realtime вже ініціалізовано для користувача: ${userId}`);
       return true;
     }
 
-    // Перед повторною ініціалізацією завжди робимо stopListening() — запобігає дублям
+    // На всяк випадок очистка перед новим стартом
     this.stopListening();
-
     this.currentUserId = userId;
-    console.log('🚀 Ініціалізація Realtime Notifications для:', userId);
+
+    console.log(`🚀 Ініціалізація Realtime Notifications для: ${userId}`);
 
     try {
       const realtimeSuccess = await this.setupSupabaseRealtime();
@@ -63,7 +64,7 @@ class RealtimeNotificationManager {
         console.log('✅ Supabase Realtime підключено');
         return true;
       } else {
-        console.warn('⚠️ Supabase Realtime недоступний, використовуємо polling');
+        console.warn('⚠️ Supabase Realtime недоступний, вмикаю polling fallback');
         this.setupPollingFallback();
         return true;
       }
@@ -86,7 +87,7 @@ class RealtimeNotificationManager {
 
       this.reconnectAttempts = 0;
 
-      // Якщо був старий канал — прибираємо (додатковий захист)
+      // Якщо був старий канал — прибираємо
       if (this.scenariosChannel) {
         try { supabase.removeChannel(this.scenariosChannel); } catch {}
         this.scenariosChannel = null;
@@ -101,18 +102,16 @@ class RealtimeNotificationManager {
             event: '*',
             schema: 'public',
             table: 'scenarios',
-            // Примітка: filter підтримує прості умови; складні "or" тут не гарантуються,
-            // тому додатково фільтруємо в handleStatusUpdate().
           },
-          (payload) => this.handleScenarioChange(payload)
+          (payload: any) => this.handleScenarioChange(payload)
         )
-        .subscribe((status) => {
-          console.log('📡 Realtime статус:', status);
+        .subscribe((status: any) => {
+          console.log(`📡 Realtime статус: ${status}`);
           if (status === 'SUBSCRIBED') {
             this.isListening = true;
             console.log('✅ Підписка на scenarios активна');
           } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-            console.error('❌ Помилка каналу або розрив з’єднання, переходимо на polling');
+            console.error(`❌ Помилка каналу або розрив з’єднання, переходжу на polling`);
             this.setupPollingFallback();
           }
         });
@@ -185,7 +184,7 @@ class RealtimeNotificationManager {
     }
   }
 
-  // === Автоматичне відновлення з'єднання ===
+  // === Автоматичне відновлення зʼєднання ===
   private async attemptReconnect(): Promise<void> {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.log(`🛑 Досягнуто максимум спроб відновлення (${this.maxReconnectAttempts})`);
@@ -203,10 +202,10 @@ class RealtimeNotificationManager {
         if (this.currentUserId) {
           const success = await this.setupSupabaseRealtime();
           if (success) {
-            console.log('✅ Realtime з\'єднання відновлено успішно');
+            console.log(`✅ Realtime зʼєднання відновлено успішно`);
             this.reconnectAttempts = 0;
           } else {
-            console.log('⚠️ Realtime не вдалося відновити, продовжуємо з polling');
+            console.log(`⚠️ Realtime не вдалося відновити, продовжую з polling`);
           }
         }
       } catch (error) {
@@ -236,7 +235,6 @@ class RealtimeNotificationManager {
 
   // === Обробка нового сценарію ===
   private async handleNewScenario(scenario: any): Promise<void> {
-    // Автор не отримує сповіщення про власний сценарій
     if (!scenario || scenario.creator_id === this.currentUserId) return;
 
     const notificationKey = `new-scenario-${scenario.id}`;
@@ -245,7 +243,7 @@ class RealtimeNotificationManager {
     if (lastTime && (now - lastTime) < this.COOLDOWN_MS) return;
 
     await showNotification('🆕 Новий сценарій доступний!', {
-      body: `"${scenario.description?.slice(0, 60)}..." • Сума: ${scenario.donation_amount_usdt} USDT`,
+      body: `${(scenario.description ?? '').slice(0, 60)}... • Сума: ${scenario.donation_amount_usdt} USDT`,
       sound: true,
       timeout: 6000,
       onClick: () => {
@@ -261,7 +259,6 @@ class RealtimeNotificationManager {
   private async handleStatusUpdate(oldRecord: any, newRecord: any): Promise<void> {
     if (!newRecord) return;
 
-    // Сповіщення лише для причетних
     const isInvolved =
       this.currentUserId === newRecord?.creator_id ||
       this.currentUserId === newRecord?.executor_id;
@@ -304,7 +301,7 @@ class RealtimeNotificationManager {
       case 'agreed':
         if (oldStatus !== 'agreed') {
           title = '🤝 Угоду погоджено!';
-          body = `Сценарій "${scenario.description?.slice(0, 50)}..." підтверджено обома сторонами. Сума: ${scenario.donation_amount_usdt} USDT`;
+          body = `Сценарій "${(scenario.description ?? '').slice(0, 50)}..." підтверджено обома сторонами. Сума: ${scenario.donation_amount_usdt} USDT`;
           timeout = 7000;
         }
         break;
@@ -320,7 +317,7 @@ class RealtimeNotificationManager {
         if (oldStatus !== 'completed') {
           title = '🎉 Сценарій завершено!';
           body = isExecutor
-            ? `Кошти розподілено через escrow. Ви отримали ${(scenario.donation_amount_usdt * 0.9).toFixed(2)} USDT (90% від суми угоди).`
+            ? `Кошти розподілено через escrow. Ви отримали ${((scenario.donation_amount_usdt ?? 0) * 0.9).toFixed(2)} USDT (90% від суми угоди).`
             : 'Сценарій виконано та кошти розподілено. Перевірте результат виконання.';
           sound = true;
           timeout = 8000;
@@ -329,7 +326,7 @@ class RealtimeNotificationManager {
 
       case 'cancelled':
         title = '❌ Сценарій скасовано';
-        body = 'Угода була скасована. Кошти повернуто замовнику.';
+        body = 'Угоду скасовано. Кошти повернуто замовнику.';
         break;
 
       case 'dispute':
@@ -398,7 +395,7 @@ class RealtimeNotificationManager {
     }
   }
 
-  // === Отримання статусу з'єднання ===
+  // === Отримання статусу зʼєднання ===
   public getConnectionStatus(): {
     isListening: boolean;
     method: 'realtime' | 'polling' | 'none';
@@ -488,7 +485,7 @@ export const useRealtimeNotifications = (userId: string | null) => {
     const initRealtime = async () => {
       const success = await initializeRealtimeNotifications(userId);
       setStatus(realtimeNotificationManager.getConnectionStatus());
-      if (success) console.log('🔗 Realtime notifications активовано для:', userId);
+      if (success) console.log(`🔗 Realtime notifications активовано для: ${userId}`);
     };
 
     initRealtime();
