@@ -1,5 +1,5 @@
 // src/components/MapView.tsx
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -63,10 +63,54 @@ export default function MapView() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
 
-  // зафіксувати екземпляр StoryBar (щоб не створювався на кожен ререндер)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 🧊 1) Стабілізуємо StoryBar (уникання повторних створень елемента)
   const storyBarElRef = useRef<JSX.Element | null>(null);
   if (!storyBarElRef.current) storyBarElRef.current = <StoryBar />;
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 🧊 2) Кеш іконок для маркерів, щоб НЕ створювати L.divIcon на кожен ререндер
+  const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
+  const getAvatarIcon = useCallback((avatarUrl: string) => {
+    if (!avatarUrl) avatarUrl = '';
+    const cache = iconCacheRef.current;
+    let ic = cache.get(avatarUrl);
+    if (!ic) {
+      ic = L.divIcon({
+        html: `<div class="custom-marker small"><img src="${avatarUrl}" class="marker-img" loading="lazy"/></div>`,
+        className: '',
+        iconSize: [60, 60],
+        iconAnchor: [10, 10],
+      });
+      cache.set(avatarUrl, ic);
+    }
+    return ic;
+  }, []);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 🧊 3) Віртуалізація маркерів: показуємо тільки користувачів у межах карти
+  const [visibleUsers, setVisibleUsers] = useState<User[]>([]);
+  const recomputeVisible = useCallback(() => {
+    const m = mapRef.current;
+    if (!m) { setVisibleUsers(users); return; }
+    const b = m.getBounds();
+    const vis = users.filter(u =>
+      Number.isFinite(u.latitude) &&
+      Number.isFinite(u.longitude) &&
+      b.contains([u.latitude, u.longitude])
+    );
+    setVisibleUsers(vis);
+  }, [users]);
+  useEffect(() => { recomputeVisible(); }, [recomputeVisible]);
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m) return;
+    const onMove = () => recomputeVisible();
+    m.on('moveend zoomend', onMove);
+    return () => { m.off('moveend zoomend', onMove); };
+  }, [recomputeVisible]);
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // drawer жест
   const drawerWidth = 340;
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -182,22 +226,13 @@ export default function MapView() {
     setScenarios((data || []) as unknown as Scenario[]);
   }
 
-  function createAvatarIcon(avatarUrl: string) {
-    return L.divIcon({
-      html: `<div class="custom-marker small"><img src="${avatarUrl}" class="marker-img"/></div>`,
-      className: '',
-      iconSize: [60, 60],
-      iconAnchor: [10, 10],
-    });
-  }
-
-  function handleMarkerClick(u: User) {
+  const handleMarkerClick = useCallback((u: User) => {
     if (isSelectMode) return;
     setSelectedProfile(u);
     fetchScenarios(u);
     setReviewsOpen(false);
     setTimeout(() => { setTransform(0); setTransition(true); }, 0);
-  }
+  }, [isSelectMode]);
 
   function handleMapClick() {
     if (isSelectMode) return;
@@ -207,7 +242,6 @@ export default function MapView() {
   function handleOrderClick(e?: React.MouseEvent) {
     e?.preventDefault(); e?.stopPropagation();
     if (!selectedProfile) return;
-    // ✅ виправлено: завершений рядок і правильний ключ
     localStorage.setItem('scenario_receiverId', selectedProfile.user_id);
     if (selectedProfile.latitude && selectedProfile.longitude) {
       localStorage.setItem('latitude', String(selectedProfile.latitude));
@@ -274,12 +308,14 @@ export default function MapView() {
 
         {isSelectMode && <MoveOnClickLayer />}
 
-        {!isSelectMode && users.map((u, idx) => (
+        {!isSelectMode && visibleUsers.map((u, idx) => (
           <Marker
             key={u.user_id || u.id || idx}
             position={[u.latitude + idx * 0.00015, u.longitude + idx * 0.00015]}
-            icon={createAvatarIcon(u.avatar_url)}
-            eventHandlers={{ click: (e) => { e.originalEvent.stopPropagation(); handleMarkerClick(u); } }}
+            icon={getAvatarIcon(u.avatar_url)}
+            eventHandlers={{
+              click: (e) => { e.originalEvent.stopPropagation(); handleMarkerClick(u); }
+            }}
           />
         ))}
       </MapContainer>

@@ -27,35 +27,42 @@ export interface NotificationEvent {
 class RealtimeNotificationManager {
   private currentUserId: string | null = null;
   private isListening: boolean = false;
-  private channels: any[] = [];
+
+  // 🔒 Тримаємо єдиний канал, замість масиву — щоб не плодити підписок
+  private scenariosChannel: ReturnType<typeof supabase.channel> | null = null;
+
   private lastNotificationTime: Map<string, number> = new Map();
-  private readonly COOLDOWN_MS = 5000; // 5 секунд cooldown (оптимізовано)
-  private pollingInterval: NodeJS.Timeout | null = null;
-  private lastPollingData: any = null;
-  private pollingIntervalTime = 15000; // 15 секунд для polling (швидше)
+  private readonly COOLDOWN_MS = 5000;
+
+  // Використовуємо ReturnType<typeof setInterval> — коректно для браузера/TS
+  private pollingInterval: ReturnType<typeof setInterval> | null = null;
+  private lastPollingData: Record<string, any> | null = null;
+  private pollingIntervalTime = 15000;
+
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 2000; // початкова затримка відновлення
 
   // === Ініціалізація менеджера ===
   public async initialize(userId: string): Promise<boolean> {
+    // Якщо вже ініціалізовано для цього ж користувача — нічого не робимо
     if (this.currentUserId === userId && this.isListening) {
       console.log('🔄 Realtime вже ініціалізовано для користувача:', userId);
       return true;
     }
 
+    // Перед повторною ініціалізацією завжди робимо stopListening() — запобігає дублям
+    this.stopListening();
+
     this.currentUserId = userId;
     console.log('🚀 Ініціалізація Realtime Notifications для:', userId);
 
     try {
-      // Спочатку пробуємо Supabase Realtime
       const realtimeSuccess = await this.setupSupabaseRealtime();
-      
       if (realtimeSuccess) {
         console.log('✅ Supabase Realtime підключено');
         return true;
       } else {
-        // Fallback на polling
         console.warn('⚠️ Supabase Realtime недоступний, використовуємо polling');
         this.setupPollingFallback();
         return true;
@@ -70,25 +77,32 @@ class RealtimeNotificationManager {
   // === Налаштування Supabase Realtime ===
   private async setupSupabaseRealtime(): Promise<boolean> {
     try {
-      // Перевіряємо підключення до Supabase
-      const { data, error } = await supabase.from('scenarios').select('id').limit(1);
+      // Швидка перевірка з’єднання
+      const { error } = await supabase.from('scenarios').select('id').limit(1);
       if (error) {
         console.error('🚫 Помилка підключення до Supabase:', error);
         return false;
       }
 
-      // Скидаємо лічильник спроб при успішному підключенні
       this.reconnectAttempts = 0;
 
-      // Створюємо канал для scenarios таблиці
-      const scenariosChannel = supabase
+      // Якщо був старий канал — прибираємо (додатковий захист)
+      if (this.scenariosChannel) {
+        try { supabase.removeChannel(this.scenariosChannel); } catch {}
+        this.scenariosChannel = null;
+      }
+
+      // ЄДИНИЙ канал на події таблиці scenarios
+      const ch = supabase
         .channel('scenarios-realtime')
         .on(
           'postgres_changes',
           {
             event: '*',
             schema: 'public',
-            table: 'scenarios'
+            table: 'scenarios',
+            // Примітка: filter підтримує прості умови; складні "or" тут не гарантуються,
+            // тому додатково фільтруємо в handleStatusUpdate().
           },
           (payload) => this.handleScenarioChange(payload)
         )
@@ -97,13 +111,13 @@ class RealtimeNotificationManager {
           if (status === 'SUBSCRIBED') {
             this.isListening = true;
             console.log('✅ Підписка на scenarios активна');
-          } else if (status === 'CHANNEL_ERROR') {
-            console.error('❌ Помилка каналу, переходимо на polling');
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            console.error('❌ Помилка каналу або розрив з’єднання, переходимо на polling');
             this.setupPollingFallback();
           }
         });
 
-      this.channels.push(scenariosChannel);
+      this.scenariosChannel = ch;
       return true;
     } catch (error) {
       console.error('❌ Помилка налаштування Supabase Realtime:', error);
@@ -114,15 +128,12 @@ class RealtimeNotificationManager {
   // === Fallback через polling ===
   private setupPollingFallback(): void {
     console.log(`🔄 Запуск polling fallback (кожні ${this.pollingIntervalTime / 1000} секунд)`);
-    
-    // Очищаємо попередній interval якщо є
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-    }
+
+    if (this.pollingInterval) clearInterval(this.pollingInterval);
 
     this.pollingInterval = setInterval(async () => {
       await this.pollForChanges();
-    }, this.pollingIntervalTime); // використовуємо змінну для гнучкості
+    }, this.pollingIntervalTime);
 
     this.isListening = true;
   }
@@ -132,9 +143,8 @@ class RealtimeNotificationManager {
     if (!this.currentUserId) return;
 
     try {
-      // Отримуємо сценарії користувача, оновлені за останні 20 секунд (оптимізовано)
       const timeWindow = new Date(Date.now() - (this.pollingIntervalTime + 5000)).toISOString();
-      
+
       const { data: scenarios, error } = await supabase
         .from('scenarios')
         .select('*')
@@ -148,18 +158,12 @@ class RealtimeNotificationManager {
       }
 
       if (scenarios && scenarios.length > 0) {
-        // Порівнюємо з попередніми даними
         for (const scenario of scenarios) {
           const key = `${scenario.id}-${scenario.status}`;
           const lastTime = this.lastNotificationTime.get(key);
           const now = Date.now();
+          if (lastTime && (now - lastTime) < this.COOLDOWN_MS) continue;
 
-          // Перевіряємо cooldown
-          if (lastTime && (now - lastTime) < this.COOLDOWN_MS) {
-            continue;
-          }
-
-          // Симулюємо payload для обробки
           await this.handleScenarioChange({
             eventType: 'UPDATE',
             new: scenario,
@@ -169,16 +173,14 @@ class RealtimeNotificationManager {
           this.lastNotificationTime.set(key, now);
         }
 
-        // Зберігаємо поточні дані для наступного порівняння
+        // Зберігаємо останній знімок
         this.lastPollingData = scenarios.reduce((acc, s) => {
           acc[s.id] = s;
           return acc;
-        }, {} as any);
+        }, {} as Record<string, any>);
       }
     } catch (error) {
       console.error('❌ Помилка в polling:', error);
-      
-      // Спробуємо відновити Realtime з'єднання при помилці polling
       this.attemptReconnect();
     }
   }
@@ -191,21 +193,18 @@ class RealtimeNotificationManager {
     }
 
     this.reconnectAttempts++;
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1); // експоненційна затримка
-    
+    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+
     console.log(`🔄 Спроба відновлення ${this.reconnectAttempts}/${this.maxReconnectAttempts} через ${delay}ms`);
-    
+
     setTimeout(async () => {
       try {
-        // Зупиняємо поточні підключення
         this.stopListening();
-        
-        // Пробуємо відновити Realtime
         if (this.currentUserId) {
           const success = await this.setupSupabaseRealtime();
           if (success) {
             console.log('✅ Realtime з\'єднання відновлено успішно');
-            this.reconnectAttempts = 0; // скидаємо лічильник
+            this.reconnectAttempts = 0;
           } else {
             console.log('⚠️ Realtime не вдалося відновити, продовжуємо з polling');
           }
@@ -218,7 +217,8 @@ class RealtimeNotificationManager {
 
   // === Обробка змін в сценаріях ===
   private async handleScenarioChange(payload: any): Promise<void> {
-    console.log('📥 Отримано зміну в scenarios:', payload);
+    // Формат payload Supabase v2: { eventType, new, old, table, schema, ... }
+    if (!payload) return;
 
     if (!this.currentUserId) {
       console.warn('⚠️ Користувач не ідентифікований');
@@ -227,7 +227,6 @@ class RealtimeNotificationManager {
 
     const { eventType, new: newRecord, old: oldRecord } = payload;
 
-    // Обробляємо різні типи подій
     if (eventType === 'INSERT') {
       await this.handleNewScenario(newRecord);
     } else if (eventType === 'UPDATE') {
@@ -237,19 +236,13 @@ class RealtimeNotificationManager {
 
   // === Обробка нового сценарію ===
   private async handleNewScenario(scenario: any): Promise<void> {
-    // Сповіщаємо тільки потенційних виконавців (поки що всіх окрім автора)
-    if (scenario.creator_id === this.currentUserId) {
-      return; // Автор не отримує сповіщення про власний сценарій
-    }
+    // Автор не отримує сповіщення про власний сценарій
+    if (!scenario || scenario.creator_id === this.currentUserId) return;
 
     const notificationKey = `new-scenario-${scenario.id}`;
     const lastTime = this.lastNotificationTime.get(notificationKey);
     const now = Date.now();
-
-    if (lastTime && (now - lastTime) < this.COOLDOWN_MS) {
-      console.log('⏳ Cooldown: пропуск сповіщення про новий сценарій');
-      return;
-    }
+    if (lastTime && (now - lastTime) < this.COOLDOWN_MS) return;
 
     await showNotification('🆕 Новий сценарій доступний!', {
       body: `"${scenario.description?.slice(0, 60)}..." • Сума: ${scenario.donation_amount_usdt} USDT`,
@@ -257,7 +250,6 @@ class RealtimeNotificationManager {
       timeout: 6000,
       onClick: () => {
         console.log('🎯 Клік по сповіщенню нового сценарію');
-        // Можна додати навігацію до списку сценаріїв
       }
     });
 
@@ -267,37 +259,29 @@ class RealtimeNotificationManager {
 
   // === Обробка оновлення статусу ===
   private async handleStatusUpdate(oldRecord: any, newRecord: any): Promise<void> {
-    // Перевіряємо чи користувач причетний до сценарію
-    const isInvolved = this.currentUserId === newRecord.creator_id || 
-                      this.currentUserId === newRecord.executor_id;
-    
-    if (!isInvolved) {
-      return;
-    }
+    if (!newRecord) return;
 
-    const oldStatus = oldRecord.status;
-    const newStatus = newRecord.status;
+    // Сповіщення лише для причетних
+    const isInvolved =
+      this.currentUserId === newRecord?.creator_id ||
+      this.currentUserId === newRecord?.executor_id;
 
-    if (oldStatus === newStatus) {
-      return; // Статус не змінився
-    }
+    if (!isInvolved) return;
+
+    const oldStatus = oldRecord?.status;
+    const newStatus = newRecord?.status;
+    if (!newStatus || oldStatus === newStatus) return;
 
     console.log(`📊 Зміна статусу сценарію ${newRecord.id}: ${oldStatus} → ${newStatus}`);
 
     const notificationKey = `status-${newRecord.id}-${newStatus}`;
     const lastTime = this.lastNotificationTime.get(notificationKey);
     const now = Date.now();
+    if (lastTime && (now - lastTime) < this.COOLDOWN_MS) return;
 
-    if (lastTime && (now - lastTime) < this.COOLDOWN_MS) {
-      console.log('⏳ Cooldown: пропуск сповіщення про зміну статусу');
-      return;
-    }
-
-    // Визначаємо роль користувача
     const isExecutor = this.currentUserId === newRecord.executor_id;
     const isCustomer = this.currentUserId === newRecord.creator_id;
 
-    // Логіка сповіщень залежно від зміни статусу
     await this.sendStatusNotification(oldStatus, newStatus, newRecord, isExecutor, isCustomer);
 
     this.lastNotificationTime.set(notificationKey, now);
@@ -327,7 +311,7 @@ class RealtimeNotificationManager {
 
       case 'confirmed':
         title = '✅ Підтвердження отримано';
-        body = isExecutor 
+        body = isExecutor
           ? 'Замовник підтвердив початок роботи. Можете приступати до виконання.'
           : 'Виконавець підтвердив отримання завдання та розпочав роботу.';
         break;
@@ -355,7 +339,6 @@ class RealtimeNotificationManager {
         break;
 
       default:
-        // Для інших статусів не показуємо сповіщення
         return;
     }
 
@@ -367,7 +350,6 @@ class RealtimeNotificationManager {
         vibrate: sound ? [200, 100, 200] : false,
         onClick: () => {
           console.log(`🎯 Клік по сповіщенню статусу: ${newStatus}`);
-          // Можна додати навігацію до конкретного сценарію
         }
       });
 
@@ -425,7 +407,7 @@ class RealtimeNotificationManager {
   } {
     return {
       isListening: this.isListening,
-      method: this.pollingInterval ? 'polling' : (this.channels.length > 0 ? 'realtime' : 'none'),
+      method: this.pollingInterval ? 'polling' : (this.scenariosChannel ? 'realtime' : 'none'),
       userId: this.currentUserId,
       reconnectAttempts: this.reconnectAttempts
     };
@@ -435,13 +417,11 @@ class RealtimeNotificationManager {
   public stopListening(): void {
     console.log('⏸️ Зупинка прослуховування Realtime');
 
-    // Відписуємося від каналів Supabase
-    this.channels.forEach(channel => {
-      supabase.removeChannel(channel);
-    });
-    this.channels = [];
+    if (this.scenariosChannel) {
+      try { supabase.removeChannel(this.scenariosChannel); } catch {}
+      this.scenariosChannel = null;
+    }
 
-    // Очищаємо polling
     if (this.pollingInterval) {
       clearInterval(this.pollingInterval);
       this.pollingInterval = null;
@@ -460,7 +440,7 @@ class RealtimeNotificationManager {
     this.currentUserId = null;
     this.lastNotificationTime.clear();
     this.lastPollingData = null;
-    this.reconnectAttempts = 0; // скидаємо лічильник спроб
+    this.reconnectAttempts = 0;
 
     console.log('✅ Realtime Notifications очищено');
   }
@@ -469,11 +449,7 @@ class RealtimeNotificationManager {
   public async restart(): Promise<boolean> {
     const userId = this.currentUserId;
     this.cleanup();
-    
-    if (userId) {
-      return await this.initialize(userId);
-    }
-    
+    if (userId) return await this.initialize(userId);
     return false;
   }
 }
@@ -512,26 +488,22 @@ export const useRealtimeNotifications = (userId: string | null) => {
     const initRealtime = async () => {
       const success = await initializeRealtimeNotifications(userId);
       setStatus(realtimeNotificationManager.getConnectionStatus());
-      
-      if (success) {
-        console.log('🔗 Realtime notifications активовано для:', userId);
-      }
+      if (success) console.log('🔗 Realtime notifications активовано для:', userId);
     };
 
     initRealtime();
 
-    // Очищення при розмонтуванні
+    // Очищення при розмонтуванні/зміні userId
     return () => {
       cleanupRealtimeNotifications();
     };
   }, [userId]);
 
-  // Періодично оновлюємо статус
+  // Періодичне оновлення статусу (для UI/діагностики)
   React.useEffect(() => {
     const interval = setInterval(() => {
       setStatus(realtimeNotificationManager.getConnectionStatus());
     }, 5000);
-
     return () => clearInterval(interval);
   }, []);
 
