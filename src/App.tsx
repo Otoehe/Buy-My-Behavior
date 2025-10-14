@@ -9,6 +9,7 @@ import NavigationBar   from "./components/NavigationBar";
 import Profile         from "./components/Profile";
 import AuthCallback    from "./components/AuthCallback";
 import A2HS            from "./components/A2HS";
+import Register        from "./components/Register";             // ⬅️ ПОВЕРТАЄМО
 
 import useViewportVH        from "./lib/useViewportVH";
 import useGlobalImageHints  from "./lib/useGlobalImageHints";
@@ -49,11 +50,11 @@ function RequireAuth({
   return children;
 }
 
-/** Домашній роут: якщо MetaMask — одразу на підпис/ескроу, інакше на карту */
+/** Домашній роут: MetaMask → escrow; інші → /register (або /map, за бажанням) */
 function HomeGate() {
   return isMetaMaskInApp()
     ? <Navigate to="/escrow/approve?next=/my-orders" replace />
-    : <Navigate to="/map" replace />;
+    : <Navigate to="/register" replace />;      // ← можеш змінити на "/map"
 }
 
 export default function App() {
@@ -114,10 +115,15 @@ export default function App() {
           {/* Публічні */}
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/escrow/approve" element={<EscrowHandoff />} />
-          {/* /register прибрали — редіректимо на escrow */}
+
+          {/* ⬇️ ТУТ БУЛО ВИМКНЕНО — ПОВЕРТАЄМО СПРАВЖНЮ СТОРІНКУ */}
           <Route
             path="/register"
-            element={<Navigate to="/escrow/approve?next=/my-orders" replace />}
+            element={
+              isMetaMaskInApp()
+                ? <Navigate to="/escrow/approve?next=/my-orders" replace />
+                : <Register />
+            }
           />
 
           <Route path="/map"          element={<MapView />} />
