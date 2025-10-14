@@ -1,20 +1,26 @@
-export function isMetaMaskInApp(): boolean {
-  const w = window as any;
-  const ua = navigator.userAgent || "";
-  const hasMM =
-    !!w.ethereum?.isMetaMask ||
-    Array.isArray(w.ethereum?.providers) &&
-    w.ethereum.providers.some((p: any) => p?.isMetaMask);
-  const mmUA = /MetaMaskMobile|MetaMask/i.test(ua);
-  return hasMM || mmUA;
-}
+// Визначаємо ТІЛЬКИ мобільний in-app MetaMask браузер.
+// Розширення MetaMask на десктопі НЕ повинно вважатися in-app.
 
-export function openInMetaMaskDeepLink(path = "/escrow/approve?next=/my-orders") {
-  const host = window.location.host;
-  const https = `https://metamask.app.link/dapp/${host}${path}`;
-  const native = `metamask://dapp/${host}${path}`;
-  // пробуємо спершу https-лінк (MetaMask Mobile його перехоплює)
-  window.location.href = https;
-  // підстраховка
-  setTimeout(() => { window.location.href = native; }, 300);
+export function isMetaMaskInApp(): boolean {
+  if (typeof navigator === "undefined" || typeof window === "undefined") return false;
+
+  const ua = navigator.userAgent || "";
+
+  // Ознаки мобільного середовища
+  const isMobile =
+    /Android|iPhone|iPad|iPod|Windows Phone/i.test(ua) ||
+    // iPadOS у десктопному UA
+    (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1);
+
+  // Ознаки саме in-app MetaMask Mobile
+  const isMetaMaskUA =
+    /MetaMaskMobile/i.test(ua) || /metamask/i.test((navigator as any).standalone ? "" : ua);
+
+  // window.ethereum може бути і в мобільному in-app, і в десктопному розширенні.
+  const hasEthereum = typeof (window as any).ethereum !== "undefined";
+  const isMMFlag = !!(hasEthereum && (window as any).ethereum.isMetaMask);
+
+  // Повертаємо true лише коли:
+  //   мобільний пристрій + є ethereum + явні ознаки MetaMask Mobile у UA
+  return isMobile && isMMFlag && isMetaMaskUA;
 }

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, Suspense, lazy } from "react";
-import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import type { User } from "@supabase/supabase-js";
-import { supabase } from "./lib/supabase";            // ← ВАЖЛИВО: саме ./lib/supabase
+import { supabase } from "./lib/supabase";
 
 import BehaviorsFeed   from "./components/BehaviorsFeed";
 import NavigationBar   from "./components/NavigationBar";
@@ -47,10 +47,9 @@ function RequireAuth({
   return children;
 }
 
+// Домашній роут: нехай веде на карту (щоб / працював без авторизації)
 function HomeGate() {
-  return isMetaMaskInApp()
-    ? <Navigate to="/escrow/approve?next=/my-orders" replace />
-    : <Navigate to="/register" replace />;
+  return <Navigate to="/map" replace />;
 }
 
 export default function App() {
@@ -59,7 +58,6 @@ export default function App() {
 
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const location = useLocation();
-  const navigate = useNavigate();
 
   useEffect(() => {
     let mounted = true;
@@ -78,14 +76,14 @@ export default function App() {
     };
   }, []);
 
-  // якщо MetaMask in-app — / та /register ведуть у escrow
-  useEffect(() => {
-    if (!isMetaMaskInApp()) return;
-    const p = location.pathname;
-    if (p === "/" || p === "/register") {
-      navigate("/escrow/approve?next=/my-orders", { replace: true });
-    }
-  }, [location.pathname, navigate]);
+  // УВАГА: ми БІЛЬШЕ НЕ редіректимо /register автоматично.
+  // Якщо треба, можна зберегти лише для СУВОРОГО мобільного in-app сценарію:
+  // (Закоментовано навмисне)
+  // useEffect(() => {
+  //   if (isMetaMaskInApp() && location.pathname === "/") {
+  //     navigate("/escrow/approve?next=/my-orders", { replace: true });
+  //   }
+  // }, [location.pathname, navigate]);
 
   if (user === undefined) return null;
 
@@ -112,9 +110,9 @@ export default function App() {
           <Route
             path="/register"
             element={
-              isMetaMaskInApp()
-                ? <Navigate to="/escrow/approve?next=/my-orders" replace />
-                : <Register />
+              // навіть якщо MetaMask in-app — показуємо реєстрацію.
+              // обмеження реєстрації робляться всередині Register.
+              <Register />
             }
           />
 
