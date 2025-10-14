@@ -1,4 +1,3 @@
-// src/components/MapView.tsx
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
@@ -59,7 +58,6 @@ export default function MapView() {
   const [selectedProfile, setSelectedProfile] = useState<User | null>(null);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
-  const [authUserId, setAuthUserId] = useState<string | null>(null); // ← хто залогінений
 
   const drawerWidth = 340;
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -105,7 +103,6 @@ export default function MapView() {
     touchStartX.current = null; lastX.current = null;
   };
 
-  // Завантаження користувачів + визначення авторизованого
   useEffect(() => {
     (async () => {
       const { data, error } = await supabase
@@ -116,7 +113,6 @@ export default function MapView() {
     })();
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      setAuthUserId(user?.id ?? null);
       if (!user) return;
       const { data } = await supabase
         .from('profiles').select('latitude, longitude')
@@ -182,29 +178,31 @@ export default function MapView() {
     if (selectedProfile || reviewsOpen) { setSelectedProfile(null); setReviewsOpen(false); }
   }
 
-  function handleOrderClick(e?: React.MouseEvent) {
+  async function handleOrderClick(e?: React.MouseEvent) {
     e?.preventDefault();
     e?.stopPropagation();
     if (!selectedProfile) return;
 
-    // збережемо контекст для форми
-    localStorage.setItem('scenario_receiverId', selectedProfile.user_id);
-    if (selectedProfile.latitude && selectedProfile.longitude) {
-      localStorage.setItem('latitude', String(selectedProfile.latitude));
-      localStorage.setItem('longitude', String(selectedProfile.longitude));
-    }
+    // збережемо контекст
+    try {
+      localStorage.setItem('scenario_receiverId', selectedProfile.user_id);
+      if (selectedProfile.latitude && selectedProfile.longitude) {
+        localStorage.setItem('latitude', String(selectedProfile.latitude));
+        localStorage.setItem('longitude', String(selectedProfile.longitude));
+      }
+    } catch {}
 
-    const q = `?executor_id=${encodeURIComponent(selectedProfile.user_id)}`;
+    // перевіримо авторизацію
+    const { data: { user } } = await supabase.auth.getUser();
 
-    // якщо НЕ авторизовані — ведемо на escrow з next = /scenario/new?... (поверне туди)
-    if (!authUserId) {
-      const next = encodeURIComponent(`/scenario/new${q}`);
-      navigate(`/escrow/approve?next=${next}`, { replace: false });
+    if (!user) {
+      const next = `/scenario/new?executor_id=${encodeURIComponent(selectedProfile.user_id)}`;
+      sessionStorage.setItem('bmb_next_after_auth', next);
+      navigate(`/register`, { replace: false, state: { next } });
       return;
     }
 
-    // авторизовані — одразу у форму сценарію
-    navigate(`/scenario/new${q}`, {
+    navigate(`/scenario/new?executor_id=${selectedProfile.user_id}`, {
       state: {
         executor_id: selectedProfile.user_id,
         receiverId: selectedProfile.user_id,
@@ -233,9 +231,8 @@ export default function MapView() {
 
   return (
     <div className="map-view-container" onClick={handleMapClick}>
-      {/* StoryBar ЗА мапою/шторкою, щоб не блокував кліки */}
       {!isSelectMode && (
-        <div className="storybar-overlay" style={{ zIndex: 1200, position: 'relative', pointerEvents: 'auto' }}>
+        <div className="storybar-overlay">
           <StoryBar />
         </div>
       )}
@@ -475,13 +472,12 @@ function DrawerContent({
       </div>
 
       <button
-        type="button"                 // ← важливо, щоб не було submit
         style={{
           position: 'sticky', bottom: 16, marginTop: 24, width: '100%',
           padding: '12px 16px', background: '#000', color: '#fff',
           border: 'none', borderRadius: 999, cursor: 'pointer', fontWeight: 700,
         }}
-        onClick={(e) => { e.stopPropagation(); onOrderClick(e); }} // ← блокуємо “спливання”
+        onClick={onOrderClick}
       >
         Замовити поведінку
       </button>
