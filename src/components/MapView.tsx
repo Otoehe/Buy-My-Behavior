@@ -199,9 +199,10 @@ export default function MapView() {
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
+      // 🔁 Раніше тут був navigate('/register'...), тепер ведемо на MetaMask-логін:
       const next = `/scenario/new?executor_id=${encodeURIComponent(selectedProfile.user_id)}`;
       sessionStorage.setItem('bmb_next_after_auth', next);
-      navigate(`/register`, { replace: false, state: { next } });
+      navigate(`/login?next=${encodeURIComponent(next)}`, { replace: false });
       return;
     }
 
@@ -387,7 +388,6 @@ export default function MapView() {
             scenarios={scenarios}
             avg={avg}
             onOpenReviews={() => setReviewsOpen(true)}
-            // ⬇️ Передаємо безпечний тап як обробник замовлення
             onOrderClick={handleOrderSafeTap}
           />
         </div>
@@ -493,7 +493,6 @@ function DrawerContent({
           padding: '12px 16px', background: '#000', color: '#fff',
           border: 'none', borderRadius: 999, cursor: 'pointer', fontWeight: 700,
         }}
-        // ⚠️ дизайн НЕ змінював; додано лише безпечні обробники:
         onClick={onOrderClick}
         onTouchStart={onOrderClick}
       >
