@@ -1,4 +1,3 @@
-// src/main.tsx
 import "./lib/metamaskGuard";
 
 import React from "react";
