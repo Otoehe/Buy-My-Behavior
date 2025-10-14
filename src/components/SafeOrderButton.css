@@ -1,0 +1,19 @@
+/* Проста базова стилізація; можеш не підключати, якщо вже є свій клас */
+.bmb-safe-order-btn {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  cursor: pointer;
+  border: none;
+  border-radius: 14px;
+  padding: 12px 16px;
+  font-weight: 700;
+  font-size: 16px;
+  background: #ffcdd6; /* бренд BMB */
+  color: #000;         /* чорний текст */
+}
+
+/* На випадок перекриття оверлеями: JS-логіка і так ставить stopPropagation,
+   але інколи допомагає явний pointer-events */
+.bmb-safe-order-btn {
+  pointer-events: auto;
+}
