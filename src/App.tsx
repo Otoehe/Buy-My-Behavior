@@ -1,4 +1,3 @@
-// src/App.tsx
 import React, { useEffect, useState, Suspense, lazy } from "react";
 import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import type { User } from "@supabase/supabase-js";
@@ -9,7 +8,7 @@ import NavigationBar   from "./components/NavigationBar";
 import Profile         from "./components/Profile";
 import AuthCallback    from "./components/AuthCallback";
 import A2HS            from "./components/A2HS";
-import Register        from "./components/Register";             // ⬅️ ПОВЕРТАЄМО
+import Register        from "./components/Register";
 
 import useViewportVH        from "./lib/useViewportVH";
 import useGlobalImageHints  from "./lib/useGlobalImageHints";
@@ -28,7 +27,10 @@ const ScenarioLocation  = lazy(() => import("./components/ScenarioLocation"));
 const BmbModalsDemo     = lazy(() => import("./components/BmbModalsDemo"));
 const EscrowHandoff     = lazy(() => import("./components/EscrowHandoff"));
 
-/** Гейт для приватних маршрутів */
+/** Приватний гейт: якщо користувач не авторизований —
+ *  шлемо на escrow з next = фактичний запит (шлях + query).
+ *  Після підтвердження користувач повернеться саме сюди.
+ */
 function RequireAuth({
   user,
   children,
@@ -37,11 +39,14 @@ function RequireAuth({
   children: React.ReactElement;
 }) {
   const location = useLocation();
+
   if (user === undefined) return null;
+
   if (user === null) {
+    const next = encodeURIComponent(location.pathname + location.search);
     return (
       <Navigate
-        to="/escrow/approve?next=/my-orders"
+        to={`/escrow/approve?next=${next}`}
         replace
         state={{ from: location.pathname }}
       />
@@ -50,11 +55,14 @@ function RequireAuth({
   return children;
 }
 
-/** Домашній роут: MetaMask → escrow; інші → /register (або /map, за бажанням) */
+/** Домашній маршрутизатор:
+ *  - у MetaMask → escrow (після нього йдемо в /my-orders)
+ *  - для інших → /map (можеш змінити на /register, якщо треба)
+ */
 function HomeGate() {
   return isMetaMaskInApp()
     ? <Navigate to="/escrow/approve?next=/my-orders" replace />
-    : <Navigate to="/register" replace />;      // ← можеш змінити на "/map"
+    : <Navigate to="/map" replace />;
 }
 
 export default function App() {
@@ -83,11 +91,10 @@ export default function App() {
     };
   }, []);
 
-  // Автоперенаправлення у MetaMask-браузері з домашньої / register
+  // У MetaMask редіректимо тільки з домашнього "/" (НЕ чіпаємо /register)
   useEffect(() => {
     if (!isMetaMaskInApp()) return;
-    const p = location.pathname;
-    if (p === "/" || p === "/register") {
+    if (location.pathname === "/") {
       navigate("/escrow/approve?next=/my-orders", { replace: true });
     }
   }, [location.pathname, navigate]);
@@ -110,22 +117,15 @@ export default function App() {
 
       <Suspense fallback={null}>
         <Routes>
+          {/* Домашній */}
           <Route path="/" element={<HomeGate />} />
 
           {/* Публічні */}
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/escrow/approve" element={<EscrowHandoff />} />
+          <Route path="/register" element={<Register />} />
 
-          {/* ⬇️ ТУТ БУЛО ВИМКНЕНО — ПОВЕРТАЄМО СПРАВЖНЮ СТОРІНКУ */}
-          <Route
-            path="/register"
-            element={
-              isMetaMaskInApp()
-                ? <Navigate to="/escrow/approve?next=/my-orders" replace />
-                : <Register />
-            }
-          />
-
+          {/* Публічні екрани */}
           <Route path="/map"          element={<MapView />} />
           <Route path="/map/select"   element={<ScenarioLocation />} />
           <Route path="/behaviors"    element={<BehaviorsFeed />} />
@@ -166,6 +166,7 @@ export default function App() {
             }
           />
 
+          {/* Фолбек */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

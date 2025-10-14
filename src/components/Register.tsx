@@ -1,17 +1,16 @@
-// src/components/Register.tsx
 import React, { useCallback, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { ethers } from "ethers";
+import { useNavigate } from "react-router-dom";
 
-// ─── UI/ENV ──────────────────────────
+// ----- UI/Env -----
 type Phase = "idle" | "sending" | "sent" | "error";
 
 const APP_URL =
   (import.meta as any).env?.VITE_PUBLIC_APP_URL ||
   (typeof window !== "undefined" ? window.location.origin : "https://buymybehavior.com");
 
-// модалки BMB (залишаю як у тебе)
+// BMB модалки (ти вже їх використовуєш у проєкті)
 function openBmb(payload: {
   kind?:
     | "success"
@@ -36,35 +35,30 @@ function closeBmb() {
 }
 
 export default function Register() {
-  const navigate = useNavigate();
-  const [params] = useSearchParams();
-
   const [email, setEmail] = useState("");
-  const [refWord, setRefWord] = useState(params.get("ref") || ""); // зчитуємо ?ref=
+  const [refWord, setRefWord] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
+  const [busyBtn, setBusyBtn] = useState<string | null>(null);
 
-  // куди вертатись після підтвердження магік-лінка
-  const redirectTo = useMemo(
-    () => `${APP_URL}/auth/callback?next=/my-orders`,
-    []
-  );
+  const redirectTo = useMemo(() => `${APP_URL}/auth/callback?next=/map`, []);
+  const navigate = useNavigate();
 
-  // ─────────────── Supabase helpers ───────────────
-  // Перевірка реферального коду (повертаємо id + гаманець реферала)
+  // ---------- Supabase helpers ----------
   const verifyReferral = async (word: string) => {
     const code = word.trim();
     if (!code) return null;
+
     const { data, error } = await supabase
       .from("profiles")
       .select("id, wallet, wallet_address, referral_code")
       .eq("referral_code", code)
       .limit(1)
-      .maybeSingle();
+      .maybeSingle(); // не падати, якщо немає рядка
+
     if (error) throw error;
-    return data;
+    return data; // або null
   };
 
-  // Відправка magic-link
   const sendMagicLink = async (emailValue: string) => {
     return supabase.auth.signInWithOtp({
       email: emailValue.trim(),
@@ -72,25 +66,10 @@ export default function Register() {
     });
   };
 
-  // Зберігаємо контекст реферала (щоб використати на бек/після колбеку)
-  const saveRefContext = (ref: any) => {
-    try {
-      localStorage.setItem(
-        "bmb_ref_context",
-        JSON.stringify({
-          referred_by: ref?.id ?? null,
-          referrer_wallet: ref?.wallet ?? ref?.wallet_address ?? null,
-          referral_code: ref?.referral_code ?? refWord.trim(),
-        })
-      );
-    } catch {}
-  };
-
-  // ─────────────── Реєстрація (email + рефкод обов’язковий) ───────────────
+  // ---------- Дії ----------
   const onRegister = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-
       if (!email.trim()) {
         openBmb({
           kind: "info",
@@ -104,8 +83,7 @@ export default function Register() {
         openBmb({
           kind: "warning",
           title: "Реєстрація лише за реферальним словом",
-          subtitle:
-            "Введіть реферальне слово амбасадора. Без нього реєстрація недоступна.",
+          subtitle: "Введіть реферальне слово амбасадора.",
           actionLabel: "Добре",
         });
         return;
@@ -113,20 +91,32 @@ export default function Register() {
 
       try {
         setPhase("sending");
+        setBusyBtn("register");
 
+        // Перевіряємо реф-код
         const ref = await verifyReferral(refWord);
         if (!ref) {
           setPhase("error");
           openBmb({
             kind: "error",
             title: "Невірне реферальне слово",
-            subtitle: "Перевірте правильність коду або зверніться до амбасадора.",
+            subtitle: "Перевірте правильність.",
             actionLabel: "Ок",
           });
           return;
         }
 
-        saveRefContext(ref);
+        // Запам'ятовуємо локальний контекст реферала для подальшого створення профілю
+        try {
+          localStorage.setItem(
+            "bmb_ref_context",
+            JSON.stringify({
+              referred_by: ref.id,
+              referrer_wallet: ref.wallet || ref.wallet_address || "",
+              referral_code: ref.referral_code,
+            })
+          );
+        } catch {}
 
         const { error } = await sendMagicLink(email);
         if (error) throw error;
@@ -137,7 +127,7 @@ export default function Register() {
           title: "Магік-лінк надіслано",
           subtitle: (
             <>
-              Перевір пошту <b>{email}</b>. Відкрий посилання у браузері.
+              Перевір пошту <b>{email}</b>. Відкрий посилання у зовнішньому браузері.
             </>
           ),
           actionLabel: "Добре",
@@ -147,15 +137,16 @@ export default function Register() {
         openBmb({
           kind: "error",
           title: "Сталася помилка",
-          subtitle: String(err?.message ?? err),
+          subtitle: String(err?.message || err),
           actionLabel: "Добре",
         });
+      } finally {
+        setBusyBtn(null);
       }
     },
     [email, refWord, redirectTo]
   );
 
-  // ─────────────── Вхід (magic-link, БЕЗ рефкоду) ───────────────
   const onLogin = useCallback(
     async (e: React.MouseEvent) => {
       e.preventDefault();
@@ -168,8 +159,11 @@ export default function Register() {
         });
         return;
       }
+
       try {
         setPhase("sending");
+        setBusyBtn("login");
+
         const { error } = await sendMagicLink(email);
         if (error) throw error;
 
@@ -189,98 +183,77 @@ export default function Register() {
         openBmb({
           kind: "error",
           title: "Помилка",
-          subtitle: String(err?.message ?? err),
+          subtitle: String(err?.message || err),
           actionLabel: "Добре",
         });
+      } finally {
+        setBusyBtn(null);
       }
     },
     [email, redirectTo]
   );
 
-  // ─────────────── Реєстрація/вхід через MetaMask (РЕФКОД обов’язковий для РЕЄСТРАЦІЇ) ───────────────
+  // ---------- Вхід через MetaMask ----------
   const onWalletLogin = useCallback(async () => {
     try {
-      if (!refWord.trim()) {
-        openBmb({
-          kind: "warning",
-          title: "Потрібен реферальний код",
-          subtitle:
-            "Введіть реферальний код, щоб продовжити реєстрацію через MetaMask.",
-          actionLabel: "Добре",
-        });
-        return;
-      }
-
       setPhase("sending");
+      setBusyBtn("wallet");
 
       if (!(window as any).ethereum) {
         openBmb({
           kind: "info",
-          title: "Встановіть MetaMask",
-          subtitle: "У браузері не знайдено провайдера Ethereum.",
-          actionLabel: "Добре",
+          title: "MetaMask не знайдено",
+          subtitle: "Будь ласка, встановіть розширення MetaMask або відкрийте в MetaMask-браузері.",
+          actionLabel: "Зрозуміло",
         });
         return;
       }
 
-      // 1) Під’єднання гаманця + підпис повідомлення
-      const provider = new ethers.providers.Web3Provider(
-        (window as any).ethereum
-      );
+      const provider = new ethers.providers.Web3Provider((window as any).ethereum);
       await provider.send("eth_requestAccounts", []);
       const signer = provider.getSigner();
       const address = await signer.getAddress();
-
       const message = `BMB Login\nWallet: ${address}\nTime: ${Date.now()}`;
       const signature = await signer.signMessage(message);
       const recovered = ethers.utils.verifyMessage(message, signature);
+
       if (recovered.toLowerCase() !== address.toLowerCase()) {
         openBmb({
           kind: "error",
           title: "Підпис не збігається",
-          subtitle: "Спробуйте ще раз.",
+          subtitle: "Будь ласка, спробуйте ще раз.",
           actionLabel: "OK",
         });
         return;
       }
 
-      // 2) Перевіримо, що рефкод валідний (реєстрація — тільки за кодом)
-      const ref = await verifyReferral(refWord);
-      if (!ref) {
-        setPhase("error");
-        openBmb({
-          kind: "error",
-          title: "Невірне реферальне слово",
-          subtitle: "Перевірте правильність коду або зверніться до амбасадора.",
-          actionLabel: "Ок",
-        });
-        return;
-      }
-      saveRefContext(ref);
-
-      // 3) Якщо профіль існує — вважаємо це входом; якщо ні — реєструємо
+      // Якщо профіль з таким гаманцем ще не існує — створюємо
       const { data: existing } = await supabase
         .from("profiles")
         .select("id")
-        .eq("wallet_address", address)
+        .or(`wallet.eq.${address},wallet_address.eq.${address}`)
+        .limit(1)
         .maybeSingle();
 
       if (!existing) {
-        const ctxRaw = localStorage.getItem("bmb_ref_context");
-        const base: any = {
-          wallet_address: address,
+        const context = localStorage.getItem("bmb_ref_context");
+        const base: Record<string, any> = {
           created_at: new Date().toISOString(),
         };
-        if (ctxRaw) {
+
+        // підтримуємо обидві назви поля
+        base.wallet = address;
+        base.wallet_address = address;
+
+        if (context) {
           try {
-            const ctx = JSON.parse(ctxRaw);
-            Object.assign(base, {
-              referred_by: ctx?.referred_by ?? null,
-              referrer_wallet: ctx?.referrer_wallet ?? null,
-              referral_code: ctx?.referral_code ?? refWord.trim(),
-            });
+            const parsed = JSON.parse(context);
+            base.referred_by = parsed.referred_by ?? null;
+            base.referrer_wallet = parsed.referrer_wallet ?? null;
+            base.referral_code = parsed.referral_code ?? null;
           } catch {}
         }
+
         const { error: insertError } = await supabase.from("profiles").insert(base);
         if (insertError) {
           openBmb({
@@ -293,35 +266,29 @@ export default function Register() {
         }
       }
 
-      // 4) Зберігаємо адресу локально (за потреби)
-      try {
-        localStorage.setItem("wallet_address", address);
-      } catch {}
-
-      // 5) Готово: ведемо в «Мої замовлення»
-      openBmb({
-        kind: "success",
-        title: "Вхід виконано",
-        subtitle: `Гаманець: ${address.slice(0, 6)}…${address.slice(-4)}`,
-        actionLabel: "Перейти",
-      });
-      navigate("/my-orders");
+      localStorage.setItem("wallet_address", address);
+      navigate("/map", { replace: true });
     } catch (err: any) {
       openBmb({
         kind: "error",
         title: "Помилка MetaMask",
-        subtitle: String(err?.message ?? err),
+        subtitle: String(err?.message || err),
         actionLabel: "OK",
       });
     } finally {
       setPhase("idle");
+      setBusyBtn(null);
     }
-  }, [refWord, navigate]);
+  }, [navigate]);
+
+  // ---------- UI ----------
+  const isBusy = phase === "sending";
+  const disableAll = isBusy || !!busyBtn;
 
   return (
     <div style={pageWrap}>
       <div style={card}>
-        <h1 style={title}>Реєстрація з реферальним кодом</h1>
+        <h1 style={title}>Реєстрація з реферальним словом</h1>
 
         <form onSubmit={onRegister} style={formGrid}>
           <input
@@ -338,47 +305,35 @@ export default function Register() {
             type="text"
             value={refWord}
             onChange={(e) => setRefWord(e.target.value)}
-            placeholder="Реферальний код амбасадора"
+            placeholder="Реферальний код"
             style={input}
             autoComplete="one-time-code"
           />
 
-          {/* Реєстрація (обов'язково з рефкодом) */}
           <button
             type="submit"
-            disabled={phase === "sending"}
-            style={{
-              ...btnBlack,
-              opacity: phase === "sending" ? 0.7 : 1,
-            }}
+            disabled={disableAll && busyBtn !== "register"}
+            style={{ ...btnBlack, opacity: disableAll && busyBtn !== "register" ? 0.7 : 1 }}
           >
-            Зареєструватися (email + рефкод)
+            Зареєструватися
           </button>
 
-          {/* Вхід (тільки email) */}
           <button
             type="button"
             onClick={onLogin}
-            disabled={phase === "sending"}
-            style={{
-              ...btnBlack,
-              opacity: phase === "sending" ? 0.7 : 1,
-            }}
+            disabled={disableAll && busyBtn !== "login"}
+            style={{ ...btnBlack, opacity: disableAll && busyBtn !== "login" ? 0.7 : 1 }}
           >
             Увійти (magic link)
           </button>
 
-          {/* Реєстрація/вхід через MetaMask (рефкод обов'язковий для реєстрації) */}
           <button
             type="button"
             onClick={onWalletLogin}
-            disabled={phase === "sending"}
-            style={{
-              ...btnMetaMask,
-              opacity: phase === "sending" ? 0.7 : 1,
-            }}
+            disabled={disableAll && busyBtn !== "wallet"}
+            style={{ ...btnMetaMask, opacity: disableAll && busyBtn !== "wallet" ? 0.7 : 1 }}
           >
-            Продовжити через MetaMask (з рефкодом)
+            Увійти через MetaMask
           </button>
         </form>
       </div>
@@ -386,7 +341,7 @@ export default function Register() {
   );
 }
 
-/* ────────────── стилі ────────────── */
+// ----- Styles -----
 const pageWrap: React.CSSProperties = {
   minHeight: "calc(100vh - 120px)",
   display: "grid",
@@ -411,7 +366,10 @@ const title: React.CSSProperties = {
   color: "#111",
 };
 
-const formGrid: React.CSSProperties = { display: "grid", gap: 14 };
+const formGrid: React.CSSProperties = {
+  display: "grid",
+  gap: 14,
+};
 
 const input: React.CSSProperties = {
   height: 48,
