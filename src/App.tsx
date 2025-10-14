@@ -1,165 +1,89 @@
-import React, { useEffect, useState, Suspense, lazy } from "react";
+// src/App.tsx — ПОВНА версія
+import React, { Suspense } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
-import type { User } from "@supabase/supabase-js";
-import { supabase } from "./lib/supabase";
-import EscrowApprove from "./components/EscrowApprove";
-import BehaviorsFeed   from "./components/BehaviorsFeed";
-import NavigationBar   from "./components/NavigationBar";
-import Profile         from "./components/Profile";
-import AuthCallback    from "./components/AuthCallback";
-import A2HS            from "./components/A2HS";
-import Register        from "./components/Register";
 
-import useViewportVH        from "./lib/useViewportVH";
-import useGlobalImageHints  from "./lib/useGlobalImageHints";
-import NetworkToast         from "./components/NetworkToast";
-import SWUpdateToast        from "./components/SWUpdateToast";
-import BmbModalHost         from "./components/BmbModalHost";
-import { isMetaMaskInApp }  from "./lib/isMetaMaskBrowser";
+// ===== Основні екрани BMB =====
+import MapView from "./components/MapView";                // TODO: перевір шлях
+// (Ці екрани можуть мати інші шляхи у твоєму репо — відкоригуй за потреби)
+import Login from "./components/Login";                    // новий файл
+import Register from "./components/Register";              // новий файл-редіректор
+import EscrowApprove from "./components/EscrowApprove";    // новий файл
+import EscrowConfirm from "./components/EscrowConfirm";    // новий файл
 
-const MapView           = lazy(() => import("./components/MapView"));
-const MyOrders          = lazy(() => import("./components/MyOrders"));
-const ReceivedScenarios = lazy(() => import("./components/ReceivedScenarios"));
-const Manifest          = lazy(() => import("./components/Manifest"));
-const ScenarioForm      = lazy(() => import("./components/ScenarioForm"));
-const ScenarioLocation  = lazy(() => import("./components/ScenarioLocation"));
-const BmbModalsDemo     = lazy(() => import("./components/BmbModalsDemo"));
-const EscrowHandoff     = lazy(() => import("./components/EscrowHandoff"));
+// ===== (Необов’язково) Якщо в тебе є верхнє меню/хедер =====
+// Якщо NavigationBar у тебе в іншому місці або рендериться в index.tsx — просто видали цей імпорт і <Header/> нижче.
+import NavigationBar from "./components/NavigationBar";    // TODO: перевір шлях
 
-function RequireAuth({
-  user,
-  children,
-}: {
-  user: User | null | undefined;
-  children: React.ReactElement;
-}) {
-  const location = useLocation();
-  if (user === undefined) return null;
-  if (user === null) {
-    return (
-      <Navigate
-        to="/escrow/approve?next=/my-orders"
-        replace
-        state={{ from: location.pathname + location.search }}
-      />
-    );
-  }
-  return children;
+// ===== (Необов’язково) Інші сторінки, якщо вони існують у твоєму проєкті =====
+// Можеш закоментувати, якщо такі файли відсутні або інші шляхи імпорту
+// import Manifest from "./pages/Manifest";
+// import ChooseExecutor from "./pages/ChooseExecutor";
+// import MyOrders from "./pages/MyOrders";
+// import ReceivedScenarios from "./pages/ReceivedScenarios";
+// import Profile from "./pages/Profile";
+// import ScenarioNew from "./pages/ScenarioNew";
+
+// Невелика утиліта для автоскролу вгору між маршрутами
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  React.useEffect(() => {
+    // даємо SPA завершити рендер і скролимо вгору
+    const t = setTimeout(() => window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior }), 0);
+    return () => clearTimeout(t);
+  }, [pathname]);
+  return null;
 }
 
-// Домашній роут: нехай веде на карту (щоб / працював без авторизації)
-function HomeGate() {
-  return <Navigate to="/map" replace />;
+// Мінімальний контейнер застосунку
+function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+      {/* Верхнє меню (збережи, якщо воно в тебе є; інакше — видали цей рядок) */}
+      <NavigationBar />
+      {/* Контент сторінок */}
+      <main style={{ flex: 1, minHeight: 0 }}>
+        {children}
+      </main>
+    </div>
+  );
 }
 
 export default function App() {
-  useViewportVH();
-  useGlobalImageHints();
-
-  const [user, setUser] = useState<User | null | undefined>(undefined);
-  const location = useLocation();
-
-  useEffect(() => {
-    let mounted = true;
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (mounted) setUser(data.session?.user ?? null);
-    });
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user ?? null);
-    });
-
-    return () => {
-      mounted = false;
-      sub.subscription.unsubscribe();
-    };
-  }, []);
-
-  // УВАГА: ми БІЛЬШЕ НЕ редіректимо /register автоматично.
-  // Якщо треба, можна зберегти лише для СУВОРОГО мобільного in-app сценарію:
-  // (Закоментовано навмисне)
-  // useEffect(() => {
-  //   if (isMetaMaskInApp() && location.pathname === "/") {
-  //     navigate("/escrow/approve?next=/my-orders", { replace: true });
-  //   }
-  // }, [location.pathname, navigate]);
-
-  if (user === undefined) return null;
-
-  const HIDE_UI_ROUTES = new Set<string>(["/map/select", "/escrow/approve"]);
-  const pathname = location.pathname;
-  const hideNavAndA2HS = HIDE_UI_ROUTES.has(pathname);
-  const showGlobalA2HS = !hideNavAndA2HS && pathname !== "/profile";
-
   return (
     <>
-      {showGlobalA2HS && <A2HS />}
-      <NetworkToast />
-      <SWUpdateToast />
-      {!hideNavAndA2HS && <NavigationBar />}
-      <BmbModalHost />
+      <ScrollToTop />
+      <AppLayout>
+        {/* Suspense на випадок, якщо частина екранів підвантажується динамічно */}
+        <Suspense fallback={null}>
+          <Routes>
+            {/* ГОЛОВНИЙ ПОТІК */}
+            <Route path="/" element={<Navigate to="/map" replace />} />
+            <Route path="/map" element={<MapView />} />
+            <Route path="/map/select" element={<MapView />} />
 
-      <Suspense fallback={null}>
-        <Routes>
-          <Route path="/" element={<HomeGate />} />
+            {/* AUTH / WEB3 */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
 
-          {/* Публічні */}
-          <Route path="/auth/callback"  element={<AuthCallback />} />
-          <Route path="/escrow/approve" element={<EscrowApprove />} />
-          <Route path="/escrow/approve" element={<EscrowHandoff />} />
-          <Route
-            path="/register"
-            element={
-              // навіть якщо MetaMask in-app — показуємо реєстрацію.
-              // обмеження реєстрації робляться всередині Register.
-              <Register />
-            }
-          />
+            {/* ESCROW FALLBACK-СТОРІНКИ (щоб не було “білих” екранів) */}
+            <Route path="/escrow/approve" element={<EscrowApprove />} />
+            <Route path="/escrow/confirm" element={<EscrowConfirm />} />
 
-          <Route path="/map"        element={<MapView />} />
-          <Route path="/map/select" element={<ScenarioLocation />} />
-          <Route path="/behaviors"  element={<BehaviorsFeed />} />
-          <Route path="/manifest"   element={<Manifest />} />
-          <Route path="/modals"     element={<BmbModalsDemo />} />
+            {/* (НЕОБОВ’ЯЗКОВО) Якщо маєш ці сторінки — розкоментуй імпорти вище і рядки нижче */}
+            {/*
+            <Route path="/manifest" element={<Manifest />} />
+            <Route path="/executors" element={<ChooseExecutor />} />
+            <Route path="/my-orders" element={<MyOrders />} />
+            <Route path="/received" element={<ReceivedScenarios />} />
+            <Route path="/profile" element={<Profile />} />
+            <Route path="/scenario/new" element={<ScenarioNew />} />
+            */}
 
-          {/* Приватні */}
-          <Route
-            path="/profile"
-            element={
-              <RequireAuth user={user}>
-                <Profile />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/my-orders"
-            element={
-              <RequireAuth user={user}>
-                <MyOrders />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/received"
-            element={
-              <RequireAuth user={user}>
-                <ReceivedScenarios />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/scenario/new"
-            element={
-              <RequireAuth user={user}>
-                <ScenarioForm />
-              </RequireAuth>
-            }
-          />
-
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
+            {/* 404 → на мапу */}
+            <Route path="*" element={<Navigate to="/map" replace />} />
+          </Routes>
+        </Suspense>
+      </AppLayout>
     </>
   );
 }

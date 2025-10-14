@@ -67,7 +67,7 @@ export default function MapView() {
   const dragXRef = useRef(0);
   const rafRef = useRef<number | null>(null);
 
-  // 🔒 Анти-дабл для кнопки "Замовити поведінку" (мобільний touch→click)
+  // анти-дабл для кнопки
   const orderTapLocked = useRef(false);
 
   const setTransform = (dx: number) => {
@@ -186,7 +186,7 @@ export default function MapView() {
     e?.stopPropagation?.();
     if (!selectedProfile) return;
 
-    // збережемо контекст
+    // контекст
     try {
       localStorage.setItem('scenario_receiverId', selectedProfile.user_id);
       if (selectedProfile.latitude && selectedProfile.longitude) {
@@ -195,11 +195,10 @@ export default function MapView() {
       }
     } catch {}
 
-    // перевіримо авторизацію
+    // авторизація
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
-      // 🔁 Раніше тут був navigate('/register'...), тепер ведемо на MetaMask-логін:
       const next = `/scenario/new?executor_id=${encodeURIComponent(selectedProfile.user_id)}`;
       sessionStorage.setItem('bmb_next_after_auth', next);
       navigate(`/login?next=${encodeURIComponent(next)}`, { replace: false });
@@ -217,7 +216,7 @@ export default function MapView() {
     });
   }
 
-  // ✅ Безпечний мобільний тап-обгортка: блокує повторний запуск (touch→click)
+  // безпечний мобільний тап
   const handleOrderSafeTap = (e?: React.MouseEvent | React.TouchEvent) => {
     e?.preventDefault?.();
     e?.stopPropagation?.();

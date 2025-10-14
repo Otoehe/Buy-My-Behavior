@@ -1,162 +1,123 @@
-import React, { useState } from 'react';
-import { ethers } from 'ethers';
-import { supabase } from '../lib/supabase';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { supabase } from "../lib/supabase";
 
-function openBmb(payload: {
-  kind?: 'success' | 'warning' | 'error' | 'confirm' | 'tx' | 'info' | 'magic' | 'congratsCustomer' | 'congratsPerformer',
-  title?: React.ReactNode,
-  subtitle?: React.ReactNode,
-  actionLabel?: string,
-}) {
-  window.dispatchEvent(new CustomEvent('bmb:modal:open', { detail: payload }));
+const BSC_CHAIN_ID = "0x38";
+
+function getNext(search: string): string {
+  try {
+    const p = new URLSearchParams(search);
+    const n = p.get("next");
+    if (n && typeof n === "string" && n.trim().length > 0) return n;
+  } catch {}
+  const fromSess = sessionStorage.getItem("bmb_next_after_auth");
+  return fromSess || "/map";
+}
+
+function isMobile() {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function buildMetaMaskDeepLink(next: string) {
+  const host = window.location.host;
+  return `https://metamask.app.link/dapp/${host}/login?next=${encodeURIComponent(next)}`;
+}
+
+async function ensureBSC() {
+  const eth = (window as any).ethereum;
+  if (!eth) return;
+  try {
+    const cur = await eth.request({ method: "eth_chainId" });
+    if (cur?.toLowerCase() === BSC_CHAIN_ID) return;
+    await eth.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: BSC_CHAIN_ID }],
+    });
+  } catch (err: any) {
+    if (err?.code === 4902) {
+      await (window as any).ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: BSC_CHAIN_ID,
+            chainName: "Binance Smart Chain",
+            nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
+            rpcUrls: ["https://bsc-dataseed.binance.org/"],
+            blockExplorerUrls: ["https://bscscan.com/"],
+          },
+        ],
+      });
+    }
+  }
 }
 
 export default function Login() {
-  const [loading, setLoading] = useState(false);
+  const location = useLocation();
   const navigate = useNavigate();
+  const next = useMemo(() => getNext(location.search), [location.search]);
 
-  const loginWithWallet = async () => {
+  const [status, setStatus] = useState<"idle" | "connecting" | "done" | "error">("idle");
+  const [errMsg, setErrMsg] = useState<string>("");
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session) navigate(next, { replace: true });
+    })();
+  }, [navigate, next]);
+
+  const connectMetaMask = useCallback(async () => {
+    setErrMsg("");
+    setStatus("connecting");
     try {
-      setLoading(true);
+      const eth = (window as any).ethereum;
+      if (!eth) {
+        if (isMobile()) {
+          window.location.assign(buildMetaMaskDeepLink(next));
+          return;
+        } else {
+          setStatus("error");
+          setErrMsg("MetaMask не знайдено. Встанови розширення або відкрий сайт у MetaMask Mobile.");
+          return;
+        }
+      }
 
-      if (!window.ethereum) {
-        openBmb({
-          kind: 'warning',
-          title: 'MetaMask не знайдено',
-          subtitle: 'Встановіть MetaMask для продовження.',
-          actionLabel: 'OK',
-        });
+      const accounts: string[] = await eth.request({ method: "eth_requestAccounts" });
+      if (!accounts || accounts.length === 0) {
+        setStatus("error");
+        setErrMsg("Гаманець не під’єднано.");
         return;
       }
 
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      await provider.send('eth_requestAccounts', []);
-      const signer = provider.getSigner();
-      const address = await signer.getAddress();
+      await ensureBSC();
+      try { localStorage.setItem("bmb_wallet", accounts[0]); } catch {}
 
-      const message = `BuyMyBehavior Sign-In\nWallet: ${address}\nTime: ${Date.now()}`;
-      const signature = await signer.signMessage(message);
-      const recovered = ethers.utils.verifyMessage(message, signature);
-
-      if (recovered.toLowerCase() !== address.toLowerCase()) {
-        openBmb({
-          kind: 'error',
-          title: 'Підпис не збігається',
-          subtitle: 'Будь ласка, спробуйте ще раз.',
-          actionLabel: 'OK',
-        });
-        return;
-      }
-
-      // 1) Перевіряємо, чи існує профіль (без кидання помилки коли немає)
-      const { data: existing, error: selectErr } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('wallet_address', address)
-        .maybeSingle();
-
-      if (selectErr) {
-        // не критично — продовжимо до upsert
-        console.warn('profiles select warning:', selectErr.message);
-      }
-
-      // 2) Створення/оновлення профілю по ключу wallet_address
-      const { error: upsertError } = await supabase
-        .from('profiles')
-        .upsert(
-          { wallet_address: address },     // додаткові поля додамо згодом
-          { onConflict: 'wallet_address' } // ключ унікальності
-        );
-
-      if (upsertError) {
-        openBmb({
-          kind: 'error',
-          title: 'Помилка створення профілю',
-          subtitle: upsertError.message,
-          actionLabel: 'OK',
-        });
-        return;
-      }
-
-      localStorage.setItem('wallet_address', address);
-
-      // Редирект одразу у "Мої замовлення", як просив
-      navigate('/my-orders');
-    } catch (err: any) {
-      openBmb({
-        kind: 'error',
-        title: 'Помилка входу через MetaMask',
-        subtitle: err?.message || 'Спробуйте пізніше.',
-        actionLabel: 'OK',
-      });
-    } finally {
-      setLoading(false);
+      setStatus("done");
+      navigate(next, { replace: true, state: { from: "/login" } });
+    } catch (e: any) {
+      setStatus("error");
+      setErrMsg(e?.message || "Помилка під час підключення MetaMask.");
     }
-  };
+  }, [next, navigate]);
 
   return (
-    <div style={wrapper}>
-      <div style={card}>
-        <h1 style={title}>Вхід через MetaMask</h1>
-        <button onClick={loginWithWallet} style={btnOval} disabled={loading}>
-          {loading ? 'Зачекайте…' : '🦊 Увійти через MetaMask'}
+    <div style={{ minHeight: "calc(100dvh - 56px)", display: "grid", placeItems: "center", padding: 24 }}>
+      <div style={{ maxWidth: 420, width: "100%", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, boxShadow: "0 12px 28px rgba(0,0,0,.08)", padding: 20, textAlign: "center" }}>
+        <h1 style={{ fontSize: 22, fontWeight: 900, marginBottom: 6 }}>Вхід через MetaMask</h1>
+        <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 16 }}>
+          Після входу повернемо тебе на: <span style={{ color: "#111827", fontWeight: 700 }}>{next}</span>
+        </p>
+        <button
+          type="button"
+          onClick={connectMetaMask}
+          disabled={status === "connecting"}
+          style={{ display: "inline-block", width: "100%", padding: "12px 16px", borderRadius: 999, background: "#000", color: "#fff", fontWeight: 800, border: 0, cursor: "pointer" }}
+        >
+          {status === "connecting" ? "З’єднання…" : "Увійти через MetaMask"}
         </button>
-        <button onClick={() => navigate('/my-orders')} style={btnSecondary}>
-          Повернутись у BMB
-        </button>
+        {errMsg && <div style={{ color: "#ef4444", fontSize: 13, marginTop: 10 }}>{errMsg}</div>}
+        <div style={{ marginTop: 12, fontSize: 12, color: "#9ca3af" }}>На мобільному? За потреби відкриємо MetaMask-додаток.</div>
       </div>
     </div>
   );
 }
-
-const wrapper: React.CSSProperties = {
-  height: '100vh',
-  display: 'flex',
-  justifyContent: 'center',
-  alignItems: 'center',
-  background: '#fff',
-};
-
-const card: React.CSSProperties = {
-  padding: 24,
-  borderRadius: 16,
-  background: '#ffcdd6',
-  boxShadow: '0 8px 30px rgba(0, 0, 0, 0.1)',
-  textAlign: 'center',
-};
-
-const title: React.CSSProperties = {
-  fontSize: 24,
-  fontWeight: 700,
-  marginBottom: 20,
-};
-
-const btnOval: React.CSSProperties = {
-  backgroundColor: '#000',
-  color: '#fff',
-  padding: '14px 32px',
-  fontSize: 16,
-  fontWeight: 600,
-  borderRadius: 999,
-  border: 'none',
-  cursor: 'pointer',
-  width: '100%',
-  maxWidth: 280,
-  margin: '12px auto',
-};
-
-const btnSecondary: React.CSSProperties = {
-  backgroundColor: '#fff',
-  color: '#000',
-  padding: '12px 24px',
-  fontSize: 15,
-  fontWeight: 500,
-  borderRadius: 999,
-  border: '2px solid #000',
-  marginTop: 12,
-  cursor: 'pointer',
-  width: '100%',
-  maxWidth: 240,
-  marginInline: 'auto',
-};
