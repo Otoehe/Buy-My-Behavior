@@ -1,48 +1,55 @@
 // public/sw.js
-const VERSION    = 'bmb-2025-10-14-1';          // міняй при кожному релізі
-const CACHE_NAME = `spa-shell-${VERSION}`;
+const VERSION = 'bmb-2025-10-14-2';
+const CACHE_PREFIX = 'bmb-sw';
+const RUNTIME_CACHE = `${CACHE_PREFIX}-${VERSION}`;
 
-// Встановлення SW (нічого не кешуємо наперед)
 self.addEventListener('install', (event) => {
-  // залишаємо порожнім; активуватимемось за повідомленням SKIP_WAITING
+  // Активуємось без затримок
+  event.waitUntil(self.skipWaiting());
 });
 
-// Активуємось: прибираємо старі кеші та беремо контроль над клієнтами
 self.addEventListener('activate', (event) => {
+  // Чистимо попередні кеші цього SW
   event.waitUntil((async () => {
     const keys = await caches.keys();
     await Promise.all(
-      keys.map((k) => (k === CACHE_NAME ? null : caches.delete(k)))
+      keys
+        .filter((k) => k.startsWith(CACHE_PREFIX) && k !== RUNTIME_CACHE)
+        .map((k) => caches.delete(k))
     );
     await self.clients.claim();
   })());
 });
 
-// Дозволяємо ручне оновлення через повідомлення з клієнта
-//   navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' })
+// Дозволяємо вручну перейти в активний стан одразу
 self.addEventListener('message', (event) => {
-  if (event?.data && event.data.type === 'SKIP_WAITING') {
+  if (event?.data?.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
 });
 
-// Для SPA: перехоплюємо тільки навігаційні запити (перехід сторінками)
-// Тягнемо свіжий /index.html (no-store); якщо мережа недоступна — віддаємо кеш
+// Мінімалістична стратегія: навігацію тягнемо з мережі без кешу.
+// Якщо мережа впала — повертаємо помилку (або можна спробувати /index.html з кеша).
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.mode !== 'navigate') return; // усе інше нехай йде напряму в мережу
 
-  event.respondWith((async () => {
-    try {
-      // свіжа версія shell'а
-      const fresh = await fetch('/index.html', { cache: 'no-store' });
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put('/index.html', fresh.clone());
-      return fresh;
-    } catch {
-      // офлайн/помилка — повертаємо останню збережену версію
-      const cached = await caches.match('/index.html');
-      return cached || Response.error();
-    }
-  })());
+  // Навігації (переходи по сторінках)
+  if (req.mode === 'navigate') {
+    event.respondWith((async () => {
+      try {
+        const preload = await event.preloadResponse;
+        if (preload) return preload;
+        return await fetch(req, { cache: 'no-store', redirect: 'follow' });
+      } catch {
+        // Якщо дуже хочеться — можна дістати запасний index.html:
+        // const cached = await caches.match('/index.html');
+        // return cached || Response.error();
+        return Response.error();
+      }
+    })());
+    return;
+  }
+
+  // Для всього іншого: просто прозорий прохід (без кешування)
+  // Якщо колись знадобиться — тут легко додати кеш-стратегію для статичних файлів.
 });

@@ -1,41 +1,24 @@
 // middleware.ts
-import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-
-// регулярка: будь-який файл типу /file.ext
-const PUBLIC_FILE = /\.(.*)$/;
+import type { NextRequest } from 'next/server';
 
 export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
-
-  // 1) Пропускаємо службові та публічні ресурси
-  if (
-    pathname.startsWith('/_next') ||             // статичні Next
-    pathname.startsWith('/static') ||            // якщо є
-    pathname === '/favicon.ico' ||
-    pathname === '/site.webmanifest' ||          // іноді так називають
-    pathname === '/manifest.webmanifest' ||
-    pathname === '/manifest.json' ||
-    pathname.startsWith('/icons') ||             // /icons/* з public
-    pathname === '/robots.txt' ||
-    pathname === '/sitemap.xml' ||
-    pathname === '/sw.js' ||                     // ваш service worker в public
-    PUBLIC_FILE.test(pathname)                   // будь-який інший *.ext з public
-  ) {
-    return NextResponse.next();
-  }
-
-  // 2) (Необов’язково) тут можуть бути ваші перевірки авторизації для закритих сторінок
-  // приклад:
-  // const token = req.cookies.get('token')?.value;
-  // if (!token && pathname.startsWith('/profile')) {
-  //   return NextResponse.redirect(new URL('/signin', req.url));
+  // 🔐 Ваша логіка авторизації (за потреби):
+  // приклад: якщо користувач не авторизований і йде на /profile чи /orders —
+  // редірект на /signin
+  // const isAuthed = Boolean(req.cookies.get('auth_token'));
+  // if (!isAuthed && req.nextUrl.pathname.startsWith('/profile')) {
+  //   const url = req.nextUrl.clone();
+  //   url.pathname = '/signin';
+  //   return NextResponse.redirect(url);
   // }
 
   return NextResponse.next();
 }
 
-// Вказуємо, що middleware застосовується до сторінок, але не до /api
+// Дуже важливо: не чіпати _next, статичні, маніфест, іконки, sw, api.
 export const config = {
-  matcher: ['/((?!api/).* )'], // якщо у вас є /api — не чіпаємо
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|robots.txt|manifest.webmanifest|icons/.*|sw.js|api/.*|assets/.*).*)'
+  ],
 };
