@@ -67,6 +67,9 @@ export default function MapView() {
   const dragXRef = useRef(0);
   const rafRef = useRef<number | null>(null);
 
+  // 🔒 Анти-дабл для кнопки "Замовити поведінку" (мобільний touch→click)
+  const orderTapLocked = useRef(false);
+
   const setTransform = (dx: number) => {
     dragXRef.current = dx;
     if (rafRef.current != null) return;
@@ -178,9 +181,9 @@ export default function MapView() {
     if (selectedProfile || reviewsOpen) { setSelectedProfile(null); setReviewsOpen(false); }
   }
 
-  async function handleOrderClick(e?: React.MouseEvent) {
-    e?.preventDefault();
-    e?.stopPropagation();
+  async function handleOrderClick(e?: React.MouseEvent | React.TouchEvent) {
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
     if (!selectedProfile) return;
 
     // збережемо контекст
@@ -212,6 +215,17 @@ export default function MapView() {
       },
     });
   }
+
+  // ✅ Безпечний мобільний тап-обгортка: блокує повторний запуск (touch→click)
+  const handleOrderSafeTap = (e?: React.MouseEvent | React.TouchEvent) => {
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
+    if (orderTapLocked.current) return;
+    orderTapLocked.current = true;
+    Promise.resolve(handleOrderClick(e)).finally(() => {
+      window.setTimeout(() => { orderTapLocked.current = false; }, 800);
+    });
+  };
 
   const confirmCenterAsLocation = () => {
     const m = mapRef.current; if (!m) return;
@@ -373,7 +387,8 @@ export default function MapView() {
             scenarios={scenarios}
             avg={avg}
             onOpenReviews={() => setReviewsOpen(true)}
-            onOrderClick={handleOrderClick}
+            // ⬇️ Передаємо безпечний тап як обробник замовлення
+            onOrderClick={handleOrderSafeTap}
           />
         </div>
       )}
@@ -389,7 +404,7 @@ function DrawerContent({
   selectedProfile, scenarios, avg, onOpenReviews, onOrderClick,
 }: {
   selectedProfile: User; scenarios: Scenario[]; avg: number;
-  onOpenReviews: () => void; onOrderClick: (e?: React.MouseEvent) => void;
+  onOpenReviews: () => void; onOrderClick: (e?: React.MouseEvent | React.TouchEvent) => void;
 }) {
   return (
     <div>
@@ -472,12 +487,15 @@ function DrawerContent({
       </div>
 
       <button
+        type="button"
         style={{
           position: 'sticky', bottom: 16, marginTop: 24, width: '100%',
           padding: '12px 16px', background: '#000', color: '#fff',
           border: 'none', borderRadius: 999, cursor: 'pointer', fontWeight: 700,
         }}
+        // ⚠️ дизайн НЕ змінював; додано лише безпечні обробники:
         onClick={onOrderClick}
+        onTouchStart={onOrderClick}
       >
         Замовити поведінку
       </button>
