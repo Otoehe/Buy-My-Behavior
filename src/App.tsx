@@ -2,7 +2,7 @@ import React, { useEffect, useState, Suspense, lazy } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "./lib/supabase";
-
+import EscrowApprove from "./components/EscrowApprove";
 import BehaviorsFeed   from "./components/BehaviorsFeed";
 import NavigationBar   from "./components/NavigationBar";
 import Profile         from "./components/Profile";
@@ -106,6 +106,7 @@ export default function App() {
 
           {/* Публічні */}
           <Route path="/auth/callback"  element={<AuthCallback />} />
+          <Route path="/escrow/approve" element={<EscrowApprove />} />
           <Route path="/escrow/approve" element={<EscrowHandoff />} />
           <Route
             path="/register"
