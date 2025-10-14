@@ -1,7 +1,7 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { ethers } from "ethers";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 // ----- UI/Env -----
 type Phase = "idle" | "sending" | "sent" | "error";
@@ -10,7 +10,7 @@ const APP_URL =
   (import.meta as any).env?.VITE_PUBLIC_APP_URL ||
   (typeof window !== "undefined" ? window.location.origin : "https://buymybehavior.com");
 
-// BMB модалки (ти вже їх використовуєш у проєкті)
+// BMB модалки
 function openBmb(payload: {
   kind?:
     | "success"
@@ -35,13 +35,26 @@ function closeBmb() {
 }
 
 export default function Register() {
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+
   const [email, setEmail] = useState("");
-  const [refWord, setRefWord] = useState("");
+  const [refWord, setRefWord] = useState(params.get("ref") || "");
   const [phase, setPhase] = useState<Phase>("idle");
   const [busyBtn, setBusyBtn] = useState<string | null>(null);
 
   const redirectTo = useMemo(() => `${APP_URL}/auth/callback?next=/map`, []);
-  const navigate = useNavigate();
+
+  // 💡 На всяк випадок: при заході на /register закриємо будь-які залишкові модалки,
+  // і прокрутимо до верху. Також додамо клас до body для дебагу, якщо треба.
+  useEffect(() => {
+    try { closeBmb(); } catch {}
+    try { window.scrollTo(0, 0); } catch {}
+    try { document.body.classList.add("bmb-register-open"); } catch {}
+    return () => {
+      try { document.body.classList.remove("bmb-register-open"); } catch {}
+    };
+  }, []);
 
   // ---------- Supabase helpers ----------
   const verifyReferral = async (word: string) => {
@@ -53,7 +66,7 @@ export default function Register() {
       .select("id, wallet, wallet_address, referral_code")
       .eq("referral_code", code)
       .limit(1)
-      .maybeSingle(); // не падати, якщо немає рядка
+      .maybeSingle();
 
     if (error) throw error;
     return data; // або null
@@ -64,6 +77,19 @@ export default function Register() {
       email: emailValue.trim(),
       options: { emailRedirectTo: redirectTo },
     });
+  };
+
+  const saveRefContext = (ref: any) => {
+    try {
+      localStorage.setItem(
+        "bmb_ref_context",
+        JSON.stringify({
+          referred_by: ref?.id ?? null,
+          referrer_wallet: ref?.wallet || ref?.wallet_address || null,
+          referral_code: ref?.referral_code ?? refWord.trim(),
+        })
+      );
+    } catch {}
   };
 
   // ---------- Дії ----------
@@ -93,7 +119,6 @@ export default function Register() {
         setPhase("sending");
         setBusyBtn("register");
 
-        // Перевіряємо реф-код
         const ref = await verifyReferral(refWord);
         if (!ref) {
           setPhase("error");
@@ -106,17 +131,7 @@ export default function Register() {
           return;
         }
 
-        // Запам'ятовуємо локальний контекст реферала для подальшого створення профілю
-        try {
-          localStorage.setItem(
-            "bmb_ref_context",
-            JSON.stringify({
-              referred_by: ref.id,
-              referrer_wallet: ref.wallet || ref.wallet_address || "",
-              referral_code: ref.referral_code,
-            })
-          );
-        } catch {}
+        saveRefContext(ref);
 
         const { error } = await sendMagicLink(email);
         if (error) throw error;
@@ -193,7 +208,6 @@ export default function Register() {
     [email, redirectTo]
   );
 
-  // ---------- Вхід через MetaMask ----------
   const onWalletLogin = useCallback(async () => {
     try {
       setPhase("sending");
@@ -203,7 +217,7 @@ export default function Register() {
         openBmb({
           kind: "info",
           title: "MetaMask не знайдено",
-          subtitle: "Будь ласка, встановіть розширення MetaMask або відкрийте в MetaMask-браузері.",
+          subtitle: "Встановіть MetaMask або відкрийте сайт у MetaMask-браузері.",
           actionLabel: "Зрозуміло",
         });
         return;
@@ -221,13 +235,13 @@ export default function Register() {
         openBmb({
           kind: "error",
           title: "Підпис не збігається",
-          subtitle: "Будь ласка, спробуйте ще раз.",
+          subtitle: "Спробуйте ще раз.",
           actionLabel: "OK",
         });
         return;
       }
 
-      // Якщо профіль з таким гаманцем ще не існує — створюємо
+      // реєстрація/вхід через гаманець
       const { data: existing } = await supabase
         .from("profiles")
         .select("id")
@@ -236,23 +250,36 @@ export default function Register() {
         .maybeSingle();
 
       if (!existing) {
-        const context = localStorage.getItem("bmb_ref_context");
+        if (!refWord.trim()) {
+          openBmb({
+            kind: "warning",
+            title: "Потрібен реферальний код",
+            subtitle: "Введіть реферальний код, щоб завершити реєстрацію через MetaMask.",
+            actionLabel: "Добре",
+          });
+          return;
+        }
+        const ref = await verifyReferral(refWord);
+        if (!ref) {
+          openBmb({
+            kind: "error",
+            title: "Невірне реферальне слово",
+            subtitle: "Перевірте правильність або зверніться до амбасадора.",
+            actionLabel: "Ок",
+          });
+          return;
+        }
+
+        saveRefContext(ref);
+
         const base: Record<string, any> = {
           created_at: new Date().toISOString(),
+          wallet: address,
+          wallet_address: address,
+          referred_by: ref?.id ?? null,
+          referrer_wallet: ref?.wallet || ref?.wallet_address || null,
+          referral_code: ref?.referral_code ?? refWord.trim(),
         };
-
-        // підтримуємо обидві назви поля
-        base.wallet = address;
-        base.wallet_address = address;
-
-        if (context) {
-          try {
-            const parsed = JSON.parse(context);
-            base.referred_by = parsed.referred_by ?? null;
-            base.referrer_wallet = parsed.referrer_wallet ?? null;
-            base.referral_code = parsed.referral_code ?? null;
-          } catch {}
-        }
 
         const { error: insertError } = await supabase.from("profiles").insert(base);
         if (insertError) {
@@ -279,25 +306,64 @@ export default function Register() {
       setPhase("idle");
       setBusyBtn(null);
     }
-  }, [navigate]);
+  }, [navigate, refWord]);
 
-  // ---------- UI ----------
-  const isBusy = phase === "sending";
-  const disableAll = isBusy || !!busyBtn;
+  const disableAll = phase === "sending" || !!busyBtn;
 
   return (
-    <div style={pageWrap}>
-      <div style={card}>
-        <h1 style={title}>Реєстрація з реферальним словом</h1>
+    <div
+      style={{
+        minHeight: "calc(100vh - 120px)",
+        display: "grid",
+        placeItems: "center",
+        padding: "32px 16px",
+        // ⬇️ АНТИ-ОВЕРЛЕЙ: реєстрація САМА поверх усього
+        position: "relative",
+        zIndex: 9001,
+        background: "#fff",
+      }}
+    >
+      <div
+        style={{
+          width: "min(680px, 92vw)",
+          background: "#f7f7f7",
+          borderRadius: 16,
+          padding: 24,
+          boxShadow: "0 30px 60px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.08)",
+          border: "1px solid #eaeaea",
+          position: "relative",
+          zIndex: 9002,
+        }}
+      >
+        <h1
+          style={{
+            margin: "8px 0 20px",
+            fontSize: 24,
+            fontWeight: 800,
+            textAlign: "center",
+            color: "#111",
+          }}
+        >
+          Реєстрація з реферальним словом
+        </h1>
 
-        <form onSubmit={onRegister} style={formGrid}>
+        <form onSubmit={onRegister} style={{ display: "grid", gap: 14 }}>
           <input
             type="email"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
-            style={{ ...input, background: "#eaf2ff" }}
+            style={{
+              height: 48,
+              borderRadius: 12,
+              border: "1px solid #e3e3e3",
+              padding: "0 14px",
+              fontSize: 16,
+              outline: "none",
+              background: "#eaf2ff",
+              color: "#111",
+            }}
             autoComplete="email"
           />
 
@@ -306,14 +372,33 @@ export default function Register() {
             value={refWord}
             onChange={(e) => setRefWord(e.target.value)}
             placeholder="Реферальний код"
-            style={input}
+            style={{
+              height: 48,
+              borderRadius: 12,
+              border: "1px solid #e3e3e3",
+              padding: "0 14px",
+              fontSize: 16,
+              outline: "none",
+              background: "#fff",
+              color: "#111",
+            }}
             autoComplete="one-time-code"
           />
 
           <button
             type="submit"
             disabled={disableAll && busyBtn !== "register"}
-            style={{ ...btnBlack, opacity: disableAll && busyBtn !== "register" ? 0.7 : 1 }}
+            style={{
+              height: 52,
+              borderRadius: 12,
+              border: "1px solid #000",
+              background: "#000",
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: 16,
+              cursor: "pointer",
+              opacity: disableAll && busyBtn !== "register" ? 0.7 : 1,
+            }}
           >
             Зареєструватися
           </button>
@@ -322,7 +407,17 @@ export default function Register() {
             type="button"
             onClick={onLogin}
             disabled={disableAll && busyBtn !== "login"}
-            style={{ ...btnBlack, opacity: disableAll && busyBtn !== "login" ? 0.7 : 1 }}
+            style={{
+              height: 52,
+              borderRadius: 12,
+              border: "1px solid #000",
+              background: "#000",
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: 16,
+              cursor: "pointer",
+              opacity: disableAll && busyBtn !== "login" ? 0.7 : 1,
+            }}
           >
             Увійти (magic link)
           </button>
@@ -331,71 +426,22 @@ export default function Register() {
             type="button"
             onClick={onWalletLogin}
             disabled={disableAll && busyBtn !== "wallet"}
-            style={{ ...btnMetaMask, opacity: disableAll && busyBtn !== "wallet" ? 0.7 : 1 }}
+            style={{
+              height: 52,
+              borderRadius: 12,
+              border: "1px solid #000",
+              background: "#ffcdd6",
+              color: "#000",
+              fontWeight: 700,
+              fontSize: 16,
+              cursor: "pointer",
+              opacity: disableAll && busyBtn !== "wallet" ? 0.7 : 1,
+            }}
           >
-            Увійти через MetaMask
+            Продовжити через MetaMask
           </button>
         </form>
       </div>
     </div>
   );
 }
-
-// ----- Styles -----
-const pageWrap: React.CSSProperties = {
-  minHeight: "calc(100vh - 120px)",
-  display: "grid",
-  placeItems: "center",
-  padding: "32px 16px",
-};
-
-const card: React.CSSProperties = {
-  width: "min(680px, 92vw)",
-  background: "#f7f7f7",
-  borderRadius: 16,
-  padding: 24,
-  boxShadow: "0 30px 60px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.08)",
-  border: "1px solid #eaeaea",
-};
-
-const title: React.CSSProperties = {
-  margin: "8px 0 20px",
-  fontSize: 24,
-  fontWeight: 800,
-  textAlign: "center",
-  color: "#111",
-};
-
-const formGrid: React.CSSProperties = {
-  display: "grid",
-  gap: 14,
-};
-
-const input: React.CSSProperties = {
-  height: 48,
-  borderRadius: 12,
-  border: "1px solid #e3e3e3",
-  padding: "0 14px",
-  fontSize: 16,
-  outline: "none",
-  background: "#fff",
-  color: "#111",
-};
-
-const btnBlack: React.CSSProperties = {
-  height: 52,
-  borderRadius: 12,
-  border: "1px solid #000",
-  background: "#000",
-  color: "#fff",
-  fontWeight: 700,
-  fontSize: 16,
-  cursor: "pointer",
-};
-
-const btnMetaMask: React.CSSProperties = {
-  ...btnBlack,
-  background: "#ffcdd6",
-  color: "#000",
-  border: "1px solid #000",
-};
