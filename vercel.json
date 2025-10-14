@@ -1,8 +1,1 @@
-{
-  "headers": [
-    {
-      "source": "/(sw\\.js|manifest\\.webmanifest|robots\\.txt|favicon\\.ico)",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
-    }
-  ]
-}
+{}
