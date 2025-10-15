@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
-const BSC_CHAIN_ID = "0x38";
+const BSC_CHAIN_ID = "0x38"; // 56 BSC Mainnet
 
 function getNext(search: string): string {
   try {
@@ -12,6 +12,19 @@ function getNext(search: string): string {
   } catch {}
   const fromSess = sessionStorage.getItem("bmb_next_after_auth");
   return fromSess || "/map";
+}
+
+function getReferral(): { ref?: string; refCode?: string } {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const ref = p.get("ref") || undefined;
+    const refCode = p.get("refCode") || undefined;
+    if (ref) sessionStorage.setItem("bmb_ref", ref);
+    if (refCode) sessionStorage.setItem("bmb_refCode", refCode);
+    return { ref, refCode };
+  } catch {
+    return {};
+  }
 }
 
 function isMobile() {
@@ -59,6 +72,7 @@ export default function Login() {
   const [status, setStatus] = useState<"idle" | "connecting" | "done" | "error">("idle");
   const [errMsg, setErrMsg] = useState<string>("");
 
+  // якщо є сесія — одразу пускаємо
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();
@@ -82,15 +96,65 @@ export default function Login() {
         }
       }
 
+      // розбираємо реферала (якщо є)
+      const { ref, refCode } = getReferral();
+
+      // під’єднати гаманець
       const accounts: string[] = await eth.request({ method: "eth_requestAccounts" });
-      if (!accounts || accounts.length === 0) {
-        setStatus("error");
-        setErrMsg("Гаманець не під’єднано.");
-        return;
-      }
+      if (!accounts || accounts.length === 0) throw new Error("Гаманець не під’єднано.");
+      const myWallet = accounts[0];
 
       await ensureBSC();
-      try { localStorage.setItem("bmb_wallet", accounts[0]); } catch {}
+
+      try { localStorage.setItem("bmb_wallet", myWallet); } catch {}
+
+      // спробуємо записати/зафіксувати реферала (одноразово)
+      try {
+        const { data: me } = await supabase.auth.getUser();
+        if (me?.user) {
+          // оновимо власний гаманець у профілі (якщо треба)
+          await supabase.from("profiles").update({ wallet: myWallet }).eq("user_id", me.user.id);
+
+          // дізнаємося, чи вже є referrer
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("referrer_wallet")
+            .eq("user_id", me.user.id)
+            .single();
+
+          // спробуємо отримати адресу з refCode (якщо використовується)
+          let refWallet: string | null = ref || null;
+          if (!refWallet && !prof?.referrer_wallet) {
+            const code = sessionStorage.getItem("bmb_refCode");
+            if (code) {
+              // якщо у вас є таблиця referral_codes(code -> wallet), дістаньте тут адресу:
+              // const { data: rc } = await supabase.from("referral_codes").select("wallet").eq("code", code).single();
+              // refWallet = rc?.wallet || null;
+            }
+          }
+
+          // забороняємо самореферал
+          if (refWallet && refWallet.toLowerCase() === myWallet.toLowerCase()) {
+            refWallet = null;
+          }
+
+          if (!prof?.referrer_wallet && refWallet) {
+            await supabase
+              .from("profiles")
+              .update({ referrer_wallet: refWallet, referred_at: new Date().toISOString() })
+              .eq("user_id", me.user.id);
+
+            await supabase.from("ref_events").insert({
+              user_id: me.user.id,
+              user_wallet: myWallet,
+              referrer_wallet: refWallet,
+              event_type: "signup",
+            });
+          }
+        }
+      } catch {
+        /* no-op: реферал не критичний для входу */
+      }
 
       setStatus("done");
       navigate(next, { replace: true, state: { from: "/login" } });
@@ -101,22 +165,58 @@ export default function Login() {
   }, [next, navigate]);
 
   return (
-    <div style={{ minHeight: "calc(100dvh - 56px)", display: "grid", placeItems: "center", padding: 24 }}>
-      <div style={{ maxWidth: 420, width: "100%", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, boxShadow: "0 12px 28px rgba(0,0,0,.08)", padding: 20, textAlign: "center" }}>
+    <div
+      style={{
+        minHeight: "calc(100dvh - 56px)",
+        display: "grid",
+        placeItems: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 420,
+          width: "100%",
+          background: "#fff",
+          border: "1px solid #e5e7eb",
+          borderRadius: 16,
+          boxShadow: "0 12px 28px rgba(0,0,0,.08)",
+          padding: 20,
+          textAlign: "center",
+        }}
+      >
         <h1 style={{ fontSize: 22, fontWeight: 900, marginBottom: 6 }}>Вхід через MetaMask</h1>
         <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 16 }}>
-          Після входу повернемо тебе на: <span style={{ color: "#111827", fontWeight: 700 }}>{next}</span>
+          Після входу повернемо тебе на:{" "}
+          <span style={{ color: "#111827", fontWeight: 700 }}>{next}</span>
         </p>
+
         <button
           type="button"
           onClick={connectMetaMask}
           disabled={status === "connecting"}
-          style={{ display: "inline-block", width: "100%", padding: "12px 16px", borderRadius: 999, background: "#000", color: "#fff", fontWeight: 800, border: 0, cursor: "pointer" }}
+          style={{
+            display: "inline-block",
+            width: "100%",
+            padding: "12px 16px",
+            borderRadius: 999,
+            background: "#000",
+            color: "#fff",
+            fontWeight: 800,
+            border: 0,
+            cursor: "pointer",
+          }}
         >
           {status === "connecting" ? "З’єднання…" : "Увійти через MetaMask"}
         </button>
-        {errMsg && <div style={{ color: "#ef4444", fontSize: 13, marginTop: 10 }}>{errMsg}</div>}
-        <div style={{ marginTop: 12, fontSize: 12, color: "#9ca3af" }}>На мобільному? За потреби відкриємо MetaMask-додаток.</div>
+
+        {errMsg && (
+          <div style={{ color: "#ef4444", fontSize: 13, marginTop: 10 }}>{errMsg}</div>
+        )}
+
+        <div style={{ marginTop: 12, fontSize: 12, color: "#9ca3af" }}>
+          На мобільному відкриємо MetaMask-додаток за потреби.
+        </div>
       </div>
     </div>
   );

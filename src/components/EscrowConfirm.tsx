@@ -4,10 +4,15 @@ import { useNavigate } from "react-router-dom";
 export default function EscrowConfirm() {
   const navigate = useNavigate();
   useEffect(() => {
-    const t = setTimeout(() => {
-      navigate("/my-orders", { replace: true, state: { from: "/escrow/confirm" } });
-    }, 300);
-    return () => clearTimeout(t);
+    const t1 = setTimeout(() => {
+      try { navigate("/my-orders", { replace: true }); } catch {}
+    }, 200);
+    const t2 = setTimeout(() => {
+      if (window.location.pathname.startsWith("/escrow/confirm")) {
+        try { window.location.replace("/my-orders"); } catch {}
+      }
+    }, 800);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [navigate]);
 
   return (
