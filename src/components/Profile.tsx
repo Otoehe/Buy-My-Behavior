@@ -472,6 +472,41 @@ export default function Profile() {
     localStorage.setItem('bmb.push', next ? '1' : '0');
   };
 
+  // ==== LOGOUT ====
+  const handleLogout = async () => {
+    try {
+      // 1) вихід із Supabase
+      await supabase.auth.signOut();
+
+      // 2) почистити локальні ключі, якими користується BMB
+      const keys = [
+        'bmb.a2hs.done', 'bmb.geo', 'bmb.push',
+        'referral_persisted', 'referred_by', 'referrer_wallet',
+        'bmb.sw.update', 'bmb_mm_lock_v1',
+        'bmb:auth', 'bmb:wallet', 'wagmi.store', 'WALLETCONNECT_DEEPLINK_CHOICE',
+      ];
+      keys.forEach((k) => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch {} });
+
+      // 3) опційно: скинути SW-реєстрації, щоб PWA не тримала старий стан
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(r => r.unregister()));
+        }
+      } catch {}
+
+      // 4) локальний UI-скид
+      setUser(null);
+      setWalletConnected(false);
+      setKycCompleted(false);
+
+      // 5) редірект
+      window.location.href = '/login';
+    } catch (e: any) {
+      alert('Не вдалось вийти: ' + (e?.message || String(e)));
+    }
+  };
+
   const UserIcon = () => (
     <svg className="user-icon" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
@@ -580,6 +615,9 @@ export default function Profile() {
         </button>
         <button onClick={() => setKycCompleted(true)} className="button">{kycCompleted ? '✅ KYC пройдено' : '🛡 Пройти KYC'}</button>
         <button onClick={handleSaveProfile} className="button">💾 Зберегти профіль</button>
+
+        {/* КНОПКА ВИХОДУ */}
+        <button onClick={handleLogout} className="button button-danger">🚪 Вийти</button>
       </div>
 
       {/* Сценарії */}
