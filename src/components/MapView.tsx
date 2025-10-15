@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
@@ -201,7 +202,8 @@ export default function MapView() {
     if (!user) {
       const next = `/scenario/new?executor_id=${encodeURIComponent(selectedProfile.user_id)}`;
       sessionStorage.setItem('bmb_next_after_auth', next);
-      navigate(`/login?next=${encodeURIComponent(next)}`, { replace: false });
+      // ✅ у вашому App.tsx є тільки /register (немає /login)
+      navigate(`/register?next=${encodeURIComponent(next)}`, { replace: false });
       return;
     }
 
@@ -216,7 +218,7 @@ export default function MapView() {
     });
   }
 
-  // безпечний мобільний тап
+  // безпечний мобільний тап (single-flight + запобігаємо "кліку крізь")
   const handleOrderSafeTap = (e?: React.MouseEvent | React.TouchEvent) => {
     e?.preventDefault?.();
     e?.stopPropagation?.();
@@ -493,7 +495,7 @@ function DrawerContent({
           border: 'none', borderRadius: 999, cursor: 'pointer', fontWeight: 700,
         }}
         onClick={onOrderClick}
-        onTouchStart={onOrderClick}
+        // ❌ прибрали onTouchStart, щоб не було подвійного запуску на мобільних
       >
         Замовити поведінку
       </button>
