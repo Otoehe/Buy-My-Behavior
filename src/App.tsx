@@ -13,6 +13,7 @@ const ReceivedScenarios  = lazy(() => import('./components/ReceivedScenarios'));
 const Manifest           = lazy(() => import('./components/Manifest'));
 const Profile            = lazy(() => import('./components/Profile'));
 const BehaviorsFeed      = lazy(() => import('./components/BehaviorsFeed'));
+const ScenarioForm       = lazy(() => import('./components/ScenarioForm')); // ⬅️ ДОДАНО
 
 // Escrow екрани (теж під Lazy)
 const EscrowApprove      = lazy(() => import('./components/EscrowApprove'));
@@ -66,11 +67,14 @@ export default function App() {
           <Route path="/received"        element={<RequireAuth><ReceivedScenarios /></RequireAuth>} />
           <Route path="/manifest"        element={<RequireAuth><Manifest /></RequireAuth>} />
 
-          {/* Escrow тепер ТЕЖ приватні, щоб гість не бачив /escrow/... */}
+          {/* Створення сценарію */}
+          <Route path="/scenario/new"    element={<RequireAuth><ScenarioForm /></RequireAuth>} /> {/* ⬅️ ДОДАНО */}
+
+          {/* Escrow приватні */}
           <Route path="/escrow/approve"  element={<RequireAuth><EscrowApprove /></RequireAuth>} />
           <Route path="/escrow/confirm"  element={<RequireAuth><EscrowConfirm /></RequireAuth>} />
 
-          {/* Дефолт: усе веде на реєстрацію (далі RequireAuth поверне туди, де хотів бути користувач) */}
+          {/* Дефолт */}
           <Route path="/" element={<Navigate to="/register" replace />} />
           <Route path="*" element={<Navigate to="/register" replace />} />
         </Routes>
