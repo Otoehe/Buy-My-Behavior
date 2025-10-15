@@ -1,48 +1,50 @@
-/* eslint-disable no-restricted-globals */
+// BMB minimal SW — safe navigations, cache static only
 
-// ---- BMB Service Worker (SPA shell) ----
-const VERSION    = 'bmb-2025-10-14-1';
-const CACHE_NAME = `spa-shell-${VERSION}`;
+const CACHE_NAME = 'bmb-static-v1';
+const STATIC_EXT = /\.(?:js|css|png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf|eot|mp3|wav)$/i;
 
-// Install: не кешуємо нічого наперед; чекаємо ручного SKIP_WAITING
-self.addEventListener('install', (_evt) => {
-  // навмисно порожньо
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
 });
 
-// Activate: чистимо старі кеші, одразу беремо контроль
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
+    // очистити старі кеші, якщо ви міняєте ім'я CACHE_NAME
     const keys = await caches.keys();
-    await Promise.all(
-      keys.map((k) => (k === CACHE_NAME ? null : caches.delete(k)))
-    );
+    await Promise.all(keys.map(k => (k !== CACHE_NAME ? caches.delete(k) : Promise.resolve())));
     await self.clients.claim();
   })());
 });
 
-// Прийом команд від клієнта
-//   navigator.serviceWorker.controller?.postMessage({ type: 'SKIP_WAITING' })
-self.addEventListener('message', (event) => {
-  if (event?.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
-});
-
-// SPA-навігація: пробуємо свіжий index.html (no-store) з мережі;
-// на помилку/офлайн — повертаємо останній закешований index.html.
+// Дуже просте правило:
+// - Навігації віддаємо напряму з мережі (щоб не ламати SPA редіректи)
+// - Кешуємо лише статику з того ж походження
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.mode !== 'navigate') return;
 
-  event.respondWith((async () => {
-    try {
-      const fresh = await fetch('/index.html', { cache: 'no-store' });
+  // Лише наш домен
+  const sameOrigin = new URL(req.url).origin === self.location.origin;
+
+  // 1) Навігації — пропускаємо в мережу без жодних manual-redirect
+  if (req.mode === 'navigate') {
+    event.respondWith(fetch(req));
+    return;
+  }
+
+  // 2) Для крос-доменних — нічого не робимо
+  if (!sameOrigin) return;
+
+  // 3) Кеш-стратегія для статичних файлів (cache-first)
+  if (STATIC_EXT.test(req.url)) {
+    event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
-      await cache.put('/index.html', fresh.clone());
-      return fresh;
-    } catch {
-      const cached = await caches.match('/index.html');
-      return cached || Response.error();
-    }
-  })());
+      const cached = await cache.match(req);
+      if (cached) return cached;
+      const res = await fetch(req); // важливо: дозволяємо normal redirects
+      if (res && res.ok) {
+        cache.put(req, res.clone());
+      }
+      return res;
+    })());
+  }
 });
