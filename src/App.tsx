@@ -5,7 +5,6 @@ import { supabase } from './lib/supabase';
 import NavigationBar from './components/NavigationBar';
 import Register from './components/Register';
 import AuthCallback from './components/AuthCallback';
-import Login from './components/Login'; // новий актуальний вхід через MetaMask
 
 // Ліниві підвантаження наявних компонентів
 const MapView            = lazy(() => import('./components/MapView'));
@@ -15,7 +14,7 @@ const Manifest           = lazy(() => import('./components/Manifest'));
 const Profile            = lazy(() => import('./components/Profile'));
 const BehaviorsFeed      = lazy(() => import('./components/BehaviorsFeed'));
 
-// Fallback-екрани для уникнення “білих сторінок”
+// Escrow екрани (теж під Lazy)
 const EscrowApprove      = lazy(() => import('./components/EscrowApprove'));
 const EscrowConfirm      = lazy(() => import('./components/EscrowConfirm'));
 
@@ -41,9 +40,8 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   if (checking) return null;
 
   if (!isAuthed) {
-    // будуємо next, щоб після логіну повернути користувача туди, де він хотів бути
     const next = `${location.pathname}${location.search || ''}`;
-    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace state={{ from: location }} />;
+    return <Navigate to={`/register?next=${encodeURIComponent(next)}`} replace state={{ from: location }} />;
   }
 
   return <>{children}</>;
@@ -56,17 +54,10 @@ export default function App() {
       <Suspense fallback={null}>
         <Routes>
           {/* Публічні */}
-          <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="/signup" element={<Register />} />
-          <Route path="/reg" element={<Register />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
 
-          {/* Fallback-екрани ескроу, щоб прибрати “білі” сторінки */}
-          <Route path="/escrow/approve" element={<EscrowApprove />} />
-          <Route path="/escrow/confirm" element={<EscrowConfirm />} />
-
-          {/* Захищені (до входу недоступні) */}
+          {/* УСІ приватні шляхи — тільки через RequireAuth */}
           <Route path="/profile"         element={<RequireAuth><Profile /></RequireAuth>} />
           <Route path="/behaviors"       element={<RequireAuth><BehaviorsFeed /></RequireAuth>} />
           <Route path="/map"             element={<RequireAuth><MapView /></RequireAuth>} />
@@ -75,11 +66,13 @@ export default function App() {
           <Route path="/received"        element={<RequireAuth><ReceivedScenarios /></RequireAuth>} />
           <Route path="/manifest"        element={<RequireAuth><Manifest /></RequireAuth>} />
 
-          {/* Дефолт: на карту (RequireAuth відправить на /login, якщо користувач неавторизований) */}
-          <Route path="/" element={<Navigate to="/map" replace />} />
+          {/* Escrow тепер ТЕЖ приватні, щоб гість не бачив /escrow/... */}
+          <Route path="/escrow/approve"  element={<RequireAuth><EscrowApprove /></RequireAuth>} />
+          <Route path="/escrow/confirm"  element={<RequireAuth><EscrowConfirm /></RequireAuth>} />
 
-          {/* 404 */}
-          <Route path="*" element={<Navigate to="/map" replace />} />
+          {/* Дефолт: усе веде на реєстрацію (далі RequireAuth поверне туди, де хотів бути користувач) */}
+          <Route path="/" element={<Navigate to="/register" replace />} />
+          <Route path="*" element={<Navigate to="/register" replace />} />
         </Routes>
       </Suspense>
     </>
