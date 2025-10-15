@@ -1,67 +1,73 @@
+// src/components/Register.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { supabase } from "../lib/supabase";
 
-/** Дістаємо next з ?next= або з sessionStorage, fallback — /map */
+// дістаємо ?next= або з sessionStorage, інакше /map
 function resolveNext(search: string): string {
   try {
     const p = new URLSearchParams(search);
     const n = p.get("next");
-    if (n && typeof n === "string" && n.trim().length > 0) return n;
+    if (n && n.trim().length > 0) return n;
   } catch {}
   const fromSess = sessionStorage.getItem("bmb_next_after_auth");
   return fromSess || "/map";
 }
 
-/** Безпечна утиліта, яка спочатку намагається SPA-редірект, а потім — системний replace */
-function hardRedirect(to: string, useReplace = true) {
+function hardRedirect(to: string, replace = true) {
   try {
-    if (useReplace) window.location.replace(to);
+    if (replace) window.location.replace(to);
     else window.location.assign(to);
   } catch {
-    // останній шанс — змінити location.href
-    try { (window.location as any).href = to; } catch {}
+    (window.location as any).href = to;
   }
 }
 
 export default function Register() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [blocked, setBlocked] = useState(false);
   const fired = useRef(false);
+  const [blocked, setBlocked] = useState(false);
 
   const next = useMemo(() => resolveNext(location.search), [location.search]);
-  const loginHref = `/login?next=${encodeURIComponent(next)}`;
 
   useEffect(() => {
     if (fired.current) return;
     fired.current = true;
 
-    // 1) спроба через react-router (миттєво)
-    try {
-      navigate(loginHref, { replace: true });
-    } catch {
-      // ігноруємо — підстрахуємось нижче
-    }
+    (async () => {
+      // 1) перевіряємо чи користувач вже авторизований
+      const { data } = await supabase.auth.getSession();
+      const isAuthed = !!data?.session;
 
-    // 2) через 120мс — системний replace (на випадок throttling навігації)
-    const t1 = setTimeout(() => {
-      if (window.location.pathname.startsWith("/register")) {
+      // якщо авторизований → одразу ведемо на next (або /map)
+      const targetIfAuthed = next || "/map";
+      const targetIfGuest = `/login?next=${encodeURIComponent(targetIfAuthed)}`;
+
+      const target = isAuthed ? targetIfAuthed : targetIfGuest;
+
+      // спочатку пробуємо SPA-навігацію
+      try {
+        navigate(target, { replace: true, state: { from: "/register" } });
+      } catch {}
+
+      // підстраховка системним редіректом (уникнути "білого" екрану)
+      const t1 = setTimeout(() => {
         setBlocked(true);
-        hardRedirect(loginHref, true);
-      }
-    }, 120);
+        hardRedirect(target, true);
+      }, 150);
 
-    // 3) ще одна страховка через 800мс — assign (деякі мобільні вебв’ю)
-    const t2 = setTimeout(() => {
-      if (window.location.pathname.startsWith("/register")) {
-        hardRedirect(loginHref, false);
-      }
-    }, 800);
+      // ще одна підстраховка (деякі вебв’ю)
+      const t2 = setTimeout(() => hardRedirect(target, false), 900);
 
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [loginHref, navigate]);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    })();
+  }, [navigate, next]);
 
-  // Фолбек UI, якщо авто-редірект заблоковано
+  // простий фолбек-UI на випадок, якщо браузер блокує авто-перехід
   return (
     <div
       style={{
@@ -84,31 +90,15 @@ export default function Register() {
         }}
       >
         <h1 style={{ fontSize: 20, fontWeight: 800, marginBottom: 8 }}>
-          Перехід до входу через MetaMask
+          Триває перенаправлення…
         </h1>
         <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 16 }}>
-          Email-реєстрацію вимкнено. Використовуй вхід через MetaMask.
+          Якщо ти вже увійшов — перейдемо на потрібну сторінку.
+          Якщо ні — на сторінку входу через MetaMask.
         </p>
-
-        <a
-          href={loginHref}
-          style={{
-            display: "inline-block",
-            width: "100%",
-            padding: "12px 16px",
-            borderRadius: 999,
-            background: "#000",
-            color: "#fff",
-            fontWeight: 800,
-            textDecoration: "none",
-          }}
-        >
-          Увійти через MetaMask
-        </a>
-
         {blocked && (
-          <div style={{ marginTop: 10, fontSize: 12, color: "#9ca3af" }}>
-            Ваш браузер сповільнив авто-перехід. Натисніть кнопку вище.
+          <div style={{ fontSize: 12, color: "#9ca3af" }}>
+            Якщо авто-перехід не спрацював — онови сторінку.
           </div>
         )}
       </div>
