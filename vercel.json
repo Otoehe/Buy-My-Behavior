@@ -1,7 +1,6 @@
 {
   "cleanUrls": true,
   "trailingSlash": false,
-
   "headers": [
     {
       "source": "/(.*)\\.webmanifest",
@@ -17,15 +16,15 @@
       ]
     }
   ],
-
   "rewrites": [
     { "source": "/sw.js", "destination": "/sw.js" },
     { "source": "/manifest.webmanifest", "destination": "/manifest.webmanifest" },
     { "source": "/favicon.ico", "destination": "/favicon.ico" },
     { "source": "/robots.txt", "destination": "/robots.txt" },
-
-    { "source": "/(.*)\\.(js|css|png|jpg|jpeg|gif|svg|ico|txt|json|webmanifest|map|mp4|webm|wav|mp3|woff|woff2|ttf|otf)", "destination": "/$1" },
-
+    {
+      "source": "/(.*)\\.(js|css|png|jpg|jpeg|gif|svg|ico|txt|json|webmanifest|map|mp4|webm|wav|mp3|woff|woff2|ttf|otf)",
+      "destination": "/$1"
+    },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
