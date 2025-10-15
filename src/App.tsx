@@ -6,16 +6,15 @@ import NavigationBar from './components/NavigationBar';
 import Register from './components/Register';
 import AuthCallback from './components/AuthCallback';
 
-// Ліниві підвантаження наявних компонентів
+// Ліниві підвантаження
 const MapView            = lazy(() => import('./components/MapView'));
 const MyOrders           = lazy(() => import('./components/MyOrders'));
 const ReceivedScenarios  = lazy(() => import('./components/ReceivedScenarios'));
 const Manifest           = lazy(() => import('./components/Manifest'));
 const Profile            = lazy(() => import('./components/Profile'));
 const BehaviorsFeed      = lazy(() => import('./components/BehaviorsFeed'));
-const ScenarioForm       = lazy(() => import('./components/ScenarioForm')); // ⬅️ ДОДАНО
+const ScenarioForm       = lazy(() => import('./components/ScenarioForm')); // ✅
 
-// Escrow екрани (теж під Lazy)
 const EscrowApprove      = lazy(() => import('./components/EscrowApprove'));
 const EscrowConfirm      = lazy(() => import('./components/EscrowConfirm'));
 
@@ -44,7 +43,6 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
     const next = `${location.pathname}${location.search || ''}`;
     return <Navigate to={`/register?next=${encodeURIComponent(next)}`} replace state={{ from: location }} />;
   }
-
   return <>{children}</>;
 }
 
@@ -58,7 +56,7 @@ export default function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
 
-          {/* УСІ приватні шляхи — тільки через RequireAuth */}
+          {/* Приватні */}
           <Route path="/profile"         element={<RequireAuth><Profile /></RequireAuth>} />
           <Route path="/behaviors"       element={<RequireAuth><BehaviorsFeed /></RequireAuth>} />
           <Route path="/map"             element={<RequireAuth><MapView /></RequireAuth>} />
@@ -68,9 +66,9 @@ export default function App() {
           <Route path="/manifest"        element={<RequireAuth><Manifest /></RequireAuth>} />
 
           {/* Створення сценарію */}
-          <Route path="/scenario/new"    element={<RequireAuth><ScenarioForm /></RequireAuth>} /> {/* ⬅️ ДОДАНО */}
+          <Route path="/scenario/new"    element={<RequireAuth><ScenarioForm /></RequireAuth>} />
 
-          {/* Escrow приватні */}
+          {/* Escrow */}
           <Route path="/escrow/approve"  element={<RequireAuth><EscrowApprove /></RequireAuth>} />
           <Route path="/escrow/confirm"  element={<RequireAuth><EscrowConfirm /></RequireAuth>} />
 
