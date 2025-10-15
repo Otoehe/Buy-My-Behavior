@@ -4,7 +4,6 @@ import { useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import EscrowButton from "./EscrowButton";
 
-
 import { confirmCompletionOnChain, getDealOnChain } from "../lib/escrowContract";
 import {
   pushNotificationManager as pushNotificationManager,
@@ -27,6 +26,9 @@ import { lockFundsMobileFlow } from "../lib/escrowMobile";
 // ⬇ якщо цього немає у проєкті — ок, воно опційне
 import { writeSupabaseSessionCookie } from "../lib/supabaseSessionBridge";
 
+// i18n
+import { useTranslation } from "react-i18next";
+
 /* -----------------------------------------
  * ЛОКАЛЬНІ невеличкі утиліти, щоб не падали імпорти
  * ----------------------------------------- */
@@ -36,7 +38,10 @@ const isMobileUA = (): boolean =>
 const isMetaMaskInApp = (): boolean =>
   /MetaMaskMobile/i.test(navigator.userAgent || "");
 
-function openInMetaMaskDapp(nextPath: string, handoff?: { at?: string | null; rt?: string | null; next?: string }) {
+function openInMetaMaskDapp(
+  nextPath: string,
+  handoff?: { at?: string | null; rt?: string | null; next?: string }
+) {
   // домен беремо з ENV або з поточного location
   const publicUrl =
     (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) || window.location.origin;
@@ -81,7 +86,12 @@ function asStatusNum(x: any): number {
 }
 
 /** Очікуємо поки угода стане в потрібний статус на ланцюгу (polling) */
-async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 120_000, stepMs = 3_000) {
+async function waitDealStatus(
+  scenarioId: string,
+  target: number,
+  timeoutMs = 120_000,
+  stepMs = 3_000
+) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     try {
@@ -94,8 +104,8 @@ async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 12
 }
 
 function StatusStrip({ s }: { s: Scenario }) {
-  const stage =
-    s.status === "confirmed" ? 3 : s.escrow_tx_hash ? 2 : isBothAgreed(s) ? 1 : 0;
+  const stage = s.status === "confirmed" ? 3 : s.escrow_tx_hash ? 2 : isBothAgreed(s) ? 1 : 0;
+  const { t } = useTranslation();
 
   const Dot = ({ active }: { active: boolean }) => (
     <span
@@ -126,10 +136,10 @@ function StatusStrip({ s }: { s: Scenario }) {
       <Dot active={stage >= 2} />
       <Dot active={stage >= 3} />
       <div style={{ fontSize: 12, color: "#6b7280", marginLeft: 8 }}>
-        {stage === 0 && "• Угоду погоджено → далі кошти в Escrow"}
-        {stage === 1 && "• Погоджено → кошти ще не заблоковані"}
-        {stage === 2 && "• Кошти заблоковано → очікуємо виконання"}
-        {stage === 3 && "• Виконання підтверджено"}
+        {stage === 0 && t("status.init")}
+        {stage === 1 && t("status.agreed")}
+        {stage === 2 && t("status.locked")}
+        {stage === 3 && t("status.confirmed")}
       </div>
     </div>
   );
@@ -137,6 +147,7 @@ function StatusStrip({ s }: { s: Scenario }) {
 
 export default function MyOrders() {
   const location = useLocation();
+  const { t } = useTranslation();
 
   const [userId, setUserId] = useState("");
   const [list, setList] = useState<Scenario[]>([]);
@@ -251,7 +262,7 @@ export default function MyOrders() {
             const oldId = (p as any).old?.id as string | undefined;
 
             setList((prev) => {
-              if (ev === "DELETE" && oldId) return prev.filter((x) => x.id !== oldId);
+              if (ev === "DELETE" && oldId) return prev.filter((x) => x !== undefined && x.id !== oldId);
               if (!s) return prev;
 
               if (s.creator_id !== uid) return prev.filter((x) => x.id !== s.id);
@@ -275,8 +286,8 @@ export default function MyOrders() {
                       await SOUND.play();
                     } catch {}
                     await pushNotificationManager.showNotification({
-                      title: "🎉 Виконання підтверджено",
-                      body: "Escrow розподілив кошти.",
+                      title: t("notify.confirm_title"),
+                      body: t("notify.confirm_body"),
                       tag: `confirm-${after.id}`,
                       requireSound: true,
                     });
@@ -331,7 +342,7 @@ export default function MyOrders() {
         } catch {}
       };
     })();
-  }, [load, list, refreshRated, refreshLocked]);
+  }, [load, list, refreshRated, refreshLocked, t]);
 
   useEffect(() => {
     if (!userId) return;
@@ -358,7 +369,7 @@ export default function MyOrders() {
       if (error && error.code !== "PGRST116") throw error;
       setLocal(s.id, { is_agreed_by_customer: true, status: rec?.status || s.status });
     } catch (e: any) {
-      alert(e?.message || "Помилка погодження.");
+      alert(e?.message || t("errors.agree_failed"));
     } finally {
       setAgreeBusy((p) => ({ ...p, [s.id]: false }));
     }
@@ -382,7 +393,7 @@ export default function MyOrders() {
     }
 
     if (!executor || typeof executor !== "string" || !/^0x[a-fA-F0-9]{40}$/.test(executor)) {
-      throw new Error("Не знайдено адресу гаманця виконавця для цієї угоди.");
+      throw new Error(t("errors.executor_wallet_missing"));
     }
 
     const referrer = (s as any).referrer_wallet ?? ZERO;
@@ -392,11 +403,11 @@ export default function MyOrders() {
   const handleLock = async (s: Scenario) => {
     if (lockBusy[s.id]) return;
     if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) {
-      alert("Сума має бути > 0");
+      alert(t("errors.amount_positive"));
       return;
     }
     if (!isBothAgreed(s)) {
-      alert("Спершу потрібні дві згоди.");
+      alert(t("errors.need_two_agrees"));
       return;
     }
     if (s.escrow_tx_hash) {
@@ -418,9 +429,7 @@ export default function MyOrders() {
 
       const ok = await waitDealStatus(s.id, 2, 120_000, 3_000);
       if (!ok) {
-        alert(
-          "Транзакція ще не зафіксована як Locked. Спробуйте оновити сторінку трохи пізніше."
-        );
+        alert(t("errors.not_yet_locked"));
         return;
       }
 
@@ -432,7 +441,7 @@ export default function MyOrders() {
       setLocal(s.id, { escrow_tx_hash: txHash as any, status: "agreed" });
       markLockedLocal(s.id, true);
     } catch (e: any) {
-      alert(e?.message || "Не вдалося заблокувати кошти.");
+      alert(e?.message || t("errors.lock_failed"));
     } finally {
       setLockBusy((p) => ({ ...p, [s.id]: false }));
     }
@@ -462,14 +471,12 @@ export default function MyOrders() {
     try {
       const deal = await getDealOnChain(s.id);
       if (asStatusNum(deal) !== 2) {
-        alert(
-          "Escrow ще не у статусі Locked. Дочекайтесь підтвердження блокування коштів замовником."
-        );
+        alert(t("errors.escrow_not_locked"));
         await refreshLocked(s.id);
         return;
       }
     } catch {
-      alert("Не вдалося прочитати стан escrow. Перевірте підключення до мережі BSC.");
+      alert(t("errors.read_escrow_failed"));
       return;
     }
 
@@ -504,7 +511,7 @@ export default function MyOrders() {
         setToast(true);
       }
     } catch (e: any) {
-      alert(e?.message || "Помилка підтвердження.");
+      alert(e?.message || t("errors.confirm_failed"));
     } finally {
       setConfirmBusy((p) => ({ ...p, [s.id]: false }));
     }
@@ -516,7 +523,7 @@ export default function MyOrders() {
       setLocal(s.id, { status: "disputed" } as any);
       setOpenDisputes((prev) => ({ ...prev, [s.id]: d }));
     } catch (e: any) {
-      alert(e?.message || "Не вдалося створити спір");
+      alert(e?.message || t("errors.dispute_failed"));
     }
   };
 
@@ -542,9 +549,9 @@ export default function MyOrders() {
       window.dispatchEvent(
         new CustomEvent("ratings:updated", { detail: { userId: rateFor.counterpartyId } })
       );
-      alert("Рейтинг збережено ✅");
+      alert(t("rating.saved"));
     } catch (e: any) {
-      alert(e?.message ?? "Помилка під час збереження рейтингу");
+      alert(e?.message ?? t("rating.save_failed"));
     } finally {
       setRateBusy(false);
     }
@@ -556,20 +563,20 @@ export default function MyOrders() {
         <span>
           🔔{" "}
           {permissionStatus === "granted"
-            ? "Увімкнено"
+            ? t("notify.enabled")
             : permissionStatus === "denied"
-            ? "Не підключено"
-            : "Не запитано"}
+            ? t("notify.denied")
+            : t("notify.not_requested")}
         </span>
-        <span>📡 {rt.isListening ? `${rt.method} активний` : "Не підключено"}</span>
+        <span>📡 {rt.isListening ? t("notify.channel_on", { method: rt.method }) : t("notify.channel_off")}</span>
         {permissionStatus !== "granted" && (
           <button className="notify-btn" onClick={requestPermission}>
-            🔔 Дозволити
+            🔔 {t("notify.allow")}
           </button>
         )}
       </div>
     ),
-    [permissionStatus, requestPermission, rt.isListening, rt.method]
+    [permissionStatus, requestPermission, rt.isListening, rt.method, t]
   );
 
   // Авто-ран у MetaMask-браузері, якщо прийшли через deeplink із ?scenario=...
@@ -593,11 +600,11 @@ export default function MyOrders() {
   return (
     <div className="scenario-list">
       <div className="scenario-header">
-        <h2>Мої замовлення</h2>
+        <h2>{t("my_orders.title")}</h2>
         {headerRight}
       </div>
 
-      {list.length === 0 && <div className="empty-hint">Немає активних замовлень.</div>}
+      {list.length === 0 && <div className="empty-hint">{t("my_orders.empty")}</div>}
 
       {list.map((s) => {
         const bothAgreed = isBothAgreed(s);
@@ -633,7 +640,7 @@ export default function MyOrders() {
               onCommitAmount={async (v) => {
                 if (!fieldsEditable) return;
                 if (v !== null && (!Number.isFinite(v) || v <= 0)) {
-                  alert("Сума має бути > 0");
+                  alert(t("errors.amount_positive"));
                   setLocal(s.id, { donation_amount_usdt: null });
                   return;
                 }
@@ -658,9 +665,7 @@ export default function MyOrders() {
                     "_blank"
                   );
                 } else {
-                  alert(
-                    "Локацію ще не встановлено або її не видно. Додайте/перевірте локацію у формі сценарію."
-                  );
+                  alert(t("errors.location_missing"));
                 }
               }}
               canAgree={canAgree(s)}
@@ -693,7 +698,7 @@ export default function MyOrders() {
                     boxShadow: "inset 0 0 0 1px rgba(255,255,255,.7)",
                   }}
                 >
-                  ⭐ Оцінити виконавця
+                  ⭐ {t("rating.rate_executor")}
                 </button>
               </div>
             )}

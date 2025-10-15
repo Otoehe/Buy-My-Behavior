@@ -1,4 +1,5 @@
 import "./lib/metamaskGuard";
+import "./lib/i18n"; // ✅ новий рядок: ініціалізує i18n ДО першого рендера
 
 import React from "react";
 import ReactDOM from "react-dom/client";

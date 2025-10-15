@@ -1,0 +1,10 @@
+{
+  "app_name": "Buy My Behavior",
+  "login_metamask": "Sign in with MetaMask",
+  "lock_escrow": "Lock Escrow",
+  "my_orders": "My Orders",
+  "received_scenarios": "Received Scenarios",
+  "profile": "Profile",
+  "register": "Register",
+  "confirm_completion": "Confirm Completion"
+}
