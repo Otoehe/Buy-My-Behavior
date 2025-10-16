@@ -1,5 +1,11 @@
 // src/main.tsx
 import "./lib/metamaskGuard";
+// ⬇️ додаємо ґард: підвішує window.bmbGuard (whoCanConfirm / confirmAsExecutorSafely / getScenarioWithWallets)
+import "./lib/escrowConfirmGuard";
+
+// (опційно для зручного дебагу в DEV): зробимо window.ethers доступним у консолі
+import { ethers } from "ethers";
+if (import.meta.env.DEV) (window as any).ethers = ethers;
 
 import React from "react";
 import ReactDOM from "react-dom/client";
