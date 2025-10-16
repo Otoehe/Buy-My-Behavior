@@ -1,0 +1,37 @@
+/* 📄 src/components/UploadBehavior.css — стиль модального вікна */
+
+.upload-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.upload-modal {
+  background: white;
+  border-radius: 20px;
+  padding: 30px;
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.3);
+  text-align: center;
+  min-width: 320px;
+  max-width: 90vw;
+}
+
+.upload-button {
+  width: 100%;
+  text-align: center;
+  background: #ffcdd6;
+  color: black;
+  padding: 12px 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: bold;
+  border: 2px solid white;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}

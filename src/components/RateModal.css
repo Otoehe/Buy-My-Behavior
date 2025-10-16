@@ -1,0 +1,148 @@
+/* ====== Overlay ====== */
+.rate-overlay{
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  background: rgba(0,0,0,.42);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+/* =========================================
+   Card / “скляна” панель у стилі BMB
+   ГОЛОВНЕ: все в border-box, щоб нічого не пливло
+   ========================================= */
+.rate-modal{
+  width: min(520px, 92vw);
+  background: #ffffffcc;
+  border: 1px solid rgba(255,255,255,.7);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow:
+    0 28px 68px rgba(0,0,0,.28),
+    0 2px 0 #fff inset;
+  backdrop-filter: saturate(140%) blur(6px);
+  -webkit-backdrop-filter: saturate(140%) blur(6px);
+  transform: translateY(6px);
+  animation: bmb-in .22s ease-out both;
+  box-sizing: border-box;
+}
+.rate-modal *, .rate-modal *::before, .rate-modal *::after{
+  box-sizing: border-box;
+}
+
+@keyframes bmb-in{
+  from{ opacity: 0; transform: translateY(14px) scale(.98); }
+  to  { opacity: 1; transform: translateY(6px)  scale(1);  }
+}
+
+.rate-title{
+  margin: 0 0 10px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: .01em;
+}
+
+/* ====== 10 чорних зірок ====== */
+.rate-stars{
+  display: flex;
+  gap: 6px;
+  margin: 6px 0 12px;
+  outline: none;
+}
+.rate-star{
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  color: #d1d5db;
+  text-shadow: 0 0 0 rgba(0,0,0,0);
+  transition: transform .08s ease, color .15s ease;
+}
+.rate-star.is-active{ color: #000; }
+.rate-star:hover{ transform: translateY(-1px) scale(1.06); }
+.rate-stars:focus .rate-star.is-active{
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 2px rgba(0,0,0,.08);
+  border-radius: 6px;
+}
+
+/* ====== Comment ====== */
+.rate-textarea{
+  display: block;
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 12px;
+  font-size: 14px;
+  color: #0f172a;
+  background: #fff;
+  box-shadow: 0 1px 0 #fff inset;
+}
+.rate-textarea::placeholder{ color: #9aa4b2; }
+.rate-textarea:focus{
+  outline: none;
+  border-color: #0f172a;
+  box-shadow: 0 0 0 3px rgba(0,0,0,.06);
+}
+
+/* ====== Actions ====== */
+.rate-actions{
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+}
+.rate-btn{
+  height: 42px;
+  border-radius: 9999px;
+  padding: 0 18px;
+  font-weight: 800;
+  border: 0;
+  cursor: pointer;
+  transition: transform .08s ease, box-shadow .18s ease, opacity .18s ease, background .18s ease;
+}
+.rate-btn.muted{
+  background: #f1f5f9;
+  color: #111;
+  box-shadow: 0 1px 0 #fff inset;
+}
+.rate-btn.muted:hover{ background:#e9eef5; }
+.rate-btn.primary{
+  min-width: 160px;
+  background: #000;
+  color: #fff;
+  box-shadow: 0 16px 38px rgba(0,0,0,.32);
+}
+.rate-btn.primary:hover{
+  background:#111;
+  transform: translateY(-1px);
+  box-shadow: 0 20px 48px rgba(0,0,0,.36);
+}
+.rate-btn.primary:active{
+  transform: translateY(0);
+  box-shadow: 0 14px 36px rgba(0,0,0,.28);
+}
+
+/* ====== Тригер-кнопка списку ====== */
+.rate-open-btn{
+  padding: 10px 16px;
+  border-radius: 9999px;
+  background: #ffcdd6;
+  color: #000;
+  border: none;
+  font-weight: 800;
+  cursor: pointer;
+}
+.rate-open-btn:hover{ background: #ffc1cc; }

@@ -1,0 +1,51 @@
+/* src/components/StoryBar.css */
+
+.story-bar{
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  background: transparent;
+}
+:root{ --sb-h: 80px; }
+
+.sb-container{
+  display:flex; gap:12px; align-items:center;
+  height:var(--sb-h);
+  overflow-x:auto; overflow-y:hidden;
+  -webkit-overflow-scrolling:touch;
+  padding:8px 12px;
+  background:#fff;
+  scrollbar-gutter:stable both-edges;
+  scrollbar-width:none;
+  box-shadow:0 1px 0 rgba(0,0,0,.06);
+}
+.sb-container::-webkit-scrollbar{ display:none; }
+
+.sb-item{
+  width:64px; height:64px; flex:0 0 auto;
+  border-radius:9999px;
+  border:2px solid #fff;           /* біла обводка */
+  background:#f6f7f9;              /* сірий фон усередині */
+  box-shadow:0 4px 12px rgba(0,0,0,.15); /* сіра тінь */
+  display:inline-flex; align-items:center; justify-content:center;
+  padding:0; cursor:pointer; position:relative;
+  transition:transform .12s ease, box-shadow .12s ease;
+}
+.sb-item:active{ transform:scale(.96); }
+
+.sb-item > img, .sb-item > video, .sb-media{
+  width:100%; height:100%; display:block; object-fit:cover; border-radius:50%;
+}
+
+.sb-item-add{
+  background:linear-gradient(180deg,#f3f4f6,#e5e7eb);
+  color:#111;
+}
+.sb-plus{ font-size:28px; line-height:1; font-weight:900; transform:translateY(-1px); }
+
+.sb-fallback{
+  width:100%; height:100%; border-radius:50%;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(0,0,0,.06), transparent 40%),
+    repeating-linear-gradient(45deg,#eee,#eee 6px,#f7f7f7 6px,#f7f7f7 12px);
+}

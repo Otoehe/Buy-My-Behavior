@@ -1,0 +1,11 @@
+.behaviors-list {
+  padding: 1rem;
+}
+
+.behavior-item {
+  border: 1px solid #ccc;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  border-radius: 8px;
+  background: #fafafa;
+}

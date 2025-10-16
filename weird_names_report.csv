@@ -1,0 +1,2 @@
+type,path,issues,bad_chars,suggested_safe_name
+file,public\Новий текстовий документ.txt,non-ascii,Новийтексдумн,_____ _________ ________.txt

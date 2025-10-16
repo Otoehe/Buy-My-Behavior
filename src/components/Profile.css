@@ -1,0 +1,328 @@
+/* src/components/Profile.css */
+
+/* ───────────────── Base container & title (ORIGINAL) ───────────────── */
+
+.profile-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: var(--page-bg, #f7f7f8);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.title {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin-bottom: 2rem;
+  text-align: center;
+  color: #2d3748;
+  width: 100%;
+  max-width: 600px;
+}
+
+/* ───────────────── A2HS (ORIGINAL) ───────────────── */
+
+.a2hs-card{
+  width: 100%;
+  max-width: 600px;
+  background: #fff;
+  border: 1px solid #fff;               /* біла окантовка */
+  border-radius: 16px;
+  box-shadow: 0 18px 40px rgba(255, 131, 176, .18), 0 4px 10px rgba(0,0,0,.06); /* рожева тінь */
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+.a2hs-row{ display:flex; align-items:center; gap:.75rem; }
+.a2hs-emoji{ font-size: 1.5rem; }
+.a2hs-text{ font-weight: 600; color:#111827; }
+.a2hs-sub{ font-weight: 500; color:#6b7280; font-size:.9rem; }
+.a2hs-actions{ margin-top:.75rem; display:flex; justify-content:flex-end; }
+
+/* Сіра кнопка з рожевою іконкою */
+.a2hs-btn{
+  background:#f5f6f8 !important;
+  color:#0e0e0e !important;
+  border:1.5px solid #fff !important;     /* біла окантовка */
+  border-radius: 999px !important;
+  display:inline-flex !important;
+  align-items:center; gap:.5rem;
+  padding: 12px 16px !important;
+  box-shadow: 0 14px 28px rgba(255,131,176,.22), 0 2px 8px rgba(0,0,0,.06) !important; /* рожева тінь */
+}
+.a2hs-btn:hover{ transform: translateY(-1px); box-shadow: 0 18px 36px rgba(255,131,176,.26), 0 4px 10px rgba(0,0,0,.08) !important; }
+.btn-icon{ display:inline-flex; }
+
+/* Підказка для iOS */
+.a2hs-hint{
+  margin-top:.75rem; font-size:.9rem; color:#374151; background:#f9fafb;
+  border:1px dashed #e5e7eb; padding:.75rem; border-radius:12px;
+}
+.a2hs-share{ display:inline-block; background:#111827; color:#fff; padding:.05rem .4rem; border-radius:6px; margin:0 .25rem; }
+
+/* ───────────────── Avatar (ORIGINAL) ───────────────── */
+
+.avatar-container {
+  position: relative;
+  margin-bottom: 2rem;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  max-width: 600px;
+  transition: transform .3s ease;
+  cursor: pointer;
+}
+.avatar-container:hover { transform: scale(1.03); }
+
+/* Фото з білою обводкою і рожевою тінню */
+.avatar-photo{
+  border-radius: 50%;
+  outline: 6px solid #fff; /* біла окантовка */
+  box-shadow:
+    0 22px 50px rgba(255, 131, 176, .28),  /* рожева мʼяка тінь */
+    0 4px 12px rgba(0, 0, 0, .08);
+}
+
+/* Плейсхолдер */
+.avatar-placeholder {
+  display: flex; align-items: center; justify-content: center;
+  width: 180px; height: 180px; border-radius: 50%;
+  border: 2px dashed #cbd5e1; background: #fff; gap: 8px; flex-direction: column;
+  color: #64748b;
+  transition: all .3s ease;
+}
+.avatar-container.drag-over .avatar-placeholder { border-color: #22c55e; background: #ecfdf5; }
+.user-icon { color: #667eea; }
+
+/* Лоадер */
+.avatar-uploading-spinner {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+}
+.avatar-uploading-spinner::after {
+  content: ''; width: 46px; height: 46px; border-radius: 50%;
+  border: 4px solid rgba(0,0,0,.06); border-top-color: #667eea; animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ───────────────── Forms (ORIGINAL) ───────────────── */
+
+.profile-form,
+.scenario-form {
+  display: flex; flex-direction: column; gap: 1.2rem;
+  background: #fff; max-width: 600px; width: 100%;
+  margin: 1rem auto; padding: 2rem; border-radius: 16px;
+  border: 1px solid #e2e8f0; box-shadow: 0 8px 32px rgba(0,0,0,0.06);
+}
+.input { padding: 1rem 1.25rem; border-radius: 12px; border: 1.5px solid #e2e8f0; font-size: 1rem; background: #fff; outline: none; transition: all .2s ease; }
+.input:focus { border-color: #667eea; box-shadow: 0 0 0 6px rgba(102,126,234,.10); }
+
+/* Базова бренд-кнопка (інше місце в профілі) */
+.button {
+  background: var(--bmb-pink, #ffcdd6);
+  color: var(--bmb-text, #0e0e0e);
+  padding: 12px 16px;
+  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 999px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform .06s ease, box-shadow .2s ease;
+  box-shadow: 0 12px 28px rgba(0,0,0,.08);
+}
+.button:hover { transform: translateY(-1px); box-shadow: 0 16px 36px rgba(0,0,0,.10); }
+.button:active { transform: translateY(0); box-shadow: none; }
+
+/* ───────────────── Scenarios (ORIGINAL) ───────────────── */
+
+.scenario-archive {
+  max-width: 600px; width: 100%; margin: 2rem auto; padding: 2rem;
+  background: #fff;
+  border-radius: 16px; border: 1px solid #fff;                /* біла рамка */
+  box-shadow: 0 18px 40px rgba(255, 131, 176, .18), 0 4px 10px rgba(0,0,0,.06); /* рожева тінь */
+}
+.scenarios-grid { display: grid; gap: 1rem; grid-template-columns: 1fr; width: 100%; }
+
+.scenario-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  display: flex; justify-content: space-between; align-items: center;
+  border: 1px solid #fff;                                       /* біла окантовка */
+  box-shadow: 0 14px 28px rgba(255, 131, 176, .18), 0 2px 8px rgba(0,0,0,.06); /* рожева тінь */
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+.scenario-card:hover { transform: translateY(-2px); box-shadow: 0 18px 36px rgba(255,131,176,.22), 0 4px 10px rgba(0,0,0,.08); }
+
+.scenario-description { font-size: 1rem; color: #495057; margin-bottom: .5rem; line-height: 1.4; }
+.scenario-price {
+  display: inline-block; background: #f4f5f6; color: #111;
+  padding: .25rem .75rem; border-radius: 20px; font-size: .875rem; font-weight: 600;
+  border: 1px solid #e9ecef;
+}
+
+/* Кнопки дій: СІРІ з білою окантовкою та рожевою тінню */
+.scenario-actions { display: flex; gap: .5rem; align-items: center; }
+.action-btn {
+  width: 40px; height: 40px; border-radius: 12px; cursor: pointer; font-size: 1.1rem;
+  display: flex; align-items: center; justify-content: center; transition: transform .2s ease, box-shadow .2s ease;
+  background: #f5f6f8;                       /* сіра кнопка */
+  border: 1.5px solid #fff;                  /* біла окантовка */
+  box-shadow: 0 12px 26px rgba(255,131,176,.22), 0 2px 8px rgba(0,0,0,.06); /* рожева тінь */
+  color: #111;
+}
+.action-btn:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(255,131,176,.26), 0 4px 10px rgba(0,0,0,.08); }
+
+/* (класи лишаємо, щоб не чіпати TSX — обидві однакові нейтральні) */
+.hide-btn { }
+.delete-btn { }
+
+.empty-scenarios { text-align: center; padding: 2rem 1rem; color: #6c757d; }
+
+/* ───────────────── Responsive (ORIGINAL) ───────────────── */
+
+@media (max-width: 767px) {
+  .profile-container { padding: 1rem; }
+  .profile-form, .scenario-form, .scenario-archive { padding: 1.5rem; }
+  .title { font-size: 2rem; margin-bottom: 1.5rem; }
+  .scenario-card { padding: 1.25rem; flex-direction: column; align-items: stretch; gap: 1rem; }
+  .scenario-actions { justify-content: center; }
+}
+
+/* ───────────────────── ADDITIONS (safe-area, modal, settings) ───────────────────── */
+/* УВАГА: нижче лише доповнення. Існуючі стилі вище не видалялись. */
+
+/* 0) Невеличкий reset для симетрії відступів і відсутності горизонтальної прокрутки */
+html, body { margin: 0; padding: 0; }
+* { box-sizing: border-box; }
+
+/* 1) Безпечне вирівнювання по краях екрана з урахуванням "вусів" iOS/Android */
+.profile-container {
+  box-sizing: border-box;
+  padding-left: max(2rem, env(safe-area-inset-left));
+  padding-right: max(2rem, env(safe-area-inset-right));
+  overflow-x: hidden;
+}
+
+/* Додатково гарантуємо центр усіх основних карток */
+.a2hs-card,
+.avatar-container,
+.settings-card,
+.profile-form,
+.scenario-form,
+.scenario-archive,
+.title {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* 1.1) Аватарка без «смужки»: рівне біле кільце через shadow (override попереднього outline) */
+.avatar-photo{
+  outline: none; /* прибираємо можливу нерівну окантовку */
+  box-shadow:
+    0 0 0 6px #fff,                             /* біле кільце, рівне з обох сторін */
+    0 22px 50px rgba(255, 131, 176, .28),
+    0 4px 12px rgba(0, 0, 0, .08);
+}
+
+/* 2) Картка налаштувань (Геолокація / Пуші) */
+.settings-card {
+  width: 100%;
+  max-width: 600px;
+  margin: 12px auto 16px;
+  background: #fff;
+  border: 1px solid #fff;                 /* біла окантовка */
+  border-radius: 16px;
+  padding: 12px 16px;
+  box-shadow: 0 14px 28px rgba(255,131,176,.18), 0 2px 8px rgba(0,0,0,.06);
+}
+.settings-card h2 {
+  margin: 2px 0 10px; font-size: 16px; color: #000; font-weight: 700;
+}
+.settings-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 2px; border-top: 1px dashed #ffe2ea;
+}
+.settings-row:first-of-type { border-top: 0; }
+
+/* 3) Перемикач (брендовий) */
+.bmb-switch {
+  position: relative; display: inline-block; width: 46px; height: 28px;
+}
+.bmb-switch input { opacity: 0; width: 0; height: 0; }
+.bmb-switch i {
+  position: absolute; inset: 0; cursor: pointer;
+  background: #e5e7eb; border-radius: 99px; transition: 200ms;
+}
+.bmb-switch i::after {
+  content: ""; position: absolute; height: 22px; width: 22px; left: 3px; top: 3px;
+  background: #fff; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,.12); transition: 200ms;
+}
+.bmb-switch input:checked + i { background: #ffcdd6; } /* бренд */
+.bmb-switch input:checked + i::after { transform: translateX(18px); }
+
+/* 4) A2HS Modal (брендова, для красивого UX) */
+.bmb-modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.35);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9999;
+}
+.bmb-modal {
+  width: min(560px, 92vw);
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.18);
+  border: 2px solid #ffcdd6;       /* брендова рамка */
+}
+.bmb-modal-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #ffe4ea;
+}
+.bmb-logo-square {
+  width: 34px; height: 34px; border-radius: 8px;
+  background: #ffcdd6;              /* рожевий квадрат під лого m */
+}
+.bmb-modal-header h3 {
+  margin: 0; font-size: 16px; letter-spacing: .4px; color: #000;
+}
+.bmb-modal-body { padding: 16px 18px 6px; color: #111; }
+.bmb-steps { margin: 10px 0 0 18px; padding: 0; }
+.bmb-steps li { margin-bottom: 6px; }
+.bmb-modal-actions {
+  padding: 12px 18px 16px;
+  display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;
+}
+.bmb-modal-actions .button { font-weight: 600; }
+.bmb-primary {
+  background: #ffcdd6; color: #000; border: 2px solid #ffcdd6;
+  border-radius: 12px; padding: 10px 14px;
+}
+.bmb-secondary {
+  background: #fff; color: #000; border: 2px solid #ffcdd6;
+  border-radius: 12px; padding: 10px 14px;
+}
+.bmb-ghost {
+  background: transparent; color: #000; border: 1px dashed #ffcdd6;
+  border-radius: 12px; padding: 10px 14px; font-weight: 500;
+}
+
+/* 5) Дрібні покращення мобільної читабельності (доповнення) */
+@media (max-width: 430px) {
+  .title { font-size: 1.85rem; }
+  .a2hs-text { font-size: .95rem; }
+  .profile-form, .scenario-form, .scenario-archive { border-radius: 14px; }
+  .scenario-price { font-size: .85rem; }
+}
+
+/* 6) Сувора симетрія відступів на мобільних (override попереднього @media) */
+@media (max-width: 767px){
+  .profile-container{
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+    /* верх/низ залишаємо з попереднього правила: padding-top/bottom контролює перший блок */
+  }
+  .title{ margin-left:auto; margin-right:auto; }
+}

@@ -1,0 +1,132 @@
+/* ===== ReviewsModal — скляне модальне вікно у стилі BMB ===== */
+
+.rev-overlay{
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0,0,0,.42);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.rev-modal{
+  width: min(920px, 92vw);
+  max-height: min(80vh, 760px);
+  overflow: auto;
+  background: #ffffffcc;
+  border: 1px solid rgba(255,255,255,.7);
+  border-radius: 20px;
+  box-shadow: 0 28px 68px rgba(0,0,0,.28), 0 2px 0 #fff inset;
+  backdrop-filter: saturate(140%) blur(6px);
+  -webkit-backdrop-filter: saturate(140%) blur(6px);
+  padding: 20px 20px 16px;
+  box-sizing: border-box;
+  animation: rev-in .22s ease-out both;
+}
+.rev-modal *,.rev-modal *::before,.rev-modal *::after{ box-sizing:border-box; }
+
+@keyframes rev-in{
+  from{ opacity:0; transform: translateY(10px) scale(.98); }
+  to  { opacity:1; transform: translateY(0)     scale(1);   }
+}
+
+.rev-title{
+  margin: 0 0 12px;
+  font-size: 22px;
+  font-weight: 800;
+  color:#0f172a;
+  letter-spacing:.01em;
+}
+
+.rev-close{
+  position: sticky;
+  top: 0;
+  float: right;
+  width: 32px; height: 32px;
+  border: 0; border-radius: 50%;
+  background: rgba(0,0,0,.06);
+  color:#111; cursor:pointer;
+  display:grid; place-items:center;
+  font-size:18px;
+  box-shadow: 0 1px 0 #fff inset;
+  transition: transform .1s ease, background .15s ease, opacity .15s ease;
+}
+.rev-close:hover{ background: rgba(0,0,0,.12); transform: scale(1.04); }
+
+.rev-empty{
+  padding: 40px 8px 46px;
+  text-align: center;
+  color:#64748b;
+  font-weight:600;
+}
+
+.rev-list{
+  list-style:none; margin:0; padding:0;
+  display:flex; flex-direction:column; gap:12px;
+}
+.rev-item{
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:16px;
+  padding:16px 18px;
+  box-shadow:0 1px 0 #fff inset;
+}
+
+.rev-head{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:10px;
+  margin-bottom: 8px;
+}
+.rev-date{ color:#94a3b8; font-size:12px; white-space:nowrap; }
+
+/* коментар: переносимо довгі рядки та завжди показуємо */
+.rev-comment{
+  margin: 0 0 12px;
+  color:#1f2937;
+  line-height:1.45;
+  font-size:14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* клікабельний автор (кнопка) */
+.rev-author-btn{
+  display:flex; align-items:center; gap:12px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 9999px;
+}
+.rev-author-btn:focus{ outline: none; box-shadow: 0 0 0 3px rgba(0,0,0,.06); border-radius: 9999px; }
+
+/* великий круглий аватар у нашому стилі */
+.rev-ava{
+  width:56px; height:56px;
+  border-radius:50%;
+  object-fit:cover;
+  background:#eef2f7;
+  border: 5px solid #fff;
+  box-shadow: 0 12px 28px rgba(0,0,0,.18);
+  transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
+}
+.rev-author-btn:hover .rev-ava{
+  transform: scale(1.04);
+  box-shadow: 0 16px 36px rgba(0,0,0,.22);
+}
+
+.rev-name{ font-weight:700; color:#0f172a; }
+
+/* 10 чорних зірок */
+.bmb-stars10{ display:inline-flex; gap:2px; line-height:1; }
+.bmb-star{ font-size:18px; color:#000; opacity:.25; transition:opacity .12s ease, transform .12s ease; }
+.bmb-star.on{ opacity:1; }
+
+@media (max-width:560px){
+  .rev-modal{ width:min(96vw,640px); }
+  .rev-item{ padding:14px; }
+  .rev-ava{ width:48px; height:48px; }
+}

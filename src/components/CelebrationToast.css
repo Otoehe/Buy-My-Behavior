@@ -1,0 +1,39 @@
+.ct-overlay{ position:fixed; inset:0; z-index:9999; display:grid; place-items:center; background:rgba(0,0,0,.18); animation:ct-fade .18s ease both }
+@keyframes ct-fade{ from{opacity:0} to{opacity:1} }
+
+.ct-card{ position:relative; width:min(560px, calc(100% - 32px)); display:grid; place-items:center }
+.ct-logo{ position:absolute; top:-28px; width:56px; height:56px; border-radius:999px; background:#fff; display:grid; place-items:center; box-shadow:0 12px 30px rgba(0,0,0,.12) }
+.ct-logo svg{ width:40px; height:40px }
+
+.ct-bubble{
+  width:100%; border-radius:28px; padding:28px 24px 24px;
+  background:radial-gradient(120% 120% at 0% 0%, #ffd8e6 0%, #ffd0e1 40%, #ffc3d9 100%);
+  box-shadow:0 20px 60px rgba(255,136,170,.35), inset 0 2px 0 rgba(255,255,255,.8);
+  position:relative; overflow:hidden;
+}
+
+.ct-bubble-float{ position:absolute; opacity:.35; background:#fff; filter:blur(.5px); border-radius:999px; animation:ct-float 6s ease-in-out infinite }
+.b1{ width:120px; height:120px; left:-40px; bottom:-20px; animation-delay:.1s }
+.b2{ width:80px; height:80px; right:-20px; top:10px; animation-delay:.6s }
+.b3{ width:56px; height:56px; left:30px; top:-20px; animation-delay:.9s }
+.b4{ width:42px; height:42px; right:60px; bottom:-10px; animation-delay:1.2s }
+@keyframes ct-float{ 0%{transform:translateY(16px) scale(1)} 50%{transform:translateY(-6px) scale(1.04)} 100%{transform:translateY(16px) scale(1)} }
+
+.ct-check{ display:grid; place-items:center; margin:8px 0 10px }
+.ct-check-svg{ width:86px; height:86px }
+.ct-check-svg .ring{ fill:none; stroke:rgba(0,0,0,.15); stroke-width:3; stroke-dasharray:188; stroke-dashoffset:188; animation:ring-in .6s .05s ease forwards }
+.ct-check-svg .tick{ fill:none; stroke:#111; stroke-width:5; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:60; stroke-dashoffset:60; animation:tick-in .5s .3s ease forwards }
+@keyframes ring-in{ to{ stroke-dashoffset:0 } }
+@keyframes tick-in{ to{ stroke-dashoffset:0 } }
+
+.ct-title{ margin:6px 0 6px; text-align:center; font-size:24px; font-weight:900; letter-spacing:.2px; color:#111 }
+.ct-subtitle{ text-align:center; font-size:14px; opacity:.78; margin:0 8px 16px }
+
+.ct-btn{ display:block; margin:0 auto; padding:12px 18px; border:none; border-radius:999px; font-weight:800; cursor:pointer; background:#111; color:#fff; box-shadow:0 8px 24px rgba(0,0,0,.22); transition:transform .05s ease, filter .2s ease }
+.ct-btn:hover{ filter:brightness(1.06) }
+.ct-btn:active{ transform:translateY(1px) }
+
+.ct-confetti{ position:absolute; inset:0; pointer-events:none }
+.ct-piece{ position:absolute; top:-12px; width:10px; height:14px; background:#000; opacity:0; transform:translateY(-20px) rotate(0deg); animation:ct-fall 1400ms ease-out forwards }
+@keyframes ct-fall{ 0%{opacity:0; transform:translateY(-30px) rotate(0)} 10%{opacity:1} 100%{opacity:0; transform:translateY(110vh) rotate(260deg)} }
+.ct-piece-1{ background:#111 } .ct-piece-2{ background:#e91e63 } .ct-piece-3{ background:#ff8ab4 } .ct-piece-4{ background:#ff7aa6 } .ct-piece-5{ background:#ffb3cc } .ct-piece-6{ background:#ff5e98 }

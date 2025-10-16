@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Ви офлайн</title>
+  <meta name="theme-color" content="#ffcdd6" />
+  <style>
+    :root { --pink:#ffcdd6; --black:#000; --muted:#6b7280; --radius:20px; }
+    html,body{height:100%}
+    body{
+      margin:0; display:grid; place-items:center; background:#f6f7f9;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Arial;
+      color:var(--black);
+      padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+    }
+    .card{
+      display:grid; place-items:center; gap:10px; text-align:center;
+      background:#fff; border:2px solid var(--pink); border-radius:var(--radius);
+      box-shadow:0 16px 40px rgba(0,0,0,.12);
+      padding:24px 28px; width:min(420px,92vw);
+      animation:pop .18s ease-out;
+    }
+    @keyframes pop{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}
+    .brand{width:56px;height:56px;border-radius:14px;display:grid;place-items:center;background:var(--pink);color:var(--black);box-shadow:0 8px 24px rgba(0,0,0,.12);} 
+    .brand-img{width:70%;height:70%;object-fit:contain;display:block}
+    h1{margin:6px 0 4px;font-size:22px;letter-spacing:.2px}
+    .hint{font-size:12px;color:var(--muted);margin:0}
+    .actions{display:flex;gap:12px;margin-top:10px;justify-content:center;flex-wrap:wrap}
+    .btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:116px;padding:0 18px;border-radius:14px;border:1px solid #ddd;background:#fff;cursor:pointer;font-weight:700;font-size:14px;line-height:1;white-space:nowrap;box-sizing:border-box;transition:transform .06s ease}
+    .btn.brand{background:var(--pink);border-color:var(--pink);color:#000;box-shadow:0 0 0 1px rgba(0,0,0,.02) inset}
+  </style>
+</head>
+<body>
+  <div class="card" role="dialog" aria-live="polite">
+    <div class="brand" aria-hidden="true">
+      <img class="brand-img" src="/icons/icon-192.png" srcset="/icons/icon-192.png 1x, /icons/icon-512.png 2x" alt="BMB logo" loading="eager" />
+    </div>
+    <h1>Ви офлайн</h1>
+    <p class="hint">Підключіть інтернет і оновіть сторінку</p>
+    <div class="actions">
+      <button class="btn brand" id="retry">Оновити</button>
+      <button class="btn" id="back">Назад</button>
+    </div>
+  </div>
+  <script>
+    const retry=document.getElementById('retry');
+    const back=document.getElementById('back');
+    retry?.addEventListener('click',()=> location.reload());
+    back?.addEventListener('click',()=> { if(history.length>1) history.back(); else location.href='/'; });
+    addEventListener('online', ()=> location.reload());
+  </script>
+</body>
+</html>

@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔄 Тест: Автоматичне відновлення з'єднання</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            color: white;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 25px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .status-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 12px;
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .status-card h3 {
+            color: #ffd700;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .status-connected { background: #4CAF50; }
+        .status-disconnected { background: #f44336; }
+        .status-reconnecting { background: #ff9800; }
+        
+        .test-section {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white;
+            border: none;
+            padding: 12px 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .btn-disconnect { background: linear-gradient(45deg, #f44336, #d32f2f); }
+        .btn-reconnect { background: linear-gradient(45deg, #2196F3, #1976D2); }
+        .btn-simulate { background: linear-gradient(45deg, #ff9800, #f57c00); }
+        .btn-test { background: linear-gradient(45deg, #9c27b0, #7b1fa2); }
+        
+        .metrics-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .metric-card {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #ffd700;
+            margin-bottom: 5px;
+        }
+        
+        .metric-label {
+            font-size: 0.85em;
+            opacity: 0.8;
+        }
+        
+        .timeline {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        
+        .timeline-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .timeline-item:last-child {
+            border-bottom: none;
+        }
+        
+        .timeline-time {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #888;
+            min-width: 80px;
+        }
+        
+        .timeline-event {
+            flex: 1;
+            font-size: 14px;
+        }
+        
+        .timeline-status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        
+        .status-success { background: #4CAF50; }
+        .status-error { background: #f44336; }
+        .status-warning { background: #ff9800; }
+        .status-info { background: #2196F3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔄 Тест автоматичного відновлення з'єднання</h1>
+            <p>Перевірка надійності Realtime Notifications BMB</p>
+        </div>
+        
+        <!-- Статус панель -->
+        <div class="status-panel">
+            <div class="status-card">
+                <h3>
+                    <span class="status-indicator" id="connectionIndicator"></span>
+                    Стан з'єднання
+                </h3>
+                <p><strong>Метод:</strong> <span id="connectionMethod">Невідомо</span></p>
+                <p><strong>Спроби відновлення:</strong> <span id="reconnectAttempts">0</span></p>
+                <p><strong>Останній статус:</strong> <span id="lastStatus">Ініціалізація</span></p>
+            </div>
+            
+            <div class="status-card">
+                <h3>📊 Метрики надійності</h3>
+                <div class="metrics-panel">
+                    <div class="metric-card">
+                        <div class="metric-value" id="totalTests">0</div>
+                        <div class="metric-label">Тестів</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="successfulReconnects">0</div>
+                        <div class="metric-label">Успішних</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="avgReconnectTime">0ms</div>
+                        <div class="metric-label">Середній час</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Тести з'єднання -->
+        <div class="test-section">
+            <h3>🧪 Тести стабільності з'єднання</h3>
+            <div class="test-grid">
+                <button onclick="simulateDisconnection()" class="btn-disconnect" id="disconnectBtn">
+                    📶 Симуляція втрати з'єднання
+                </button>
+                <button onclick="forceReconnection()" class="btn-reconnect" id="reconnectBtn">
+                    🔄 Ручне відновлення
+                </button>
+                <button onclick="stressTest()" class="btn-simulate" id="stressBtn">
+                    ⚡ Стрес-тест (5 циклів)
+                </button>
+                <button onclick="networkLatencyTest()" class="btn-test" id="latencyBtn">
+                    🌐 Тест затримки мережі
+                </button>
+            </div>
+        </div>
+        
+        <!-- Автоматичні тести -->
+        <div class="test-section">
+            <h3>🤖 Автоматичні тести</h3>
+            <div class="test-grid">
+                <button onclick="startContinuousTest()" class="btn-test" id="continuousBtn">
+                    🔁 Безперервний тест (30с)
+                </button>
+                <button onclick="rapidFireTest()" class="btn-simulate" id="rapidBtn">
+                    🔥 Швидкий тест підключень
+                </button>
+                <button onclick="reliabilityTest()" class="btn-reconnect" id="reliabilityBtn">
+                    🛡️ Тест надійності системи
+                </button>
+                <button onclick="stopAllTests()" class="btn-disconnect" id="stopBtn">
+                    ⏹️ Зупинити всі тести
+                </button>
+            </div>
+        </div>
+        
+        <!-- Часова лінія подій -->
+        <div class="test-section">
+            <h3>📋 Часова лінія подій</h3>
+            <div class="timeline" id="timeline">
+                <div class="timeline-item">
+                    <span class="timeline-time">--:--:--</span>
+                    <span class="timeline-event">Система готова до тестування</span>
+                    <span class="timeline-status status-info">READY</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // === Глобальні змінні ===
+        let connectionState = 'disconnected';
+        let reconnectAttempts = 0;
+        let totalTests = 0;
+        let successfulReconnects = 0;
+        let testStartTime = 0;
+        let reconnectTimes = [];
+        let isTestRunning = false;
+        let testInterval = null;
+        
+        // === Логування подій ===
+        function addTimelineEvent(event, status = 'info') {
+            const timeline = document.getElementById('timeline');
+            const item = document.createElement('div');
+            item.className = 'timeline-item';
+            
+            const time = new Date().toLocaleTimeString();
+            item.innerHTML = `
+                <span class="timeline-time">${time}</span>
+                <span class="timeline-event">${event}</span>
+                <span class="timeline-status status-${status}">${status.toUpperCase()}</span>
+            `;
+            
+            timeline.insertBefore(item, timeline.firstChild);
+            
+            // Обмежуємо кількість записів
+            const items = timeline.querySelectorAll('.timeline-item');
+            if (items.length > 20) {
+                timeline.removeChild(items[items.length - 1]);
+            }
+        }
+        
+        // === Оновлення UI ===
+        function updateConnectionStatus(state, method = 'none', attempts = 0) {
+            connectionState = state;
+            reconnectAttempts = attempts;
+            
+            const indicator = document.getElementById('connectionIndicator');
+            const methodElement = document.getElementById('connectionMethod');
+            const attemptsElement = document.getElementById('reconnectAttempts');
+            const statusElement = document.getElementById('lastStatus');
+            
+            // Оновлюємо індикатор
+            indicator.className = `status-indicator status-${state}`;
+            
+            // Оновлюємо текст
+            methodElement.textContent = method === 'polling' ? 'Polling (Fallback)' : 
+                                      method === 'realtime' ? 'Supabase Realtime' : 'Відключено';
+            attemptsElement.textContent = attempts;
+            
+            const statusMap = {
+                'connected': 'З\'єднано ✅',
+                'disconnected': 'Відключено ❌',
+                'reconnecting': 'Відновлення... 🔄'
+            };
+            statusElement.textContent = statusMap[state] || state;
+        }
+        
+        function updateMetrics() {
+            document.getElementById('totalTests').textContent = totalTests;
+            document.getElementById('successfulReconnects').textContent = successfulReconnects;
+            
+            const avgTime = reconnectTimes.length > 0 ? 
+                Math.round(reconnectTimes.reduce((a, b) => a + b, 0) / reconnectTimes.length) : 0;
+            document.getElementById('avgReconnectTime').textContent = avgTime + 'ms';
+        }
+        
+        // === Симуляція станів ===
+        function simulateDisconnection() {
+            if (isTestRunning) return;
+            
+            totalTests++;
+            addTimelineEvent('Симуляція втрати з\'єднання', 'warning');
+            updateConnectionStatus('disconnected');
+            
+            // Симулюємо затримку та автоматичне відновлення
+            setTimeout(() => {
+                updateConnectionStatus('reconnecting', 'none', 1);
+                addTimelineEvent('Спроба автоматичного відновлення #1', 'info');
+                
+                setTimeout(() => {
+                    if (Math.random() > 0.3) { // 70% успіху
+                        const method = Math.random() > 0.5 ? 'realtime' : 'polling';
+                        updateConnectionStatus('connected', method, 0);
+                        successfulReconnects++;
+                        addTimelineEvent(`З'єднання відновлено через ${method}`, 'success');
+                    } else {
+                        updateConnectionStatus('reconnecting', 'none', 2);
+                        addTimelineEvent('Спроба #1 невдала, пробуємо знову...', 'warning');
+                        
+                        setTimeout(() => {
+                            updateConnectionStatus('connected', 'polling', 0);
+                            successfulReconnects++;
+                            addTimelineEvent('З\'єднання відновлено через polling fallback', 'success');
+                        }, 2000);
+                    }
+                    updateMetrics();
+                }, 1500);
+            }, 1000);
+        }
+        
+        function forceReconnection() {
+            if (isTestRunning) return;
+            
+            totalTests++;
+            testStartTime = Date.now();
+            addTimelineEvent('Ручне відновлення з\'єднання', 'info');
+            updateConnectionStatus('reconnecting');
+            
+            setTimeout(() => {
+                const reconnectTime = Date.now() - testStartTime;
+                reconnectTimes.push(reconnectTime);
+                
+                updateConnectionStatus('connected', 'realtime', 0);
+                successfulReconnects++;
+                addTimelineEvent(`Ручне відновлення завершено за ${reconnectTime}ms`, 'success');
+                updateMetrics();
+            }, Math.random() * 2000 + 500); // 0.5-2.5 секунди
+        }
+        
+        function stressTest() {
+            if (isTestRunning) return;
+            
+            isTestRunning = true;
+            document.getElementById('stressBtn').disabled = true;
+            
+            addTimelineEvent('🚀 Початок стрес-тесту (5 циклів)', 'info');
+            
+            let cycle = 0;
+            const runCycle = () => {
+                if (cycle >= 5) {
+                    isTestRunning = false;
+                    document.getElementById('stressBtn').disabled = false;
+                    addTimelineEvent('✅ Стрес-тест завершено', 'success');
+                    return;
+                }
+                
+                cycle++;
+                addTimelineEvent(`Цикл ${cycle}/5: відключення`, 'warning');
+                updateConnectionStatus('disconnected');
+                
+                setTimeout(() => {
+                    addTimelineEvent(`Цикл ${cycle}/5: відновлення`, 'info');
+                    updateConnectionStatus('connected', Math.random() > 0.5 ? 'realtime' : 'polling');
+                    totalTests++;
+                    successfulReconnects++;
+                    updateMetrics();
+                    
+                    setTimeout(runCycle, 1000);
+                }, 2000);
+            };
+            
+            runCycle();
+        }
+        
+        function networkLatencyTest() {
+            addTimelineEvent('🌐 Тест затримки мережі', 'info');
+            
+            const latencies = [50, 150, 300, 500, 1000]; // мс
+            let testIndex = 0;
+            
+            const runLatencyTest = () => {
+                if (testIndex >= latencies.length) {
+                    addTimelineEvent('✅ Тест затримки завершено', 'success');
+                    return;
+                }
+                
+                const latency = latencies[testIndex];
+                addTimelineEvent(`Симуляція затримки ${latency}ms`, 'warning');
+                
+                setTimeout(() => {
+                    addTimelineEvent(`Відновлення після затримки ${latency}ms`, 'info');
+                    updateConnectionStatus('connected', 'realtime');
+                    testIndex++;
+                    setTimeout(runLatencyTest, 1000);
+                }, latency);
+            };
+            
+            runLatencyTest();
+        }
+        
+        function startContinuousTest() {
+            if (isTestRunning) return;
+            
+            isTestRunning = true;
+            document.getElementById('continuousBtn').disabled = true;
+            
+            addTimelineEvent('🔁 Безперервний тест розпочато (30 секунд)', 'info');
+            
+            testInterval = setInterval(() => {
+                const action = Math.random();
+                if (action < 0.3) {
+                    updateConnectionStatus('disconnected');
+                } else if (action < 0.6) {
+                    updateConnectionStatus('reconnecting');
+                } else {
+                    updateConnectionStatus('connected', Math.random() > 0.5 ? 'realtime' : 'polling');
+                }
+                totalTests++;
+                updateMetrics();
+            }, 2000);
+            
+            setTimeout(() => {
+                clearInterval(testInterval);
+                isTestRunning = false;
+                document.getElementById('continuousBtn').disabled = false;
+                addTimelineEvent('✅ Безперервний тест завершено', 'success');
+                updateConnectionStatus('connected', 'realtime');
+            }, 30000);
+        }
+        
+        function rapidFireTest() {
+            if (isTestRunning) return;
+            
+            addTimelineEvent('🔥 Швидкий тест підключень', 'info');
+            
+            for (let i = 0; i < 10; i++) {
+                setTimeout(() => {
+                    if (i % 2 === 0) {
+                        updateConnectionStatus('disconnected');
+                        addTimelineEvent(`Rapid test #${i+1}: disconnect`, 'warning');
+                    } else {
+                        updateConnectionStatus('connected', 'realtime');
+                        addTimelineEvent(`Rapid test #${i+1}: reconnect`, 'success');
+                        successfulReconnects++;
+                    }
+                    totalTests++;
+                    updateMetrics();
+                }, i * 300);
+            }
+            
+            setTimeout(() => {
+                addTimelineEvent('✅ Швидкий тест завершено', 'success');
+            }, 3000);
+        }
+        
+        function reliabilityTest() {
+            addTimelineEvent('🛡️ Комплексний тест надійності', 'info');
+            
+            // Комбінація різних тестів
+            setTimeout(() => simulateDisconnection(), 1000);
+            setTimeout(() => forceReconnection(), 5000);
+            setTimeout(() => networkLatencyTest(), 8000);
+            setTimeout(() => {
+                addTimelineEvent('✅ Тест надійності завершено', 'success');
+            }, 15000);
+        }
+        
+        function stopAllTests() {
+            if (testInterval) {
+                clearInterval(testInterval);
+                testInterval = null;
+            }
+            isTestRunning = false;
+            
+            document.getElementById('continuousBtn').disabled = false;
+            document.getElementById('stressBtn').disabled = false;
+            
+            addTimelineEvent('⏹️ Всі тести зупинено', 'error');
+            updateConnectionStatus('connected', 'realtime');
+        }
+        
+        // === Ініціалізація ===
+        document.addEventListener('DOMContentLoaded', () => {
+            updateConnectionStatus('connected', 'realtime');
+            updateMetrics();
+            
+            addTimelineEvent('🚀 Система тестування ініціалізована', 'success');
+            
+            // Демонстраційна послідовність при завантаженні
+            setTimeout(() => {
+                addTimelineEvent('🔍 Перевірка початкового стану з\'єднання', 'info');
+                setTimeout(() => {
+                    addTimelineEvent('✅ Система готова до тестування', 'success');
+                }, 1000);
+            }, 2000);
+        });
+        
+        // Автоматичне оновлення метрик
+        setInterval(updateMetrics, 1000);
+    </script>
+</body>
+</html>

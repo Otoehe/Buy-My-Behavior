@@ -1,0 +1,43 @@
+/* src/components/MapView.css */
+.map-view-container {
+  position: relative;
+  width: 100%;
+
+  /* стабільна висота без 100vh */
+  height: calc(var(--app-vh, 1vh) * 100);
+  min-height: 100vh;
+  overscroll-behavior: none;
+
+  overflow: hidden;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* мапа займає весь простір */
+.map-container {
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+/* ===== overlays ===== */
+
+/* шар для оверлеїв над мапою */
+.storybar-overlay {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 8px;
+  z-index: 1100;      /* вище за leaflet controls */
+  pointer-events: none;
+}
+
+/* дозволяємо взаємодію всередині сторісбару */
+.storybar-overlay .sb-container,
+.storybar-overlay .sb-item {
+  pointer-events: auto;
+}
+
+/* посунути кнопки + / - нижче сторісбару, щоб не перекривались */
+.map-view-container .leaflet-top.leaflet-left {
+  top: 96px; /* висота сторісбару ~ 80–90px */
+}

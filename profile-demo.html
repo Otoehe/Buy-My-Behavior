@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>👤 Demo: Покращений Профіль BMB</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .demo-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .demo-header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 30px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        
+        .demo-header h1 {
+            font-size: 2.5em;
+            color: #2d3748;
+            margin-bottom: 10px;
+        }
+        
+        .improvements-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+        
+        .improvement-card {
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e2e8f0;
+        }
+        
+        .improvement-card h3 {
+            color: #4a5568;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        /* Стилі аватара для демо */
+        .avatar-demo {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        .avatar-wrapper-demo {
+            position: relative;
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            overflow: hidden;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+            border: 4px solid #fff;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+        
+        .avatar-wrapper-demo:hover {
+            transform: scale(1.05);
+        }
+        
+        .avatar-placeholder-demo {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .bmb-logo-demo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 0.25rem;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        }
+        
+        .upload-text-demo {
+            font-size: 0.7rem;
+            text-align: center;
+            line-height: 1.2;
+            opacity: 0.9;
+        }
+        
+        /* Демо карток сценаріїв */
+        .scenario-demo {
+            margin-top: 20px;
+        }
+        
+        .scenario-card-demo {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            border: 1px solid #e9ecef;
+            transition: all 0.3s ease;
+        }
+        
+        .scenario-card-demo:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .scenario-content-demo {
+            flex: 1;
+            margin-right: 15px;
+        }
+        
+        .scenario-description-demo {
+            font-weight: 500;
+            color: #495057;
+            margin-bottom: 5px;
+        }
+        
+        .scenario-price-demo {
+            display: inline-block;
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+        
+        .scenario-actions-demo {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .action-btn-demo {
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+        
+        .hide-btn-demo {
+            background: linear-gradient(135deg, #ffc107 0%, #ff8c00 100%);
+        }
+        
+        .delete-btn-demo {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+        }
+        
+        .action-btn-demo:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        .features-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .features-list li {
+            padding: 8px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .feature-icon {
+            color: #28a745;
+            font-weight: bold;
+        }
+        
+        .code-demo {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 12px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+        
+        .highlight {
+            color: #81c995;
+            font-weight: bold;
+        }
+        
+        .comment {
+            color: #a0aec0;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <div class="demo-header">
+            <h1>👤 Покращений профіль користувача BMB</h1>
+            <p>Демонстрація нових UI/UX покращень сторінки профілю</p>
+        </div>
+        
+        <div class="improvements-grid">
+            <!-- 1. Покращений аватар -->
+            <div class="improvement-card">
+                <h3>✨ Стилізований аватар з заглушкою</h3>
+                
+                <div class="avatar-demo">
+                    <div class="avatar-wrapper-demo">
+                        <div class="avatar-placeholder-demo">
+                            <div class="bmb-logo-demo">BMB</div>
+                            <span class="upload-text-demo">Завантаж своє фото</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <ul class="features-list">
+                    <li><span class="feature-icon">✅</span> Елегантна заглушка з логотипом BMB</li>
+                    <li><span class="feature-icon">✅</span> Градієнтний фон замість сірого</li>
+                    <li><span class="feature-icon">✅</span> Hover-ефект з масштабуванням</li>
+                    <li><span class="feature-icon">✅</span> Тінь та округлення для сучасного вигляду</li>
+                </ul>
+            </div>
+            
+            <!-- 2. Автоматичне оновлення -->
+            <div class="improvement-card">
+                <h3>🔄 Автоматичне оновлення аватара</h3>
+                
+                <div class="code-demo">
+<span class="highlight">const</span> handleAvatarChange = <span class="highlight">async</span> (file) => {
+  <span class="comment">// Одразу показуємо новий файл</span>
+  <span class="highlight">setAvatarFile</span>(file);
+  <span class="highlight">setAvatarUploading</span>(<span class="highlight">true</span>);
+  
+  <span class="comment">// Завантажуємо в Supabase</span>
+  <span class="highlight">const</span> { data } = <span class="highlight">await</span> supabase.storage
+    .from('avatars').upload(file);
+  
+  <span class="comment">// Оновлюємо профіль в базі</span>
+  <span class="highlight">await</span> supabase.from('profiles')
+    .update({ avatar_url: newUrl });
+};
+                </div>
+                
+                <ul class="features-list">
+                    <li><span class="feature-icon">✅</span> Миттєвий перегляд після вибору файлу</li>
+                    <li><span class="feature-icon">✅</span> Автоматичне збереження в Supabase</li>
+                    <li><span class="feature-icon">✅</span> Індикатор завантаження</li>
+                    <li><span class="feature-icon">✅</span> Не потрібно натискати "Зберегти"</li>
+                </ul>
+            </div>
+            
+            <!-- 3. Покращені чернетки -->
+            <div class="improvement-card">
+                <h3>🎨 Покращений дизайн чернеток</h3>
+                
+                <div class="scenario-demo">
+                    <div class="scenario-card-demo">
+                        <div class="scenario-content-demo">
+                            <div class="scenario-description-demo">Допомога з переїздом у Києві</div>
+                            <span class="scenario-price-demo">120 USDT</span>
+                        </div>
+                        <div class="scenario-actions-demo">
+                            <button class="action-btn-demo hide-btn-demo">🙈</button>
+                            <button class="action-btn-demo delete-btn-demo">🗑️</button>
+                        </div>
+                    </div>
+                    
+                    <div class="scenario-card-demo">
+                        <div class="scenario-content-demo">
+                            <div class="scenario-description-demo">Фотосесія в парку з собакою</div>
+                            <span class="scenario-price-demo">80 USDT</span>
+                        </div>
+                        <div class="scenario-actions-demo">
+                            <button class="action-btn-demo hide-btn-demo">🙈</button>
+                            <button class="action-btn-demo delete-btn-demo">🗑️</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <ul class="features-list">
+                    <li><span class="feature-icon">✅</span> Картки замість списку</li>
+                    <li><span class="feature-icon">✅</span> Стилізовані кнопки з іконками</li>
+                    <li><span class="feature-icon">✅</span> Hover-ефекти та анімації</li>
+                    <li><span class="feature-icon">✅</span> Градієнтний фон з тінями</li>
+                </ul>
+            </div>
+            
+            <!-- 4. UX покращення -->
+            <div class="improvement-card">
+                <h3>🚀 UX покращення</h3>
+                
+                <ul class="features-list">
+                    <li><span class="feature-icon">✅</span> Сучасні градієнти та тіні</li>
+                    <li><span class="feature-icon">✅</span> Покращена типографія</li>
+                    <li><span class="feature-icon">✅</span> Мобільна адаптивність</li>
+                    <li><span class="feature-icon">✅</span> Інтуїтивні hover-ефекти</li>
+                    <li><span class="feature-icon">✅</span> Заглушка "Немає сценаріїв"</li>
+                    <li><span class="feature-icon">✅</span> Покращені форми та інпути</li>
+                    <li><span class="feature-icon">✅</span> Стилізовані кнопки</li>
+                    <li><span class="feature-icon">✅</span> Візуальний фідбек для дій</li>
+                </ul>
+            </div>
+            
+            <!-- 5. Технічні деталі -->
+            <div class="improvement-card">
+                <h3>⚙️ Технічні деталі</h3>
+                
+                <ul class="features-list">
+                    <li><span class="feature-icon">✅</span> Зберігання існуючої функціональності</li>
+                    <li><span class="feature-icon">✅</span> TypeScript типізація</li>
+                    <li><span class="feature-icon">✅</span> Supabase Storage інтеграція</li>
+                    <li><span class="feature-icon">✅</span> Оптимізовані React re-renders</li>
+                    <li><span class="feature-icon">✅</span> Error handling для завантаження</li>
+                    <li><span class="feature-icon">✅</span> SVG заглушка аватара</li>
+                    <li><span class="feature-icon">✅</span> CSS Grid для адаптивності</li>
+                    <li><span class="feature-icon">✅</span> Accessibility покращення</li>
+                </ul>
+            </div>
+            
+            <!-- 6. Структура компонентів -->
+            <div class="improvement-card">
+                <h3>🏗️ Структура компонентів</h3>
+                
+                <div class="code-demo">
+<span class="comment">// Покращена структура Profile.tsx</span>
+<span class="highlight">export default function</span> Profile() {
+  <span class="comment">// States для аватара</span>
+  <span class="highlight">const</span> [avatarFile, setAvatarFile] = useState();
+  <span class="highlight">const</span> [avatarUploading, setAvatarUploading] = useState();
+  
+  <span class="comment">// Автоматичне завантаження</span>
+  <span class="highlight">const</span> handleAvatarChange = <span class="highlight">async</span> (file) => {
+    <span class="comment">// Upload logic...</span>
+  };
+  
+  <span class="highlight">return</span> (
+    &lt;div className="profile-container"&gt;
+      &lt;AvatarSection /&gt;
+      &lt;ProfileForm /&gt;  
+      &lt;ScenariosGrid /&gt;
+    &lt;/div&gt;
+  );
+}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Демонстрація інтерактивності
+        document.addEventListener('DOMContentLoaded', () => {
+            const avatarWrapper = document.querySelector('.avatar-wrapper-demo');
+            const actionButtons = document.querySelectorAll('.action-btn-demo');
+            const scenarioCards = document.querySelectorAll('.scenario-card-demo');
+            
+            // Анімація кліку на аватар
+            avatarWrapper?.addEventListener('click', () => {
+                avatarWrapper.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    avatarWrapper.style.transform = 'scale(1.05)';
+                }, 100);
+                setTimeout(() => {
+                    avatarWrapper.style.transform = 'scale(1)';
+                }, 200);
+            });
+            
+            // Демонстрація дій з кнопками
+            actionButtons.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const card = btn.closest('.scenario-card-demo');
+                    
+                    if (btn.classList.contains('delete-btn-demo')) {
+                        card.style.opacity = '0.5';
+                        card.style.transform = 'translateX(-100%)';
+                        setTimeout(() => {
+                            card.style.display = 'none';
+                        }, 300);
+                    } else if (btn.classList.contains('hide-btn-demo')) {
+                        card.style.opacity = '0.3';
+                        setTimeout(() => {
+                            card.style.opacity = '1';
+                        }, 1000);
+                    }
+                });
+            });
+            
+            console.log('🎨 Демо покращеного профілю BMB готове!');
+        });
+    </script>
+</body>
+</html>

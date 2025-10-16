@@ -1,0 +1,18 @@
+# build / кеш
+node_modules/
+dist/
+.vite/
+coverage/
+.history/
+.cache/
+
+# env
+.env
+.env.*
+!.env.example
+
+# hardhat build
+onchain/artifacts/
+onchain/cache/
+*.example
+bmb_ci_pack.zip

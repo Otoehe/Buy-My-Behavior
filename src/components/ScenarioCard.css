@@ -1,0 +1,32 @@
+/* 📄 src/components/ScenarioCard.css */
+.scenario-card {
+  border: 1px solid #ccc;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  background-color: #f9f9f9;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.scenario-list {
+  padding: 24px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.show-location-btn,
+.confirm-deal-btn {
+  margin-top: 8px;
+  margin-right: 8px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background-color: #007bff;
+  color: white;
+  cursor: pointer;
+}
+
+.show-location-btn:hover,
+.confirm-deal-btn:hover {
+  background-color: #0056b3;
+}

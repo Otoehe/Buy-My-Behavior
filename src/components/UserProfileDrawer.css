@@ -1,0 +1,207 @@
+/* 🎨 UserProfileDrawer — Drawer для MapView з “скляними” сценаріями */
+
+:root{
+  --drawer-bg:#fff;
+  --overlay:rgba(0,0,0,.22);
+  --border:#e8e8eb;
+  --text:#0f172a;
+  --muted:#6b7280;
+
+  --pink:#ffd1dc;
+  --pink-hover:#ffc6d4;
+  --pink-press:#ffb8c9;
+
+  --glass-bg: rgba(255,205,214,.18);
+  --glass-edge: rgba(255,255,255,.65);
+  --glass-shadow: 0 10px 24px rgba(0,0,0,.08);
+}
+
+/* === Overlay === */
+.drawer-overlay{
+  position: fixed; inset: 0;
+  background: var(--overlay);
+  z-index: 2000;
+  display: flex; justify-content: flex-end;
+}
+
+/* === Контейнер шторки === */
+.drawer, .drawer-content{
+  width: 360px; height: 100vh;
+  background: var(--drawer-bg);
+  box-shadow: -4px 0 24px rgba(0,0,0,.14);
+  display: flex; flex-direction: column;
+  padding: 16px 16px 0 16px;
+  overflow: hidden;
+  position: relative;
+  animation: slideIn .28s ease-out;
+}
+@keyframes slideIn{ from{transform:translateX(100%);} to{transform:translateX(0);} }
+
+/* === Закриття === */
+.close-button{
+  position: absolute; top: 12px; right: 12px;
+  width: 28px; height: 28px; border: 0; border-radius: 50%;
+  background: rgba(0,0,0,.08); color:#111; cursor: pointer;
+  display: grid; place-items: center; font-size: 16px;
+  transition: transform .15s ease, background .2s ease;
+}
+.close-button:hover{ background: rgba(0,0,0,.18); transform: scale(1.06); }
+
+/* === Хедер профілю === */
+.profile-section{
+  display:flex; flex-direction:column; align-items:center; text-align:center;
+  margin-bottom: 12px; flex-shrink: 0;
+}
+.avatar,
+.profile-avatar,
+.profile-avatar-large,
+.drawer .avatar,
+.drawer-content .avatar{
+  width: 140px !important;
+  height: 140px !important;
+  border-radius: 50% !important;
+  object-fit: cover !important;
+  border: 5px solid #fff !important;
+  box-shadow: 0 14px 36px rgba(0,0,0,.18) !important;
+  display: block; margin: 0 auto;
+  transition: transform .25s ease;
+}
+.avatar:hover{ transform: scale(1.02); }
+
+.profile-section h2{ font-size: 20px; font-weight: 700; color: var(--text); margin: 8px 0 4px; }
+.role-container{ display:flex; justify-content:center; margin-bottom:6px; }
+.role-badge{
+  background: #f3f4f6; color:#111; padding: 4px 12px;
+  border-radius: 9999px; border:1px solid var(--border);
+  font-size: 12px; font-weight: 600; text-transform:capitalize;
+}
+.description{ margin: 6px 0 10px; color:#475569; font-size:14px; line-height:1.45; }
+
+/* === Сценарії === */
+.scenarios-section{ flex: 1; display:flex; flex-direction:column; min-height:0; }
+.scenarios-section h3{
+  margin: 0 0 10px; font-size: 13px; letter-spacing: .08em;
+  text-transform: uppercase; color: #94a3b8; flex-shrink: 0;
+}
+.scenarios-scroll{
+  flex:1; overflow-y:auto; padding-right:6px; position:relative;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+}
+.scenarios-scroll::-webkit-scrollbar{ width: 6px; }
+.scenarios-scroll::-webkit-scrollbar-thumb{ background:#cbd5e1; border-radius:3px; }
+.scenarios-scroll::-webkit-scrollbar-thumb:hover{ background:#94a3b8; }
+
+.scenario-item{
+  position:relative; border-radius:12px; padding:12px; margin-bottom:10px; cursor:pointer;
+  background: var(--glass-bg);
+  border:1px solid var(--glass-edge);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  transition: transform .15s ease, box-shadow .2s ease, background .2s ease;
+}
+.scenario-item:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 16px 34px rgba(0,0,0,.12);
+  background: rgba(255,205,214,.28);
+}
+.scenario-content{ display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+.scenario-description{ margin:0; color:#1f2937; font-size:13.5px; font-weight:600; line-height:1.35; flex:1; }
+
+/* === Ціна — БІЛИЙ чип === */
+.scenario-price{
+  display:inline-block; white-space:nowrap;
+  font-size:12px; font-weight:700;
+  color: var(--muted) !important;       /* світло-сіра ціна */
+  background:#ffffff !important;        /* білий овал */
+  border:1px solid rgba(0,0,0,.06) !important;
+  border-radius:9999px; padding:2px 10px; flex-shrink:0;
+}
+.scenario-item:hover .scenario-price{ box-shadow:0 2px 6px rgba(0,0,0,.06); }
+
+/* Немає сценаріїв */
+.no-scenarios{ font-size:13px; color:#94a3b8; font-style:italic; text-align:center; padding:18px 0; margin:0; }
+
+/* === Кнопка “Замовити” — ЧОРНИЙ PILL, трохи нижча === */
+.bottom-button-container{
+  position: sticky; bottom:0; left:0; right:0;
+  padding:14px 0 18px; background:#fff; border-top:1px solid #e2e8f0;
+  display:flex; justify-content:center; z-index:1; flex-shrink:0;
+}
+.order-button-new{
+  width:90%; height:46px;             /* ↓ було 52px */
+  border:0; border-radius:9999px;
+  background:#000 !important; color:#fff !important;
+  font-weight:800; font-size:14px; cursor:pointer;
+  box-shadow:0 14px 32px rgba(0,0,0,.25) !important;
+  transition: transform .08s ease, box-shadow .2s ease, background .15s ease, opacity .2s ease;
+}
+.order-button-new:hover{
+  background:#111 !important;
+  transform: translateY(-1px);
+  box-shadow:0 18px 44px rgba(0,0,0,.32) !important;
+  opacity:.98;
+}
+.order-button-new:active{ background:#000 !important; transform:translateY(0); }
+
+@media (max-width: 480px){
+  .drawer, .drawer-content{ width:100vw; padding:12px 12px 0; }
+  .bottom-button-container{ padding:12px 0 16px; }
+  .avatar{ width:120px !important; height:120px !important; }
+}
+
+/* ===================================================== */
+/* === 10 ЧОРНИХ ЗІРОЧОК + стилі бейджа та фіду відгуків === */
+/* ===================================================== */
+
+/* Рядок рейтингу під ім’ям у шторці */
+.user-rating-row{
+  display:flex; align-items:center; gap:8px;
+  margin: 4px 0 6px;
+}
+.user-rating-row .avg{
+  font-weight:800; color:#0f172a; font-size:14px;
+}
+.user-rating-row .count{
+  color:#6b7280; font-size:12px;
+}
+
+/* Самі зірки (10 штук) */
+.bmb-stars10{
+  display:inline-flex;
+  align-items:center;
+  gap:2px;
+  line-height:1;
+}
+.bmb-stars10 .bmb-star{
+  font-size:18px;           /* розмір зірки */
+  color:#000;               /* ЧОРНІ */
+  opacity:.25;              /* порожня */
+  transition:transform .12s ease, opacity .12s ease;
+}
+.bmb-stars10 .bmb-star.on{
+  opacity:1;                /* заповнена */
+}
+.bmb-stars10.small .bmb-star{ font-size:14px; }
+.bmb-stars10.clickable .bmb-star{ cursor:pointer; }
+.bmb-stars10.clickable .bmb-star:hover{
+  transform:scale(1.08); opacity:1;
+}
+
+/* Фід відгуків (якщо показуєш коментарі в шторці) */
+.ratings-section{ margin:10px 0 14px; }
+.ratings-title{ margin:0 0 6px; font-size:16px; }
+.ratings-feed{ margin-top:4px; }
+.ratings-list{
+  list-style:none; margin:0; padding:0;
+  display:flex; flex-direction:column; gap:8px;
+}
+.rating-item{
+  border:1px solid #eee; border-radius:12px; padding:10px; background:#fff;
+}
+.rating-head{ display:flex; align-items:center; gap:8px; }
+.rating-date{ color:#666; font-size:12px; }
+.rating-comment{ margin:6px 0 8px; line-height:1.35; color:#1f2937; }
+.rating-meta{ display:flex; align-items:center; gap:8px; font-size:13px; color:#333; }
+.rating-ava{ width:20px; height:20px; border-radius:50%; object-fit:cover; }

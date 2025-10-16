@@ -1,0 +1,21 @@
+.stars-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
+}
+.star-btn {
+  width: var(--starSize);
+  height: var(--starSize);
+  line-height: var(--starSize);
+  font-size: calc(var(--starSize) - 2px);
+  color: #e5e7eb;            /* сірий контур */
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+}
+.star-btn.active { color: #111827; }  /* ЧОРНІ заповнені */
+.star-btn:hover { color: #111827; transform: scale(1.05); }
+.star-btn.ro { cursor: default; }
+.star-btn.ro:hover { transform: none; }

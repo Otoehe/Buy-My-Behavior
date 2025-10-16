@@ -1,0 +1,45 @@
+/* Контейнер сцени, щоб можна було позиціонувати кнопку поверх карти */
+.map-stage {
+  position: relative;
+  height: calc(100vh - 72px); /* підлаштуй, якщо у тебе інша висота хедера */
+}
+
+/* Чорна «плаваюча» кнопка підтвердження */
+.map-confirm-btn {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 18px;
+  z-index: 1000;
+
+  height: 44px;
+  padding: 0 26px;
+  border: none;
+  border-radius: 9999px;
+
+  background: #000;
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: .2px;
+
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+}
+
+.map-confirm-btn:hover:not([disabled]) {
+  transform: translateX(-50%) translateY(-1px);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
+}
+
+.map-confirm-btn:active:not([disabled]) {
+  transform: translateX(-50%) translateY(0);
+}
+
+.map-confirm-btn[disabled],
+.map-confirm-btn[aria-disabled="true"] {
+  opacity: .45;
+  cursor: not-allowed;
+  box-shadow: none;
+}

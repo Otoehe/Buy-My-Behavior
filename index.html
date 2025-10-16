@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+
+    <!-- Адаптив + safe area для мобільних -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+    <!-- ПІДТВЕРДЖЕННЯ GOOGLE -->
+    <meta name="google-site-verification" content="dpC3Lh7Q031lOe9q1fiAmZapE2yeBvrjW5nso1cVQGw" />
+
+    <!-- Дозвіл індексації -->
+    <meta name="robots" content="index,follow" />
+
+    <!-- Канонічна адреса (для SEO) -->
+    <link rel="canonical" href="https://www.buymybehavior.com/" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#ffcdd6" />
+
+    <!-- Android / Chrome -->
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- iOS PWA -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="BMB" />
+    <link rel="apple-touch-icon" href="/icons/bmb-192.png" />
+
+    <!-- Базова SEO -->
+    <title>Buy My Behavior — Web3 платформа угод з поведінками (USDT, BSC, escrow 90/5/5)</title>
+    <meta name="description" content="BMB — платформа, де замовники та виконавці укладають угоди щодо 'поведінок'. Escrow у USDT на Binance Smart Chain: 90% виконавцю, 5% рефералу, 5% платформі. Геолокація, реферальна система, смартконтракт." />
+
+    <!-- Мова + alternates -->
+    <link rel="alternate" href="https://www.buymybehavior.com/" hreflang="uk" />
+    <link rel="alternate" href="https://www.buymybehavior.com/" hreflang="x-default" />
+
+    <!-- Open Graph / соцмережі -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Buy My Behavior — BMB" />
+    <meta property="og:description" content="Web3 платформа з escrow у USDT на BSC: 90% виконавцю, 5% рефералу, 5% платформі." />
+    <meta property="og:url" content="https://www.buymybehavior.com/" />
+    <meta property="og:image" content="https://www.buymybehavior.com/icons/bmb-512.png" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Buy My Behavior — BMB" />
+    <meta name="twitter:description" content="Escrow у USDT на BSC: 90/5/5. Геолокація, реферальна система, смартконтракт." />
+    <meta name="twitter:image" content="https://www.buymybehavior.com/icons/bmb-512.png" />
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/png" sizes="32x32"  href="/icons/bmb-192.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/bmb-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/bmb-512.png" />
+
+    <!-- Системна тема лише світла -->
+    <meta name="color-scheme" content="light only" />
+
+    <!-- Краще UX на мобільних -->
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- Важливо для SPA з глибокими маршрутами (/received, /profile) -->
+    <base href="/" />
+
+    <!-- JSON-LD: Organization -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Buy My Behavior",
+      "url": "https://www.buymybehavior.com/",
+      "logo": "https://www.buymybehavior.com/icons/bmb-512.png"
+    }
+    </script>
+
+    <!-- JSON-LD: WebSite -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "Buy My Behavior",
+      "url": "https://www.buymybehavior.com/",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "https://www.buymybehavior.com/search?q={query}",
+        "query-input": "required name=query"
+      }
+    }
+    </script>
+  </head>
+
+  <body>
+    <noscript>Для роботи застосунку потрібен увімкнений JavaScript.</noscript>
+    <div id="root"></div>
+
+    <!-- Патч для деяких web3-пакетів, яким потрібен global -->
+    <script>window.global = window.global || window;</script>
+
+    <!-- Вхідна точка Vite/React -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

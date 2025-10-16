@@ -1,0 +1,83 @@
+/* src/styles/flow.css */
+.card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 6px 24px rgba(15,22,36,.06);
+  padding: 20px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 24px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: none;
+  background: #f3f4f6;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+.btn-primary { background:#ffe9ef; }
+.btn-green   { background:#e9fbe9; }
+.btn-red     { background:#fee9e9; }
+
+.hint {
+  color:#7b8592;
+  font-size:12px;
+}
+
+/* шкала процесу */
+.progress-wrap { margin-top: 8px; }
+.progress {
+  height: 8px;
+  background: #f1f2f6;
+  border-radius: 999px;
+  position: relative;
+  overflow: hidden;
+}
+.progress > span {
+  position: absolute; left:0; top:0; bottom:0;
+  width: 0%;
+  background: linear-gradient(90deg,#ff9ab2,#ff5c7a);
+  transition: width .35s ease;
+}
+
+/* "пілюля" суми справа над шкалою */
+.amount-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+.amount-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #ebeef3;
+  border-radius: 999px;
+  background: #fff;
+  font-weight: 600;
+}
+.amount-pill input {
+  width: 60px;
+  text-align: center;
+  border: none;
+  outline: none;
+  font-weight: 700;
+}
+.badge-ok   { color:#24aa6b; }
+.badge-warn { color:#f28d15; }
+.badge-off  { color:#888; }

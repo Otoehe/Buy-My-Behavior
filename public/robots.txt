@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+
+# Закриті/приватні розділи (SPA)
+Disallow: /profile*
+Disallow: /my-orders*
+Disallow: /received*
+Disallow: /auth*
+
+# (Не обовʼязково) якщо хочеш блокувати маніфест:
+# Disallow: /manifest.webmanifest$
+
+Sitemap: https://www.buymybehavior.com/sitemap.xml
