@@ -296,9 +296,29 @@ export default function ReceivedScenarios() {
       const who = (await signer.getAddress()).toLowerCase();
       const provider = signer.provider as ethers.providers.Web3Provider;
 
-      const dealBefore = await getDealOnChain(s.id);
-      const statusOnChain = Number((dealBefore as any).status); // 1 = Locked
-      const executorOnChain = String((dealBefore as any).executor || '').toLowerCase();
+      // DEBUG: ключ для цього сценарію
+      const b32 = generateScenarioIdBytes32(s.id);
+
+      // Отримуємо стан на чейні і ЛОГуємо все, що важливо
+      let dealBefore: any = undefined;
+      try {
+        dealBefore = await getDealOnChain(s.id);
+      } catch (e) {
+        console.debug('[CONFIRM][ERROR] getDealOnChain failed', e);
+      }
+      const statusOnChain = Number((dealBefore as any)?.status ?? -1);
+      const executorOnChain = String((dealBefore as any)?.executor || '').toLowerCase();
+
+      // DEBUG: повний зріз
+      console.debug(
+        '[CONFIRM] scenarioId:', s.id,
+        '\n  bytes32:', b32,
+        '\n  dealBefore:', dealBefore,
+        '\n  statusOnChain:', statusOnChain,
+        '\n  executorOnChain:', executorOnChain,
+        '\n  connected:', who,
+        '\n  escrowAddress:', ESCROW_ADDRESS
+      );
 
       if (statusOnChain !== 1) { alert('Escrow не у статусі Locked.'); return; }
       if (executorOnChain !== who) {
@@ -310,16 +330,36 @@ export default function ReceivedScenarios() {
       if (bal.lt(ethers.utils.parseUnits('0.00005', 'ether'))) { alert('Недостатньо нативної монети для комісії.'); return; }
 
       try {
-        const b32 = generateScenarioIdBytes32(s.id);
         const abi = ['function confirmCompletion(bytes32)'];
         const c = new ethers.Contract(ESCROW_ADDRESS, abi, signer);
-        await c.callStatic.confirmCompletion(b32);
-        let gas; try { gas = await c.estimateGas.confirmCompletion(b32); } catch { gas = ethers.BigNumber.from(150000); }
+
+        // DEBUG: сухий прогон і газ
+        try {
+          await c.callStatic.confirmCompletion(b32);
+          console.debug('[CONFIRM] callStatic.confirmCompletion ok');
+        } catch (e) {
+          console.debug('[CONFIRM][callStatic] reverted:', e);
+          throw e;
+        }
+
+        let gas;
+        try {
+          gas = await c.estimateGas.confirmCompletion(b32);
+          console.debug('[CONFIRM] estimated gas:', gas?.toString?.());
+        } catch (e) {
+          gas = ethers.BigNumber.from(150000);
+          console.debug('[CONFIRM] estimateGas failed, fallback gas:', gas.toString(), e);
+        }
+
         const tx = await c.confirmCompletion(b32, { gasLimit: gas.mul(12).div(10) });
+        console.debug('[CONFIRM] sent tx:', tx.hash);
         await tx.wait();
-      } catch {
+        console.debug('[CONFIRM] tx mined');
+      } catch (e) {
+        console.debug('[CONFIRM] direct call failed, fallback wrapper...', e);
         // fallback на обгортку
         await confirmCompletionOnChain({ scenarioId: s.id });
+        console.debug('[CONFIRM] fallback wrapper done');
       }
 
       setLocal(s.id, { is_completed_by_executor: true });
@@ -331,7 +371,10 @@ export default function ReceivedScenarios() {
 
       const deal = await getDealOnChain(s.id);
       let st = Number((deal as any).status);
+      console.debug('[CONFIRM] status after tx:', st, 'deal:', deal);
       if (st !== 3) st = await waitForChainRelease(s.id);
+      console.debug('[CONFIRM] final status after wait:', st);
+
       if (st === 3) {
         await (supabase as any).from('scenarios').update({ status: 'confirmed' }).eq('id', s.id);
         try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
@@ -344,6 +387,7 @@ export default function ReceivedScenarios() {
         setShowFinalToast(true);
       }
     } catch (e:any) {
+      console.debug('[CONFIRM][ERROR]', e); // DEBUG: щоб мати стек у консолі
       alert(humanizeEthersError(e));
     } finally {
       setConfirmBusy(p => ({ ...p, [s.id]: false }));
