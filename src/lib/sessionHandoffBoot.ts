@@ -22,15 +22,14 @@ function parseSessFromHash():
 
 /**
  * Викликається ДО рендера React (див. import у src/main.tsx).
- * Якщо прийшли через диплінк у MetaMask, відновлюємо сесію.
- * ВАЖЛИВО: якщо ми на /escrow/approve — НІЯКИХ редиректів не робимо,
- * щоб користувач залишився на екрані підтвердження ескроу.
+ * Якщо прийшли через диплінк у MetaMask, відновлюємо сесію
+ * і відразу переходимо на потрібний шлях.
  */
 export async function bootstrapSessionHandoff(): Promise<void> {
   const sess = parseSessFromHash();
   if (!sess) return;
 
-  // приберемо hash із адресного рядка (щоб не лишався в історії)
+  // прибираємо hash з адресного рядка (щоб не лишався в історії)
   history.replaceState(null, "", location.pathname + location.search);
 
   // якщо є токени — відновлюємо сесію
@@ -45,14 +44,9 @@ export async function bootstrapSessionHandoff(): Promise<void> {
     }
   }
 
-  // Якщо ми в ескроу-флоу — НЕ редиректимо (користувач має натиснути "Підтвердити ескроу")
-  const isEscrowFlow = location.pathname.startsWith("/escrow/approve");
-  if (isEscrowFlow) return;
-
-  // Інакше можемо перейти на цільову сторінку (санітизуємо next)
+  // ідемо на цільову сторінку
   const next = sess.next && sess.next.startsWith("/") ? sess.next : "/my-orders";
-  const here = location.pathname + location.search;
-  if (here !== next) {
+  if (location.pathname + location.search !== next) {
     location.replace(next);
   }
 }

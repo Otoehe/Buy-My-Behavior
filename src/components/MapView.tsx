@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
@@ -7,7 +6,7 @@ import 'leaflet/dist/leaflet.css';
 import { supabase } from '../lib/supabase';
 
 import ReviewsModal from './ReviewsModal';
-import StoryBar from './StoryBar';
+import StoryBar from './StoryBar';            // ⬅️ сторісбар
 import './Pills.css';
 import './MapView.css';
 
@@ -67,9 +66,6 @@ export default function MapView() {
   const lastX = useRef<number | null>(null);
   const dragXRef = useRef(0);
   const rafRef = useRef<number | null>(null);
-
-  // анти-дабл для кнопки
-  const orderTapLocked = useRef(false);
 
   const setTransform = (dx: number) => {
     dragXRef.current = dx;
@@ -182,31 +178,14 @@ export default function MapView() {
     if (selectedProfile || reviewsOpen) { setSelectedProfile(null); setReviewsOpen(false); }
   }
 
-  async function handleOrderClick(e?: React.MouseEvent | React.TouchEvent) {
-    e?.preventDefault?.();
-    e?.stopPropagation?.();
+  function handleOrderClick(e?: React.MouseEvent) {
+    e?.preventDefault(); e?.stopPropagation();
     if (!selectedProfile) return;
-
-    // контекст
-    try {
-      localStorage.setItem('scenario_receiverId', selectedProfile.user_id);
-      if (selectedProfile.latitude && selectedProfile.longitude) {
-        localStorage.setItem('latitude', String(selectedProfile.latitude));
-        localStorage.setItem('longitude', String(selectedProfile.longitude));
-      }
-    } catch {}
-
-    // авторизація
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      const next = `/scenario/new?executor_id=${encodeURIComponent(selectedProfile.user_id)}`;
-      sessionStorage.setItem('bmb_next_after_auth', next);
-      // ✅ у вашому App.tsx є тільки /register (немає /login)
-      navigate(`/register?next=${encodeURIComponent(next)}`, { replace: false });
-      return;
+    localStorage.setItem('scenario_receiverId', selectedProfile.user_id);
+    if (selectedProfile.latitude && selectedProfile.longitude) {
+      localStorage.setItem('latitude', String(selectedProfile.latitude));
+      localStorage.setItem('longitude', String(selectedProfile.longitude));
     }
-
     navigate(`/scenario/new?executor_id=${selectedProfile.user_id}`, {
       state: {
         executor_id: selectedProfile.user_id,
@@ -217,17 +196,6 @@ export default function MapView() {
       },
     });
   }
-
-  // безпечний мобільний тап (single-flight + запобігаємо "кліку крізь")
-  const handleOrderSafeTap = (e?: React.MouseEvent | React.TouchEvent) => {
-    e?.preventDefault?.();
-    e?.stopPropagation?.();
-    if (orderTapLocked.current) return;
-    orderTapLocked.current = true;
-    Promise.resolve(handleOrderClick(e)).finally(() => {
-      window.setTimeout(() => { orderTapLocked.current = false; }, 800);
-    });
-  };
 
   const confirmCenterAsLocation = () => {
     const m = mapRef.current; if (!m) return;
@@ -247,6 +215,7 @@ export default function MapView() {
 
   return (
     <div className="map-view-container" onClick={handleMapClick}>
+      {/* ⬇️ СТОРІСБАР під навбаром і нижче зета шторки */}
       {!isSelectMode && (
         <div className="storybar-overlay">
           <StoryBar />
@@ -339,7 +308,7 @@ export default function MapView() {
           ref={backdropRef}
           onClick={() => setSelectedProfile(null)}
           style={{
-            position: 'fixed', inset: 0, zIndex: 1999,
+            position: 'fixed', inset: 0, zIndex: 1999,                   // ⬅️ над сторісбаром
             background: 'rgba(0,0,0,0.35)', opacity: 0.35, transition: 'opacity 200ms ease',
           }}
         />
@@ -350,7 +319,7 @@ export default function MapView() {
           ref={panelRef}
           className="drawer-overlay"
           style={{
-            position: 'fixed', zIndex: 2000, top: 0, right: 0, bottom: 0,
+            position: 'fixed', zIndex: 2000, top: 0, right: 0, bottom: 0, // ⬅️ ще вище
             width: drawerWidth,
             background: '#fff', boxShadow: '-8px 0 24px rgba(0,0,0,0.22)',
             padding: 20, overflowY: 'auto',
@@ -389,7 +358,7 @@ export default function MapView() {
             scenarios={scenarios}
             avg={avg}
             onOpenReviews={() => setReviewsOpen(true)}
-            onOrderClick={handleOrderSafeTap}
+            onOrderClick={handleOrderClick}
           />
         </div>
       )}
@@ -405,7 +374,7 @@ function DrawerContent({
   selectedProfile, scenarios, avg, onOpenReviews, onOrderClick,
 }: {
   selectedProfile: User; scenarios: Scenario[]; avg: number;
-  onOpenReviews: () => void; onOrderClick: (e?: React.MouseEvent | React.TouchEvent) => void;
+  onOpenReviews: () => void; onOrderClick: (e?: React.MouseEvent) => void;
 }) {
   return (
     <div>
@@ -488,14 +457,12 @@ function DrawerContent({
       </div>
 
       <button
-        type="button"
         style={{
           position: 'sticky', bottom: 16, marginTop: 24, width: '100%',
           padding: '12px 16px', background: '#000', color: '#fff',
           border: 'none', borderRadius: 999, cursor: 'pointer', fontWeight: 700,
         }}
         onClick={onOrderClick}
-        // ❌ прибрали onTouchStart, щоб не було подвійного запуску на мобільних
       >
         Замовити поведінку
       </button>

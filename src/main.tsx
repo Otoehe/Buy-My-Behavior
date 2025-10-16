@@ -1,5 +1,5 @@
+// src/main.tsx
 import "./lib/metamaskGuard";
-import "./lib/i18n"; // ✅ новий рядок: ініціалізує i18n ДО першого рендера
 
 import React from "react";
 import ReactDOM from "react-dom/client";
@@ -9,7 +9,7 @@ import App from "./App";
 import { registerServiceWorker, applyServiceWorkerUpdate } from "./lib/sw-guard";
 import UpdateToast from "./components/UpdateToast";
 
-// підхоплення сесії з MetaMask-браузера ДО рендера
+// ⬇⬇⬇ ДОДАНО: підхоплення сесії з MetaMask-браузера ДО рендера
 import { bootstrapSessionHandoff } from "./lib/sessionHandoffBoot";
 
 // DEV: чистимо старі SW/кеші
@@ -29,14 +29,7 @@ console.log(import.meta.env.PROD ? "BMB boot production" : "BMB boot dev");
 
 const rootEl = document.getElementById("root")!;
 
-// важливо: після першого рендера сповіщаємо index.html, щоб сховати бренд-заставку
-function markAppReady() {
-  try {
-    window.dispatchEvent(new Event("bmb:app-ready"));
-  } catch {}
-}
-
-// чекаємо хенд-офф і лише потім рендеримо App
+// ⬇⬇⬇ ВАЖЛИВО: чекаємо хенд-офф і лише потім рендеримо App
 bootstrapSessionHandoff().finally(() => {
   ReactDOM.createRoot(rootEl).render(
     <React.StrictMode>
@@ -46,7 +39,6 @@ bootstrapSessionHandoff().finally(() => {
       </BrowserRouter>
     </React.StrictMode>
   );
-  markAppReady();
 });
 
 // PROD: реєструємо SW тільки на дозволених хостах і прибираємо «чужі»
@@ -75,7 +67,7 @@ if (import.meta.env.PROD && HOST_OK) {
   }
 }
 
-// Прив’язка кнопки «Оновити»
+// Прив’язка кнопки «Оновити» (у твоєму UpdateToast зроби атрибут data-bmb-update)
 window.addEventListener("bmb:sw-update", () => {
   const btn = document.querySelector("[data-bmb-update]") as HTMLButtonElement | null;
   if (btn) btn.onclick = () => applyServiceWorkerUpdate();

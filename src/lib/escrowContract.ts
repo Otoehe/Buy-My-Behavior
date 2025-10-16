@@ -42,6 +42,7 @@ type DealTuple = {
 };
 
 type LockFundsOptions = {
+  /** Колбек етапів UX (mobile friendly) */
   onStep?: (step:
     | 'connect'
     | 'ensure-network'
@@ -52,18 +53,16 @@ type LockFundsOptions = {
     | 'estimate-gas'
     | 'send'
     | 'mined') => void;
+  /** Якщо true — при нестачі allowance зробимо unlimited approve одразу */
   preferUnlimitedApprove?: boolean;
+  /** Скільки підтверджень чекати (за замовчуванням 1) */
   minConfirmations?: number;
+  /** Множник на ліміт газу (за замовчуванням 1.2) */
   gasMultiplier?: number;
 };
 
-const ZERO = ethers.constants.Zero;
-const ADDR0 = ethers.constants.AddressZero;
-
-function nowSec() { return Math.floor(Date.now() / 1000); }
-
 async function getWeb3Bundle() {
-  const { provider } = await connectWallet();
+  const { provider } = await connectWallet();  // один-єдиний провайдер (SDK на мобільному)
   await ensureBSC(provider);
   const web3   = new ethers.providers.Web3Provider(provider as any, 'any');
   const signer = web3.getSigner();
@@ -92,13 +91,9 @@ async function assertNetworkAndCode(eip1193: Eip1193Provider, web3: ethers.provi
   if (!codeUsdt || codeUsdt === '0x')   throw new Error('USDT_ADDRESS не є контрактом у цій мережі');
 }
 
+// “розбудити” підпис (після повернення з MetaMask)
 async function warmupSignature(signer: ethers.Signer) {
   try { await signer.signMessage('BMB warmup ' + Date.now()); } catch { /* ignore */ }
-}
-
-function asChecksum(addr: string | null | undefined): string | null {
-  if (!addr) return null;
-  try { return ethers.utils.getAddress(addr); } catch { return null; }
 }
 
 async function ensureAllowance(
@@ -111,23 +106,21 @@ async function ensureAllowance(
 ) {
   const token = new ethers.Contract(tokenAddr, ERC20_ABI, signer);
   const have  = await token.allowance(owner, spender);
-  if (ethers.BigNumber.from(have).gte(needAmtWei)) return;
+  if (have.gte(needAmtWei)) return;
 
   const onStep = opts?.onStep;
   const preferUnlimited = !!opts?.preferUnlimitedApprove;
 
-  // Деякі токени (у т.ч. USDT) вимагають нульування approve перед підвищенням
-  if (!ethers.BigNumber.from(have).isZero() && !preferUnlimited) {
+  // деякі токени вимагають нульування перед новим approve
+  if (!have.isZero() && !preferUnlimited) {
     onStep?.('approve-send');
-    const gp = await (signer.provider as any).getGasPrice?.().catch(() => null);
-    const tx0 = await token.approve(spender, ZERO, gp ? { gasPrice: gp } : {});
+    const tx0 = await token.approve(spender, 0);
     await tx0.wait(opts?.minConfirmations ?? 1);
   }
 
   onStep?.('approve-send');
   const amount = preferUnlimited ? ethers.constants.MaxUint256 : needAmtWei;
-  const gp = await (signer.provider as any).getGasPrice?.().catch(() => null);
-  const tx = await token.approve(spender, amount, gp ? { gasPrice: gp } : {});
+  const tx = await token.approve(spender, amount);
   await tx.wait(opts?.minConfirmations ?? 1);
 }
 
@@ -138,8 +131,7 @@ export async function approveUsdtUnlimited(): Promise<{ txHash: string } | null>
   const current: ethers.BigNumber = await token.allowance(owner, ESCROW_ADDRESS);
   const MAX = ethers.constants.MaxUint256;
   if (current.gte(MAX.div(2))) return null;
-  const gp = await (signer.provider as any).getGasPrice?.().catch(() => null);
-  const tx = await token.approve(ESCROW_ADDRESS, MAX, gp ? { gasPrice: gp } : {});
+  const tx = await token.approve(ESCROW_ADDRESS, MAX);
   const rc = await tx.wait(1);
   return { txHash: rc.transactionHash };
 }
@@ -170,8 +162,7 @@ export async function quickOneClickSetup(): Promise<{ address: string; approveTx
   const current: ethers.BigNumber = await token.allowance(addr, ESCROW_ADDRESS);
   let approveTxHash: string | undefined;
   if (current.lt(ethers.constants.MaxUint256.div(2))) {
-    const gp = await (signer.provider as any).getGasPrice?.().catch(() => null);
-    const tx = await token.approve(ESCROW_ADDRESS, ethers.constants.MaxUint256, gp ? { gasPrice: gp } : {});
+    const tx = await token.approve(ESCROW_ADDRESS, ethers.constants.MaxUint256);
     const rc = await tx.wait(1);
     approveTxHash = rc.transactionHash;
   }
@@ -179,7 +170,8 @@ export async function quickOneClickSetup(): Promise<{ address: string; approveTx
 }
 
 /**
- * lockFunds з мобільним UX і захистами від UNPREDICTABLE_GAS_LIMIT.
+ * lockFunds з підтримкою мобільного UX та опцій.
+ * Старі виклики (тільки з arg) працюють як і раніше.
  */
 export async function lockFunds(
   arg:
@@ -205,8 +197,7 @@ export async function lockFunds(
   onStep?.('prepare');
   await warmupSignature(signer);
 
-  // --- аргументи
-  let amountHuman = '';
+  let amountHuman: string;
   let scenarioId: string | undefined;
   let executorId: string | undefined;
   let referrerWallet: string | null | undefined;
@@ -220,12 +211,12 @@ export async function lockFunds(
     executionTime  = arg.executionTime;
   } else {
     amountHuman = String(arg);
+    scenarioId  = undefined;
   }
 
-  if (!amountHuman) throw new Error('Не вказано суму USDT.');
-  if (!scenarioId)  throw new Error('Не вказано scenarioId для ескроу.');
+  if (!amountHuman) throw new Error('Amount is required for lockFunds');
+  if (!scenarioId)  throw new Error('ScenarioId is required for the new escrow. Pass { amount, scenarioId }.');
 
-  // --- дані сценарію
   const { data: sc, error: se } = await supabase
     .from('scenarios')
     .select('executor_id, creator_id, date, time, execution_time')
@@ -239,72 +230,56 @@ export async function lockFunds(
   const time     = (sc as any)?.time ?? null;
   const execUnix = executionTime ?? toUnixSeconds(date ?? undefined, time ?? undefined, (sc as any)?.execution_time ?? null);
 
-  // --- валідації
-  const executorWalletRaw = exId ? await getWalletByUserId(exId) : null;
-  const executorWallet = asChecksum(executorWalletRaw || undefined);
-  if (!executorWallet) throw new Error('Не знайдено або невалідний гаманець виконавця');
+  const executorWallet = exId ? await getWalletByUserId(exId) : null;
+  if (!executorWallet) throw new Error('Не знайдено гаманець виконавця');
 
-  if (execUnix < nowSec() - 60) {
-    throw new Error('Час виконання в минулому. Онови дату/час сценарію та спробуй знову.');
-  }
-
-  const refWalletRaw = (referrerWallet !== undefined)
+  const refWallet = (referrerWallet !== undefined)
     ? (referrerWallet || null)
     : (custId ? await getReferrerWalletOfUser(custId) : null);
-  const refWallet = asChecksum(refWalletRaw || undefined) || ADDR0;
 
   const usdt      = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
-  const decimals  = await usdt.decimals().catch(() => 6);
+  const decimals  = await usdt.decimals();
   const amountWei = ethers.utils.parseUnits(String(amountHuman), decimals);
 
-  if (amountWei.lte(ZERO)) {
-    throw new Error('Сума має бути більшою за 0.');
-  }
-
-  // Баланс
+  // Перевірка балансу (зрозуміле повідомлення)
   const bal: ethers.BigNumber = await usdt.balanceOf(from);
   if (bal.lt(amountWei)) {
-    throw new Error('Недостатньо USDT на балансі для блокування цієї суми.');
+    throw new Error('Недостатньо USDT на балансі для блокування цієї суми');
   }
 
-  // --- approve
   onStep?.('approve-check');
   await ensureAllowance(signer, from, USDT_ADDRESS, ESCROW_ADDRESS, amountWei, opts);
 
-  // --- контракт і параметри
   const c   = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
 
-  // --- simulate (чітка причина revert)
   onStep?.('simulate');
   try {
-    await (c as any).callStatic.lockFunds(b32, executorWallet, refWallet, amountWei, execUnix, { value: 0 });
+    await (c as any).callStatic.lockFunds(
+      b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix,
+      { value: 0 }
+    );
   } catch (e: any) {
-    const msg = e?.reason || e?.error?.message || e?.message || 'lockFunds reverted';
-    throw new Error(`lockFunds (simulate) reverted: ${msg}`);
+    throw new Error(`lockFunds (simulate) reverted: ${e?.reason || e?.message || e}`);
   }
 
-  // --- estimate gas (з фолбеком)
   onStep?.('estimate-gas');
-  let gas: ethers.BigNumber | null = null;
+  let gas: ethers.BigNumber;
   try {
-    gas = await (c as any).estimateGas.lockFunds(b32, executorWallet, refWallet, amountWei, execUnix, { value: 0 });
-  } catch {
-    gas = null;
-  }
+    gas = await (c as any).estimateGas.lockFunds(
+      b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix,
+      { value: 0 }
+    );
+  } catch { gas = ethers.BigNumber.from(300_000); }
+
   const gasMultiplier = opts?.gasMultiplier ?? 1.2;
-  const gasLimit = (gas ?? ethers.BigNumber.from(300_000))
-    .mul(Math.round(gasMultiplier * 100)).div(100);
+  const gasLimit = gas.mul(Math.round(gasMultiplier * 100)).div(100);
 
-  // --- legacy gasPrice (BSC), без EIP-1559
-  const gasPrice = await web3.getGasPrice().catch(() => null);
-
-  // --- send
   onStep?.('send');
-  const overrides: any = { gasLimit, value: 0 };
-  if (gasPrice) overrides.gasPrice = gasPrice; // важливо для BSC/MetaMask mobile
-
-  const tx = await (c as any).lockFunds(b32, executorWallet, refWallet, amountWei, execUnix, overrides);
+  const tx = await (c as any).lockFunds(
+    b32, executorWallet, refWallet ?? ethers.constants.AddressZero, amountWei, execUnix,
+    { gasLimit, value: 0 }
+  );
   await tx.wait(opts?.minConfirmations ?? 1);
   onStep?.('mined');
   return tx;
@@ -315,8 +290,7 @@ export async function confirmCompletion(args: { scenarioId: string }) {
   await assertNetworkAndCode(eip1193, web3);
   const c = escrow(signer);
   const b32 = generateScenarioIdBytes32(args.scenarioId);
-  const gp = await web3.getGasPrice().catch(() => null);
-  const tx = await (c as any).confirmCompletion(b32, gp ? { gasPrice: gp } : {});
+  const tx = await (c as any).confirmCompletion(b32);
   await tx.wait(1);
   return tx;
 }
@@ -327,8 +301,7 @@ export async function openDisputeOnChain(scenarioId: string) {
   await assertNetworkAndCode(eip1193, web3);
   const c = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
-  const gp = await web3.getGasPrice().catch(() => null);
-  const tx = await (c as any).openDispute(b32, gp ? { gasPrice: gp } : {});
+  const tx = await (c as any).openDispute(b32);
   await tx.wait(1);
   return tx;
 }
@@ -338,8 +311,7 @@ export async function voteOnChain(scenarioId: string, forExecutor: boolean) {
   await assertNetworkAndCode(eip1193, web3);
   const c = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
-  const gp = await web3.getGasPrice().catch(() => null);
-  const tx = await (c as any).vote(b32, forExecutor, gp ? { gasPrice: gp } : {});
+  const tx = await (c as any).vote(b32, forExecutor);
   await tx.wait(1);
   return tx;
 }
@@ -349,8 +321,7 @@ export async function finalizeDisputeOnChain(scenarioId: string) {
   await assertNetworkAndCode(eip1193, web3);
   const c = escrow(signer);
   const b32 = generateScenarioIdBytes32(scenarioId);
-  const gp = await web3.getGasPrice().catch(() => null);
-  const tx = await (c as any).finalizeDispute(b32, gp ? { gasPrice: gp } : {});
+  const tx = await (c as any).finalizeDispute(b32);
   await tx.wait(1);
   return tx;
 }
