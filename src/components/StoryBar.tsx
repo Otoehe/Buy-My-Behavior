@@ -1,162 +1,499 @@
-// src/components/StoryBar.tsx
-import React, { useEffect, useState } from 'react';
+// src/components/MapView.tsx
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { supabase } from '../lib/supabase';
-import UploadBehavior from './UploadBehavior';
-import './StoryBar.css';
 
-type Behavior = {
-  id: number;
-  user_id: string | null;
-  title: string | null;
-  description: string | null;
-  ipfs_cid: string | null;
-  file_url?: string | null;
-  created_at: string;
+import ReviewsModal from './ReviewsModal';
+import StoryBar from './StoryBar';            // ⬅️ сторісбар (зафіксуємо екземпляр)
+import './Pills.css';
+import './MapView.css';
+
+const MAPBOX_ACCESS_TOKEN =
+  'pk.eyJ1IjoiYnV5bXliaWhhdmlvciIsImEiOiJjbWM4MzU3cDQxZGJ0MnFzM3NnOHhnaWM4In0.wShhGG9EvmIVxcHjBHImXw';
+const MAPBOX_STYLE =
+  `https://api.mapbox.com/styles/v1/mapbox/light-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_ACCESS_TOKEN}`;
+
+interface User {
+  id: string;
+  user_id: string;
+  name: string;
+  role: string;
+  description: string;
+  avatar_url: string;
+  latitude: number;
+  longitude: number;
+  wallet: string;
+  avg_rating?: number | null;
+  rating_count?: number | null;
+}
+interface Scenario { id: string; description: string; price: number }
+
+const CenterMap: React.FC<{ center: [number, number] }> = ({ center }) => {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(center, map.getZoom(), { animate: false });
+  }, [center, map]);
+  return null;
 };
 
-const CACHE_KEY = 'bmb:storybar:v1';
+function MoveOnClickLayer() {
+  const map = useMap();
+  useMapEvents({ click(e) { map.setView(e.latlng); } });
+  return null;
+}
 
-const isVideo = (url?: string | null) => {
-  if (!url) return false;
-  const u = url.split('?')[0].toLowerCase();
-  return /\.(mp4|webm|ogg|mov|m4v)$/.test(u);
-};
+function pctFrom10(v: number) { const x = Math.max(0, Math.min(10, v)); return (x / 10) * 100; }
 
-const buildSrc = (b: Behavior) =>
-  b.file_url || (b.ipfs_cid ? `https://gateway.lighthouse.storage/ipfs/${b.ipfs_cid}` : null);
+export default function MapView() {
+  const navigate = useNavigate();
+  const location = useLocation();
 
-// helpers: cache
-const readCache = (): Behavior[] => {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
-  } catch { return []; }
-};
-const writeCache = (items: Behavior[]) => {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify(items)); } catch {}
-};
+  // стабілізуємо обчислення режиму (щоб не «скакав» між рендерами)
+  const isSelectMode = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return location.pathname === '/map/select' || params.get('pick') === '1';
+  }, [location.pathname, location.search]);
 
-export default function StoryBar() {
-  const [items, setItems] = useState<Behavior[]>(readCache());
-  const [broken, setBroken] = useState<Set<number>>(new Set());
-  const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const mapRef = useRef<L.Map | null>(null);
 
-  // refresh from DB
-  const refresh = async () => {
-    const { data, error } = await supabase
-      .from('behaviors')
-      .select('id,user_id,title,description,ipfs_cid,file_url,created_at')
-      .order('created_at', { ascending: false })
-      .limit(24);
+  const [users, setUsers] = useState<User[]>([]);
+  const [center, setCenter] = useState<[number, number]>([50.4501, 30.5234]);
+  const [selectedProfile, setSelectedProfile] = useState<User | null>(null);
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [reviewsOpen, setReviewsOpen] = useState(false);
 
-    if (!error && Array.isArray(data)) {
-      setItems(data as Behavior[]);
-      writeCache(data as Behavior[]);
-    } else {
-      // залишаємо кеш, щоб не мигало
-      console.warn('[StoryBar] fetch error:', error?.message);
-    }
+  // ⬇️ фіксуємо екземпляр StoryBar, щоб його не ремонтувало на кожен ререндер батька
+  const storyBarElRef = useRef<JSX.Element | null>(null);
+  if (!storyBarElRef.current) storyBarElRef.current = <StoryBar />;
+
+  const drawerWidth = 340;
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const backdropRef = useRef<HTMLDivElement | null>(null);
+  const touchStartX = useRef<number | null>(null);
+  const lastX = useRef<number | null>(null);
+  const dragXRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
+
+  const setTransform = (dx: number) => {
+    dragXRef.current = dx;
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      const el = panelRef.current;
+      const bd = backdropRef.current;
+      if (el) el.style.transform = `translate3d(${dragXRef.current}px,0,0)`;
+      if (bd) {
+        const k = Math.max(0, Math.min(1, 1 - dragXRef.current / drawerWidth));
+        bd.style.opacity = String(0.35 * k);
+      }
+      rafRef.current = null;
+    });
+  };
+  const setTransition = (enabled: boolean) => {
+    const el = panelRef.current; if (!el) return;
+    el.style.transition = enabled ? 'transform 200ms cubic-bezier(.2,.8,.2,1)' : 'none';
+  };
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX; lastX.current = touchStartX.current; setTransition(false);
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (touchStartX.current == null) return;
+    const x = e.touches[0].clientX; lastX.current = x;
+    const next = Math.max(0, Math.min(x - touchStartX.current, drawerWidth));
+    setTransform(next);
+  };
+  const onTouchEnd = () => {
+    if (touchStartX.current == null || lastX.current == null) { touchStartX.current = null; lastX.current = null; return; }
+    const deltaX = lastX.current - touchStartX.current;
+    setTransition(true);
+    if (deltaX > 80) { setTransform(drawerWidth); setTimeout(() => { setTransform(0); setSelectedProfile(null); }, 180); }
+    else { setTransform(0); }
+    touchStartX.current = null; lastX.current = null;
   };
 
+  // ⬇️ один ефект — один «пакет» оновлень (менше стартових ререндерів)
   useEffect(() => {
-    let mounted = true;
+    let alive = true;
+    (async () => {
+      const [{ data: profiles, error: pErr }, { data: auth }] = await Promise.all([
+        supabase.from('profiles').select('*')
+          .not('latitude', 'is', null)
+          .not('longitude', 'is', null),
+        supabase.auth.getUser(),
+      ]);
 
-    // 1) миттєво показали кеш (він уже у useState)
-    // 2) довантажуємо свіжі дані
-    refresh();
+      if (!alive) return;
+      if (!pErr && profiles) setUsers(profiles as unknown as User[]);
 
-    // 3) realtime INSERT
-    const ch = supabase
-      .channel('sb_behaviors')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'behaviors' },
-        (payload: any) => {
-          const row = payload.new as Behavior;
-          if (!mounted) return;
-          setItems(prev => {
-            const next = prev.some(x => x.id === row.id) ? prev : [row, ...prev].slice(0, 24);
-            writeCache(next);
-            return next;
-          });
+      const user = auth?.user;
+      if (user) {
+        const { data: coords } = await supabase
+          .from('profiles')
+          .select('latitude, longitude')
+          .eq('user_id', user.id)
+          .single();
+        if (coords?.latitude && coords?.longitude) {
+          setCenter([coords.latitude, coords.longitude]);
         }
-      )
-      .subscribe();
-
-    // 4) локальна подія від UploadBehavior (дублюємо на всяк випадок)
-    const onUploaded = () => refresh();
-    window.addEventListener('behaviorUploaded', onUploaded as any);
-
-    return () => {
-      mounted = false;
-      try { ch.unsubscribe(); } catch {}
-      window.removeEventListener('behaviorUploaded', onUploaded as any);
-    };
+      }
+    })();
+    return () => { alive = false; };
   }, []);
 
-  const markBroken = (id: number) => setBroken(prev => new Set(prev).add(id));
+  useEffect(() => {
+    if (!isSelectMode) return;
+    const lat = Number(localStorage.getItem('latitude'));
+    const lng = Number(localStorage.getItem('longitude'));
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      setCenter([lat, lng]);
+      requestAnimationFrame(() => {
+        const m = mapRef.current;
+        if (m) m.setView({ lat, lng }, m.getZoom(), { animate: false });
+      });
+    }
+    setSelectedProfile(null);
+    setReviewsOpen(false);
+  }, [isSelectMode]);
+
+  useEffect(() => {
+    if (isSelectMode) return;
+    const profileId = (location.state as any)?.profile;
+    if (profileId && users.length > 0) {
+      const u = users.find((x) => x.user_id === profileId);
+      if (u) {
+        setSelectedProfile(u);
+        setCenter([u.latitude, u.longitude]);
+        fetchScenarios(u);
+        setReviewsOpen(false);
+      }
+    }
+  }, [location.state, users, isSelectMode]);
+
+  async function fetchScenarios(u: User) {
+    const { data } = await supabase
+      .from('scenario_drafts')
+      .select('id, description, price')
+      .eq('user_id', u.user_id)
+      .eq('hidden', false);
+    setScenarios((data || []) as unknown as Scenario[]);
+  }
+
+  function createAvatarIcon(avatarUrl: string) {
+    return L.divIcon({
+      html: `<div class="custom-marker small"><img src="${avatarUrl}" class="marker-img"/></div>`,
+      className: '',
+      iconSize: [60, 60],
+      iconAnchor: [10, 10],
+    });
+  }
+
+  function handleMarkerClick(u: User) {
+    if (isSelectMode) return;
+    setSelectedProfile(u);
+    fetchScenarios(u);
+    setReviewsOpen(false);
+    setTimeout(() => { setTransform(0); setTransition(true); }, 0);
+  }
+
+  function handleMapClick() {
+    if (isSelectMode) return;
+    if (selectedProfile || reviewsOpen) { setSelectedProfile(null); setReviewsOpen(false); }
+  }
+
+  function handleOrderClick(e?: React.MouseEvent) {
+    e?.preventDefault(); e?.stopPropagation();
+    if (!selectedProfile) return;
+    localStorage.setItem('scenario_receiverId', selectedProfile.user_id);
+    if (selectedProfile.latitude && selectedProfile.longitude) {
+      localStorage.setItem('latitude', String(selectedProfile.latitude));
+      localStorage.setItem('longitude', String(selectedProfile.longitude));
+    }
+    navigate(`/scenario/new?executor_id=${selectedProfile.user_id}`, {
+      state: {
+        executor_id: selectedProfile.user_id,
+        receiverId: selectedProfile.user_id,
+        latitude: selectedProfile.latitude,
+        longitude: selectedProfile.longitude,
+        from: '/map',
+      },
+    });
+  }
+
+  const confirmCenterAsLocation = () => {
+    const m = mapRef.current; if (!m) return;
+    const c = m.getCenter();
+    try {
+      localStorage.setItem('latitude', String(c.lat));
+      localStorage.setItem('longitude', String(c.lng));
+      sessionStorage.setItem('scenario_visited_map', '1');
+    } catch {}
+    const params = new URLSearchParams(location.search);
+    const executorId =
+      params.get('executor_id') || localStorage.getItem('scenario_receiverId') || '';
+    navigate(`/scenario/new${executorId ? `?executor_id=${encodeURIComponent(executorId)}` : ''}`,
+      { replace: true, state: { from: '/map/select' } });
+  };
+
+  const avg = selectedProfile?.avg_rating ?? 10;
 
   return (
-    <div className="story-bar" data-bmb-storybar="">
-      <div className="sb-container">
-        {/* Кнопка "+" */}
-        <button
-          type="button"
-          className="sb-item sb-item-add"
-          onClick={() => setIsUploadOpen(true)}
-          aria-label="Додати Behavior"
-          title="Додати Behavior"
+    <div className="map-view-container" onClick={handleMapClick}>
+      {/* ⬇️ СТОРІСБАР під навбаром (елемент зафіксований і не ремонтується) */}
+      {!isSelectMode && (
+        <div
+          className="storybar-overlay"
+          style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
         >
-          <span className="sb-plus">+</span>
-        </button>
+          {storyBarElRef.current}
+        </div>
+      )}
 
-        {/* Історії */}
-        {items.map((b) => {
-          const src = buildSrc(b);
-          const isBroken = broken.has(b.id);
-          return (
-            <button
-              key={b.id}
-              type="button"
-              className="sb-item"
-              title={b.title ?? 'Переглянути'}
-              onClick={() => window.location.assign('/behaviors')}
-            >
-              {src && !isBroken ? (
-                isVideo(src) ? (
-                  <video
-                    className="sb-media"
-                    src={`${src}#t=0.001`}
-                    preload="metadata"
-                    muted
-                    playsInline
-                    onError={() => markBroken(b.id)}
-                  />
-                ) : (
-                  <img
-                    className="sb-media"
-                    src={src}
-                    alt=""
-                    loading="lazy"
-                    decoding="async"
-                    crossOrigin="anonymous"
-                    onError={() => markBroken(b.id)}
-                  />
-                )
-              ) : (
-                <div className="sb-fallback" />
-              )}
-            </button>
-          );
-        })}
+      <MapContainer
+        center={center}
+        zoom={15}
+        className="map-container"
+        whenCreated={(m) => { mapRef.current = m; }}
+        updateWhenIdle={true}
+        preferCanvas={false}
+        inertia={false}
+        zoomAnimation={false}
+        fadeAnimation={false}
+        markerZoomAnimation={false}
+      >
+        <CenterMap center={center} />
+        <TileLayer
+          url={MAPBOX_STYLE}
+          attribution='&copy; <a href="https://www.mapbox.com/about/maps/">Mapbox</a>'
+          tileSize={512}
+          zoomOffset={-1}
+        />
+
+        {isSelectMode && <MoveOnClickLayer />}
+
+        {!isSelectMode && users.map((u, idx) => (
+          <Marker
+            key={u.user_id || u.id || idx}
+            position={[u.latitude + idx * 0.00015, u.longitude + idx * 0.00015]}
+            icon={createAvatarIcon(u.avatar_url)}
+            eventHandlers={{ click: (e) => { e.originalEvent.stopPropagation(); handleMarkerClick(u); } }}
+          />
+        ))}
+      </MapContainer>
+
+      {isSelectMode && (
+        <>
+          <div
+            className="center-beacon"
+            style={{
+              position: 'absolute',
+              left: '50%', top: '50%', transform: 'translate(-50%, -100%)',
+              width: 26, height: 26, borderRadius: '50%',
+              background: '#ff385c',
+              boxShadow: '0 0 0 6px rgba(255,56,92,.25), 0 6px 16px rgba(0,0,0,.18)',
+              zIndex: 4000, pointerEvents: 'none',
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              left: '50%', top: '50%', transform: 'translateX(-50%)',
+              width: 22, height: 6, borderRadius: 999,
+              background: 'rgba(0,0,0,.18)', filter: 'blur(1px)',
+              zIndex: 3999, pointerEvents: 'none',
+            }}
+          />
+          <button
+            type="button"
+            onClick={confirmCenterAsLocation}
+            style={{
+              position: 'absolute',
+              left: '50%', bottom: 18, transform: 'translateX(-50%)',
+              padding: '10px 16px', borderRadius: 999,
+              background: '#000', color: '#fff', fontWeight: 800, border: 0,
+              boxShadow: '0 12px 28px rgba(0,0,0,.25)', zIndex: 5000, cursor: 'pointer',
+            }}
+          >
+            ✅ Підтвердити це місце
+          </button>
+          <div
+            style={{
+              position: 'absolute',
+              top: 64, left: '50%', transform: 'translateX(-50%)',
+              padding: '6px 10px', borderRadius: 9999,
+              background: '#000', color: '#fff', fontSize: 12, opacity: 0.85,
+              zIndex: 5000, pointerEvents: 'none',
+            }}
+          >
+            Перемісти карту — маячок завжди в центрі
+          </div>
+        </>
+      )}
+
+      {!isSelectMode && selectedProfile && (
+        <div
+          ref={backdropRef}
+          onClick={() => setSelectedProfile(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1999,                   // ⬅️ над сторісбаром
+            background: 'rgba(0,0,0,0.35)', opacity: 0.35, transition: 'opacity 200ms ease',
+          }}
+        />
+      )}
+
+      {!isSelectMode && selectedProfile && (
+        <div
+          ref={panelRef}
+          className="drawer-overlay"
+          style={{
+            position: 'fixed', zIndex: 2000, top: 0, right: 0, bottom: 0, // ⬅️ ще вище
+            width: drawerWidth,
+            background: '#fff', boxShadow: '-8px 0 24px rgba(0,0,0,0.22)',
+            padding: 20, overflowY: 'auto',
+            transform: 'translate3d(0,0,0)',
+            transition: 'transform 200ms cubic-bezier(.2,.8,.2,1)',
+            touchAction: 'pan-y', willChange: 'transform',
+            backgroundImage:
+              'linear-gradient(90deg, rgba(0,0,0,0.04) 0, rgba(0,0,0,0) 24px), linear-gradient(#fff,#fff)',
+            backgroundRepeat: 'no-repeat',
+            backgroundSize: '24px 100%, 100% 100%',
+            backgroundPosition: 'left top, left top',
+          }}
+          onClick={(e) => { e.stopPropagation(); }}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
+        >
+          <button
+            type="button" aria-label="Закрити"
+            onClick={() => setSelectedProfile(null)}
+            style={{
+              position: 'absolute', top: 10, right: 10,
+              width: 36, height: 36, borderRadius: 10,
+              background: 'rgba(0,0,0,0.04)',
+              border: '1px solid rgba(0,0,0,0.08)',
+              display: 'grid', placeItems: 'center', cursor: 'pointer',
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#111" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
+
+          <DrawerContent
+            selectedProfile={selectedProfile}
+            scenarios={scenarios}
+            avg={avg}
+            onOpenReviews={() => setReviewsOpen(true)}
+            onOrderClick={handleOrderClick}
+          />
+        </div>
+      )}
+
+      {reviewsOpen && selectedProfile && (
+        <ReviewsModal targetUserId={selectedProfile.user_id} onClose={() => setReviewsOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+function DrawerContent({
+  selectedProfile, scenarios, avg, onOpenReviews, onOrderClick,
+}: {
+  selectedProfile: User; scenarios: Scenario[]; avg: number;
+  onOpenReviews: () => void; onOrderClick: (e?: React.MouseEvent) => void;
+}) {
+  return (
+    <div>
+      {selectedProfile.avatar_url && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <img
+            src={selectedProfile.avatar_url}
+            alt="avatar"
+            style={{
+              width: 110, height: 110, borderRadius: '50%', objectFit: 'cover',
+              boxShadow: '0 4px 10px rgba(0,0,0,0.12)', border: '5px solid #fff',
+            }}
+          />
+        </div>
+      )}
+
+      <h2 style={{ fontSize: 20, fontWeight: 700, textAlign: 'center', marginBottom: 6 }}>
+        {selectedProfile.name}
+      </h2>
+
+      <div className="rating-row">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="stars-wrap" title={`${avg.toFixed(1)}/10`}>
+            <div className="stars-bg">★★★★★★★★★★</div>
+            <div className="stars-fill" style={{ width: `${pctFrom10(avg)}%` }}>★★★★★★★★★★</div>
+          </div>
+          <span className="rating-number">{avg.toFixed(1)}</span>
+        </div>
+
+        <button type="button" className="pill ghost" style={{ marginLeft: 8 }} onClick={onOpenReviews}>
+          Відгуки
+        </button>
       </div>
 
-      {/* Жива модалка аплоаду */}
-      {isUploadOpen && (
-        <UploadBehavior onClose={() => setIsUploadOpen(false)} />
-      )}
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8, marginBottom: 16 }}>
+        <span
+          style={{
+            background: '#111827', color: '#fff', padding: '4px 12px',
+            borderRadius: 999, fontSize: 12, fontWeight: 600, textTransform: 'capitalize',
+          }}
+        >
+          {selectedProfile.role}
+        </span>
+      </div>
+
+      <p style={{ fontSize: 14, color: '#475569', marginBottom: 16, textAlign: 'left' }}>
+        {selectedProfile.description}
+      </p>
+
+      <div>
+        <strong style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 8 }}>
+          СЦЕНАРІЇ ВИКОНАВЦЯ
+        </strong>
+
+        {scenarios.length === 0 ? (
+          <p style={{ color: '#94a3b8' }}>Немає доступних сценаріїв</p>
+        ) : (
+          scenarios.map((s) => (
+            <div
+              key={s.id}
+              style={{
+                padding: 10, marginTop: 8, border: '1px solid #e2e8f0', borderRadius: 12,
+                background: 'rgba(255,182,193,0.2)', display: 'flex',
+                alignItems: 'center', justifyContent: 'space-between', gap: 8,
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>{s.description}</div>
+              <div
+                style={{
+                  background: '#fff', color: '#6b7280', borderRadius: 999,
+                  padding: '3px 10px', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap',
+                  border: '1px solid #e5e7eb',
+                }}
+              >
+                {s.price} USDT
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <button
+        style={{
+          position: 'sticky', bottom: 16, marginTop: 24, width: '100%',
+          padding: '12px 16px', background: '#000', color: '#fff',
+          border: 'none', borderRadius: 999, cursor: 'pointer', fontWeight: 700,
+        }}
+        onClick={onOrderClick}
+      >
+        Замовити поведінку
+      </button>
     </div>
   );
 }

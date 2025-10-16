@@ -1,11 +1,16 @@
 /* src/components/StoryBar.css */
 
+/* Полиця під навбаром: без щілин та мерехтінь */
 .story-bar{
   position: relative;
   z-index: 1;
   width: 100%;
-  background: transparent;
+  background: #fff;
+  margin: 0;
+  will-change: transform, opacity;
+  transform: translateZ(0);
 }
+
 :root{ --sb-h: 80px; }
 
 .sb-container{
@@ -15,18 +20,18 @@
   -webkit-overflow-scrolling:touch;
   padding:8px 12px;
   background:#fff;
+  box-shadow:0 1px 0 rgba(0,0,0,.06);
   scrollbar-gutter:stable both-edges;
   scrollbar-width:none;
-  box-shadow:0 1px 0 rgba(0,0,0,.06);
 }
 .sb-container::-webkit-scrollbar{ display:none; }
 
 .sb-item{
   width:64px; height:64px; flex:0 0 auto;
   border-radius:9999px;
-  border:2px solid #fff;           /* біла обводка */
-  background:#f6f7f9;              /* сірий фон усередині */
-  box-shadow:0 4px 12px rgba(0,0,0,.15); /* сіра тінь */
+  border:2px solid #fff;
+  background:#f6f7f9;
+  box-shadow:0 4px 12px rgba(0,0,0,.15);
   display:inline-flex; align-items:center; justify-content:center;
   padding:0; cursor:pointer; position:relative;
   transition:transform .12s ease, box-shadow .12s ease;
@@ -48,4 +53,10 @@
   background:
     radial-gradient(circle at 30% 30%, rgba(0,0,0,.06), transparent 40%),
     repeating-linear-gradient(45deg,#eee,#eee 6px,#f7f7f7 6px,#f7f7f7 12px);
+}
+
+/* Рендер-оптимізація */
+.story-bar,
+.sb-container{
+  contain: content;
 }

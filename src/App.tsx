@@ -1,53 +1,64 @@
-import React, { useEffect, useState, Suspense, lazy } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import type { User } from '@supabase/supabase-js';
-import { supabase } from './lib/supabase';
+import React, { useEffect, useState, Suspense, lazy } from "react";
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import type { User } from "@supabase/supabase-js";
+import { supabase } from "./lib/supabase";
 
-import BehaviorsFeed   from './components/BehaviorsFeed';
-import NavigationBar   from './components/NavigationBar';
-import Register        from './components/Register';
-import Profile         from './components/Profile';
-import AuthCallback    from './components/AuthCallback';
-import A2HS            from './components/A2HS';
+import BehaviorsFeed   from "./components/BehaviorsFeed";
+import NavigationBar   from "./components/NavigationBar";
+import Profile         from "./components/Profile";
+import AuthCallback    from "./components/AuthCallback";
+import A2HS            from "./components/A2HS";
 
-import useViewportVH        from './lib/useViewportVH';
-import useGlobalImageHints  from './lib/useGlobalImageHints';
-import NetworkToast         from './components/NetworkToast';
-import SWUpdateToast        from './components/SWUpdateToast';
-import BmbModalHost         from './components/BmbModalHost';
+import useViewportVH        from "./lib/useViewportVH";
+import useGlobalImageHints  from "./lib/useGlobalImageHints";
+import NetworkToast         from "./components/NetworkToast";
+import SWUpdateToast        from "./components/SWUpdateToast";
+import BmbModalHost         from "./components/BmbModalHost";
+import { isMetaMaskInApp }  from "./lib/isMetaMaskBrowser";
 
-// 👇 NEW: глобальний shim, що робить connect() перед будь-яким request()
-import { installProviderConnectShim } from './lib/providerConnectShim';
+// ⬇ сторож редиректів під час ескроу (ШЛЯХ У COMPONENTS!)
+import RouterGuard from "./components/RouterGuard";
 
-// ── одноразова ініціалізація шима (захист від повторів при HMR)
-declare global { interface Window { __bmbShimInstalled?: boolean } }
-if (!window.__bmbShimInstalled) {
-  window.__bmbShimInstalled = true;
-  void installProviderConnectShim({ chainIdHex: '0x38', autoEnsureBSC: true });
-}
+// lazy-екрани
+const MapView           = lazy(() => import("./components/MapView"));
+const MyOrders          = lazy(() => import("./components/MyOrders"));
+const ReceivedScenarios = lazy(() => import("./components/ReceivedScenarios"));
+const Manifest          = lazy(() => import("./components/Manifest"));
+const ScenarioForm      = lazy(() => import("./components/ScenarioForm"));
+const ScenarioLocation  = lazy(() => import("./components/ScenarioLocation"));
+const BmbModalsDemo     = lazy(() => import("./components/BmbModalsDemo"));
+const EscrowHandoff     = lazy(() => import("./components/EscrowHandoff"));
+// ⬇ сторінка підтвердження ескроу (ТЕЖ У COMPONENTS!)
+const EscrowConfirm     = lazy(() => import("./components/EscrowConfirm"));
 
-const MapView           = lazy(() => import('./components/MapView'));
-const MyOrders          = lazy(() => import('./components/MyOrders'));
-const ReceivedScenarios = lazy(() => import('./components/ReceivedScenarios'));
-const Manifest          = lazy(() => import('./components/Manifest'));
-const ScenarioForm      = lazy(() => import('./components/ScenarioForm'));
-const ScenarioLocation  = lazy(() => import('./components/ScenarioLocation'));
-const BmbModalsDemo     = lazy(() => import('./components/BmbModalsDemo'));
-
-function RequireAuth({ user, children }: { user: User | null | undefined; children: React.ReactElement; }) {
+/** Гейт для приватних маршрутів */
+function RequireAuth({
+  user,
+  children,
+}: {
+  user: User | null | undefined;
+  children: React.ReactElement;
+}) {
   const location = useLocation();
   if (user === undefined) return null;
-  if (user === null) return <Navigate to="/register" replace state={{ from: location.pathname }} />;
+  if (user === null) {
+    return (
+      <Navigate
+        to="/escrow/approve?next=/my-orders"
+        replace
+        state={{ from: location.pathname }}
+      />
+    );
+  }
   return children;
 }
 
-function RedirectIfAuthed({ user, children }: { user: User | null | undefined; children: React.ReactElement; }) {
-  if (user === undefined) return null;
-  if (user) return <Navigate to="/map" replace />;
-  return children;
+/** Домашній роут: якщо MetaMask — одразу на підпис/ескроу, інакше на карту */
+function HomeGate() {
+  return isMetaMaskInApp()
+    ? <Navigate to="/escrow/approve?next=/my-orders" replace />
+    : <Navigate to="/map" replace />;
 }
-
-function HomeGate() { return <Navigate to="/map" replace />; }
 
 export default function App() {
   useViewportVH();
@@ -55,22 +66,46 @@ export default function App() {
 
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const location = useLocation();
+  const navigate = useNavigate();
 
+  // Підписка на стан авторизації Supabase
   useEffect(() => {
     let mounted = true;
-    supabase.auth.getSession().then(({ data }) => { if (mounted) setUser(data.session?.user ?? null); });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => { setUser(session?.user ?? null); });
-    return () => { mounted = false; sub.subscription.unsubscribe(); };
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (mounted) setUser(data.session?.user ?? null);
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
+
+  // Автоперенаправлення у MetaMask-браузері з домашньої / register
+  useEffect(() => {
+    if (!isMetaMaskInApp()) return;
+    const p = location.pathname;
+    if (p === "/" || p === "/register") {
+      navigate("/escrow/approve?next=/my-orders", { replace: true });
+    }
+  }, [location.pathname, navigate]);
 
   if (user === undefined) return null;
 
-  // ⬇️ Режим “чиста карта”: де не показуємо навбар та A2HS
-  const HIDE_UI_ROUTES = new Set<string>(['/map/select']);
+  // На цих екранах ховаємо глобальний нав/A2HS
+  const HIDE_UI_ROUTES = new Set<string>([
+    "/map/select",
+    "/escrow/approve",
+    "/escrow/confirm", // тут теж ховаємо
+  ]);
   const pathname = location.pathname;
   const hideNavAndA2HS = HIDE_UI_ROUTES.has(pathname);
-
-  const showGlobalA2HS = !hideNavAndA2HS && pathname !== '/profile';
+  const showGlobalA2HS = !hideNavAndA2HS && pathname !== "/profile";
 
   return (
     <>
@@ -80,27 +115,29 @@ export default function App() {
       {!hideNavAndA2HS && <NavigationBar />}
       <BmbModalHost />
 
+      {/* глобальний сторож, який під час lockIntent повертає на /escrow/confirm */}
+      <RouterGuard />
+
       <Suspense fallback={null}>
         <Routes>
           <Route path="/" element={<HomeGate />} />
 
           {/* Публічні */}
           <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/escrow/approve" element={<EscrowHandoff />} />
+          <Route path="/escrow/confirm" element={<EscrowConfirm />} />
+
+          {/* /register прибрали — редіректимо на escrow */}
+          <Route
+            path="/register"
+            element={<Navigate to="/escrow/approve?next=/my-orders" replace />}
+          />
+
           <Route path="/map"          element={<MapView />} />
           <Route path="/map/select"   element={<ScenarioLocation />} />
           <Route path="/behaviors"    element={<BehaviorsFeed />} />
           <Route path="/manifest"     element={<Manifest />} />
           <Route path="/modals"       element={<BmbModalsDemo />} />
-
-          {/* Реєстрація */}
-          <Route
-            path="/register"
-            element={
-              <RedirectIfAuthed user={user}>
-                <Register />
-              </RedirectIfAuthed>
-            }
-          />
 
           {/* Приватні */}
           <Route

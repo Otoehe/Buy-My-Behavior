@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+// src/components/MapView.tsx
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -6,7 +7,7 @@ import 'leaflet/dist/leaflet.css';
 import { supabase } from '../lib/supabase';
 
 import ReviewsModal from './ReviewsModal';
-import StoryBar from './StoryBar';            // ⬅️ сторісбар
+import StoryBar from './StoryBar';
 import './Pills.css';
 import './MapView.css';
 
@@ -32,7 +33,9 @@ interface Scenario { id: string; description: string; price: number }
 
 const CenterMap: React.FC<{ center: [number, number] }> = ({ center }) => {
   const map = useMap();
-  useEffect(() => { map.setView(center, map.getZoom(), { animate: false }); }, [center, map]);
+  useEffect(() => {
+    map.setView(center, map.getZoom(), { animate: false });
+  }, [center, map]);
   return null;
 };
 
@@ -48,8 +51,11 @@ export default function MapView() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const params = new URLSearchParams(location.search);
-  const isSelectMode = location.pathname === '/map/select' || params.get('pick') === '1';
+  // стабільне визначення режиму
+  const isSelectMode = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return location.pathname === '/map/select' || params.get('pick') === '1';
+  }, [location.pathname, location.search]);
 
   const mapRef = useRef<L.Map | null>(null);
 
@@ -59,6 +65,11 @@ export default function MapView() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
 
+  // StoryBar фіксуємо, щоб не ремонтувався
+  const storyBarElRef = useRef<JSX.Element | null>(null);
+  if (!storyBarElRef.current) storyBarElRef.current = <StoryBar />;
+
+  // ————— дровер (свайп) —————
   const drawerWidth = 340;
   const panelRef = useRef<HTMLDivElement | null>(null);
   const backdropRef = useRef<HTMLDivElement | null>(null);
@@ -103,49 +114,76 @@ export default function MapView() {
     touchStartX.current = null; lastX.current = null;
   };
 
+  // ————— завантаження даних —————
   useEffect(() => {
+    let alive = true;
     (async () => {
-      const { data, error } = await supabase
-        .from('profiles').select('*')
-        .not('latitude', 'is', null)
-        .not('longitude', 'is', null);
-      if (!error && data) setUsers(data as unknown as User[]);
+      const [{ data: profiles, error: pErr }, { data: auth }] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('id,user_id,name,role,description,avatar_url,latitude,longitude,wallet,avg_rating,rating_count')
+          .not('latitude', 'is', null)
+          .not('longitude', 'is', null)
+          .limit(300), // важливо: не рендеримо тисячі маркерів
+        supabase.auth.getUser(),
+      ]);
+
+      if (!alive) return;
+
+      if (!pErr && profiles) {
+        setUsers((profiles as unknown as User[]).slice(0, 300));
+      }
+
+      const user = auth?.user;
+      if (user) {
+        const { data: coords } = await supabase
+          .from('profiles')
+          .select('latitude, longitude')
+          .eq('user_id', user.id)
+          .single();
+        if (coords?.latitude && coords?.longitude) {
+          setCenter([coords.latitude, coords.longitude]);
+        }
+      }
     })();
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase
-        .from('profiles').select('latitude, longitude')
-        .eq('user_id', user.id).single();
-      if (data?.latitude && data?.longitude) setCenter([data.latitude, data.longitude]);
-    })();
+    return () => { alive = false; };
   }, []);
 
+  // ————— режим вибору точки —————
   useEffect(() => {
     if (!isSelectMode) return;
     const lat = Number(localStorage.getItem('latitude'));
     const lng = Number(localStorage.getItem('longitude'));
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
       setCenter([lat, lng]);
-      requestAnimationFrame(() => { const m = mapRef.current; if (m) m.setView({ lat, lng }, m.getZoom(), { animate: false }); });
+      requestAnimationFrame(() => {
+        const m = mapRef.current;
+        if (m) m.setView({ lat, lng }, m.getZoom(), { animate: false });
+      });
     }
     setSelectedProfile(null);
     setReviewsOpen(false);
   }, [isSelectMode]);
 
+  // ————— ОЧОЛОВНИЙ ФІКС: читаємо profileId лише 1 раз —————
+  const profileIdOnceRef = useRef<string | null>((location.state as any)?.profile ?? null);
+
   useEffect(() => {
     if (isSelectMode) return;
-    const profileId = (location.state as any)?.profile;
-    if (profileId && users.length > 0) {
-      const u = users.find((x) => x.user_id === profileId);
-      if (u) {
-        setSelectedProfile(u);
-        setCenter([u.latitude, u.longitude]);
-        fetchScenarios(u);
-        setReviewsOpen(false);
-      }
-    }
-  }, [location.state, users, isSelectMode]);
+    const profileId = profileIdOnceRef.current;
+    if (!profileId || users.length === 0) return;
+
+    const u = users.find((x) => x.user_id === profileId);
+    if (!u) { profileIdOnceRef.current = null; return; }
+
+    setSelectedProfile(u);
+    setCenter([u.latitude, u.longitude]);
+    fetchScenarios(u);
+    setReviewsOpen(false);
+
+    // «спалюємо» значення — більше не реагуємо
+    profileIdOnceRef.current = null;
+  }, [users, isSelectMode]);
 
   async function fetchScenarios(u: User) {
     const { data } = await supabase
@@ -181,6 +219,7 @@ export default function MapView() {
   function handleOrderClick(e?: React.MouseEvent) {
     e?.preventDefault(); e?.stopPropagation();
     if (!selectedProfile) return;
+    // ⚠️ не ламати рядок — саме так, з обома лапками :)
     localStorage.setItem('scenario_receiverId', selectedProfile.user_id);
     if (selectedProfile.latitude && selectedProfile.longitude) {
       localStorage.setItem('latitude', String(selectedProfile.latitude));
@@ -205,20 +244,21 @@ export default function MapView() {
       localStorage.setItem('longitude', String(c.lng));
       sessionStorage.setItem('scenario_visited_map', '1');
     } catch {}
-    const executorId =
-      params.get('executor_id') || localStorage.getItem('scenario_receiverId') || '';
-    navigate(`/scenario/new${executorId ? `?executor_id=${encodeURIComponent(executorId)}` : ''}`,
-      { replace: true, state: { from: '/map/select' } });
+    const params = new URLSearchParams(location.search);
+    const executorId = params.get('executor_id') || localStorage.getItem('scenario_receiverId') || '';
+    navigate(
+      `/scenario/new${executorId ? `?executor_id=${encodeURIComponent(executorId)}` : ''}`,
+      { replace: true, state: { from: '/map/select' } }
+    );
   };
 
   const avg = selectedProfile?.avg_rating ?? 10;
 
   return (
     <div className="map-view-container" onClick={handleMapClick}>
-      {/* ⬇️ СТОРІСБАР під навбаром і нижче зета шторки */}
       {!isSelectMode && (
-        <div className="storybar-overlay">
-          <StoryBar />
+        <div className="storybar-overlay" style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}>
+          {storyBarElRef.current}
         </div>
       )}
 
@@ -227,7 +267,7 @@ export default function MapView() {
         zoom={15}
         className="map-container"
         whenCreated={(m) => { mapRef.current = m; }}
-        updateWhenIdle={true}
+        updateWhenIdle
         preferCanvas={false}
         inertia={false}
         zoomAnimation={false}
@@ -244,7 +284,7 @@ export default function MapView() {
 
         {isSelectMode && <MoveOnClickLayer />}
 
-        {!isSelectMode && users.map((u, idx) => (
+        {!isSelectMode && (users.slice(0, 300)).map((u, idx) => (
           <Marker
             key={u.user_id || u.id || idx}
             position={[u.latitude + idx * 0.00015, u.longitude + idx * 0.00015]}
@@ -308,7 +348,7 @@ export default function MapView() {
           ref={backdropRef}
           onClick={() => setSelectedProfile(null)}
           style={{
-            position: 'fixed', inset: 0, zIndex: 1999,                   // ⬅️ над сторісбаром
+            position: 'fixed', inset: 0, zIndex: 1999,
             background: 'rgba(0,0,0,0.35)', opacity: 0.35, transition: 'opacity 200ms ease',
           }}
         />
@@ -319,7 +359,7 @@ export default function MapView() {
           ref={panelRef}
           className="drawer-overlay"
           style={{
-            position: 'fixed', zIndex: 2000, top: 0, right: 0, bottom: 0, // ⬅️ ще вище
+            position: 'fixed', zIndex: 2000, top: 0, right: 0, bottom: 0,
             width: drawerWidth,
             background: '#fff', boxShadow: '-8px 0 24px rgba(0,0,0,0.22)',
             padding: 20, overflowY: 'auto',

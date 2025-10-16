@@ -1,50 +1,196 @@
-<!-- Title/description -->
-<title>Buy My Behavior — Web3 платформа для угод з поведінками (USDT, BSC, escrow 90/5/5)</title>
-<meta name="description" content="BMB — платформа, де замовники та виконавці укладають угоди щодо 'поведінок'. Захист угоди — escrow у USDT на Binance Smart Chain: 90% виконавцю, 5% рефералу, 5% платформі.">
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#ffcdd6" />
 
-<!-- Дозвіл індексації -->
-<meta name="robots" content="index,follow">
+    <!-- Title/description -->
+    <title>
+      Buy My Behavior — Web3 платформа для угод з поведінками (USDT, BSC, escrow 90/5/5)
+    </title>
+    <meta
+      name="description"
+      content="BMB — платформа, де замовники та виконавці укладають угоди щодо 'поведінок'. Захист угоди — escrow у USDT на Binance Smart Chain: 90% виконавцю, 5% рефералу, 5% платформі."
+    />
+    <meta name="robots" content="index,follow" />
 
-<!-- Мова + канонічна адреса -->
-<link rel="canonical" href="https://www.buymybehavior.com/">
-<link rel="alternate" href="https://www.buymybehavior.com/" hreflang="uk" />
-<link rel="alternate" href="https://www.buymybehavior.com/" hreflang="x-default" />
+    <!-- Canonical + hreflang -->
+    <link rel="canonical" href="https://www.buymybehavior.com/" />
+    <link rel="alternate" href="https://www.buymybehavior.com/" hreflang="uk" />
+    <link rel="alternate" href="https://www.buymybehavior.com/" hreflang="x-default" />
 
-<!-- Open Graph / Twitter -->
-<meta property="og:type" content="website">
-<meta property="og:url" content="https://www.buymybehavior.com/">
-<meta property="og:title" content="Buy My Behavior — Web3 платформа для угод з поведінками">
-<meta property="og:description" content="Escrow у USDT на BSC: 90% виконавцю, 5% рефералу, 5% платформі. Геолокація, реферальна система, смартконтракт.">
-<meta property="og:image" content="https://www.buymybehavior.com/og-cover.jpg"> <!-- поклади og-cover.jpg у public/ -->
+    <!-- OG / Twitter -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://www.buymybehavior.com/" />
+    <meta
+      property="og:title"
+      content="Buy My Behavior — Web3 платформа для угод з поведінками"
+    />
+    <meta
+      property="og:description"
+      content="Escrow у USDT на BSC: 90% виконавцю, 5% рефералу, 5% платформі. Геолокація, реферальна система, смартконтракт."
+    />
+    <meta property="og:image" content="https://www.buymybehavior.com/og-cover.jpg" />
 
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Buy My Behavior — Web3 платформа">
-<meta name="twitter:description" content="Escrow у USDT на BSC: 90/5/5.">
-<meta name="twitter:image" content="https://www.buymybehavior.com/og-cover.jpg">
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Buy My Behavior — Web3 платформа" />
+    <meta name="twitter:description" content="Escrow у USDT на BSC: 90/5/5." />
+    <meta name="twitter:image" content="https://www.buymybehavior.com/og-cover.jpg" />
 
-<!-- (Опціонально) верифікація Search Console: вставиш свій токен -->
-<!-- <meta name="google-site-verification" content="PASTE_TOKEN_HERE" /> -->
+    <!-- (опц.) Google Search Console -->
+    <!-- <meta name="google-site-verification" content="PASTE_TOKEN_HERE" /> -->
 
-<!-- JSON-LD: Organization + WebSite -->
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "Organization",
-  "name": "Buy My Behavior",
-  "url": "https://www.buymybehavior.com/",
-  "logo": "https://www.buymybehavior.com/icons/icon-512x512.png"
-}
-</script>
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "WebSite",
-  "name": "Buy My Behavior",
-  "url": "https://www.buymybehavior.com/",
-  "potentialAction": {
-    "@type": "SearchAction",
-    "target": "https://www.buymybehavior.com/search?q={query}",
-    "query-input": "required name=query"
-  }
-}
-</script>
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
+
+    <!-- JSON-LD: Organization + WebSite -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "Buy My Behavior",
+        "url": "https://www.buymybehavior.com/",
+        "logo": "https://www.buymybehavior.com/icons/icon-512.png"
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Buy My Behavior",
+        "url": "https://www.buymybehavior.com/",
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": "https://www.buymybehavior.com/search?q={query}",
+          "query-input": "required name=query"
+        }
+      }
+    </script>
+
+    <style>
+      :root {
+        --brand-bg: #ffcdd6; /* фірмовий фон заставки */
+        --brand-ink: #0b0f19; /* колір тексту логотипу */
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background: #fff;
+        color: #111;
+        font-family: Inter, "SF Pro Display", system-ui, -apple-system, Segoe UI,
+          Roboto, Arial, sans-serif;
+      }
+
+      /* ----- БРЕНД-ЗАСТАВКА (оверлей до старту React) ----- */
+      #boot {
+        position: fixed;
+        inset: 0;
+        background: var(--brand-bg);
+        display: grid;
+        place-items: center;
+        z-index: 9999;
+        transition: opacity 360ms ease, visibility 360ms ease;
+      }
+      #boot.fade-out {
+        opacity: 0;
+        visibility: hidden;
+      }
+      .boot-card {
+        width: min(72vw, 320px);
+        aspect-ratio: 1 / 1;
+        border-radius: 28px;
+        background: rgba(255, 255, 255, 0.55);
+        box-shadow: 0 8px 40px rgba(0, 0, 0, 0.14);
+        display: grid;
+        place-items: center;
+        animation: pop 320ms ease-out both;
+      }
+      .boot-mark {
+        font-weight: 900;
+        font-size: clamp(80px, 18vw, 148px);
+        line-height: 1;
+        color: var(--brand-ink);
+        letter-spacing: -0.04em;
+        opacity: 0;
+        animation: rise 700ms ease-out 120ms both;
+      }
+      .boot-sub {
+        margin-top: 14px;
+        font-weight: 600;
+        font-size: 16px;
+        color: rgba(11, 15, 25, 0.9);
+        opacity: 0;
+        animation: fade 500ms ease-out 360ms both;
+      }
+      @keyframes pop {
+        from {
+          transform: scale(0.96);
+          opacity: 0.8;
+        }
+        to {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+      @keyframes rise {
+        from {
+          transform: translateY(6px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+      @keyframes fade {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- бренд-заставка -->
+    <div id="boot" aria-hidden="true">
+      <div class="boot-card">
+        <div style="display:grid;place-items:center">
+          <div class="boot-mark">m</div>
+          <div class="boot-sub">Buy&nbsp;My&nbsp;Behavior</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- корінь застосунку -->
+    <div id="root"></div>
+
+    <!-- коли застосунок стартує, main.tsx кидає подію bmb:app-ready -->
+    <script>
+      (function () {
+        var boot = document.getElementById("boot");
+        function hide() {
+          if (!boot) return;
+          boot.classList.add("fade-out");
+          setTimeout(function () {
+            boot && boot.remove();
+          }, 420);
+        }
+        window.addEventListener("bmb:app-ready", hide, { once: true });
+
+        // страховка: якщо щось піде не так — прибрати заставку через ~1.6с
+        setTimeout(hide, 1600);
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

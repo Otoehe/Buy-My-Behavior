@@ -2,29 +2,29 @@
   "name": "bmb-app",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "engines": {
-    "node": "20.x"
+    "node": "20.x",
+    "npm": "10.x"
   },
+  "packageManager": "npm@10.9.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "vercel-build": "vite build",
     "preview": "vite preview",
-    "clean": "rimraf node_modules package-lock.json pnpm-lock.yaml yarn.lock node_modules/.vite && npm cache clean --force",
-    "rebuild": "npm run clean && npm install && npm run vercel-build && npm run preview",
-    "fix-imports": "node scripts/sanitize-imports.cjs --fix",
-    "vercel-build": "node scripts/sanitize-imports.cjs --fix && vite build"
+    "clean": "rimraf node_modules package-lock.json pnpm-lock.yaml yarn.lock node_modules/.vite && npm cache clean --force"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.10.1",
     "@lighthouse-web3/sdk": "0.4.1",
-    "@metamask/sdk": "^0.33.0",
+    "@metamask/sdk": "^0.33.1",
     "@openzeppelin/contracts": "^5.4.0",
     "@supabase/auth-helpers-react": "^0.5.0",
     "@supabase/supabase-js": "^2.50.2",
-    "@walletconnect/ethereum-provider": "^2.21.8",
     "@web3-storage/w3up-client": "^17.3.0",
     "axios": "^1.11.0",
-    "ethers": "5.7.2",
+    "ethers": "5.8.0",
     "leaflet": "^1.9.4",
     "lodash": "^4.17.21",
     "mapbox-gl": "^3.13.0",
@@ -38,21 +38,13 @@
   },
   "devDependencies": {
     "@nomiclabs/hardhat-ethers": "^2.2.3",
-    "@types/react": "^18.0.28",
-    "@types/react-dom": "^18.0.11",
+    "@types/react": "^18.2.46",
+    "@types/react-dom": "^18.2.18",
     "@vitejs/plugin-react": "^4.3.2",
-    "dotenv": "^17.2.1",
+    "dotenv": "^16.4.5",
     "hardhat": "^2.22.10",
     "rimraf": "^5.0.10",
     "typescript": "^5.5.4",
     "vite": "^5.4.6"
-  },
-  "overrides": {
-    "rollup": "4.24.0",
-    "@rollup/rollup-win32-x64-msvc": "4.24.0",
-    "@rollup/rollup-linux-x64-gnu": "4.24.0",
-    "@rollup/rollup-linux-arm64-gnu": "4.24.0",
-    "@rollup/rollup-darwin-x64": "4.24.0",
-    "@rollup/rollup-darwin-arm64": "4.24.0"
   }
 }
