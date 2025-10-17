@@ -26,38 +26,31 @@ export default function AuthCallback() {
 
     (async () => {
       try {
-        // 1) Якщо прийшли з явною помилкою — одразу на /register з месседжем
         if (hasError) {
           console.warn('Auth callback error:', hasError);
           if (!cancelled) {
             setMsg('Не вдалось увійти. Спробуйте ще раз.');
-            // коротка пауза для UX
             await new Promise(r => setTimeout(r, 600));
             navigate('/register', { replace: true });
           }
           return;
         }
 
-        // 2) Декілька спроб прочитати юзера (Secure cookie інколи зʼявляється з затримкою)
         for (let i = 0; i < WAIT_STEPS_MS.length; i++) {
           if (cancelled) return;
           const { data: { user } } = await supabase.auth.getUser();
           if (user) {
-            // 3) Успіх — чистимо урл і йдемо на /map
             if (!cancelled) {
-              // очищаємо query/fragment
               const cleanUrl = window.location.pathname;
               window.history.replaceState({}, '', cleanUrl);
               navigate('/map', { replace: true });
             }
             return;
           }
-          // Невдача — чекаємо і пробуємо знову
           setMsg(i < 2 ? 'Підтверджуємо вхід…' : 'Будь ласка, зачекайте…');
           await new Promise(r => setTimeout(r, WAIT_STEPS_MS[i]));
         }
 
-        // 4) Після усіх спроб користувача немає — ведемо на /register
         if (!cancelled) {
           setMsg('Потрібна повторна авторизація.');
           await new Promise(r => setTimeout(r, 400));

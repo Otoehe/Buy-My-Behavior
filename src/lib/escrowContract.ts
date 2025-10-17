@@ -1,4 +1,3 @@
-// src/lib/escrowContract.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ethers } from 'ethers';
 import { supabase } from './supabase';
@@ -42,7 +41,6 @@ type DealTuple = {
 };
 
 type LockFundsOptions = {
-  /** Колбек етапів UX (mobile friendly) */
   onStep?: (step:
     | 'connect'
     | 'ensure-network'
@@ -53,16 +51,13 @@ type LockFundsOptions = {
     | 'estimate-gas'
     | 'send'
     | 'mined') => void;
-  /** Якщо true — при нестачі allowance зробимо unlimited approve одразу */
   preferUnlimitedApprove?: boolean;
-  /** Скільки підтверджень чекати (за замовчуванням 1) */
   minConfirmations?: number;
-  /** Множник на ліміт газу (за замовчуванням 1.2) */
   gasMultiplier?: number;
 };
 
 async function getWeb3Bundle() {
-  const { provider } = await connectWallet();  // один-єдиний провайдер (SDK на мобільному)
+  const { provider } = await connectWallet();
   await ensureBSC(provider);
   const web3   = new ethers.providers.Web3Provider(provider as any, 'any');
   const signer = web3.getSigner();
@@ -111,7 +106,6 @@ async function ensureAllowance(
   const onStep = opts?.onStep;
   const preferUnlimited = !!opts?.preferUnlimitedApprove;
 
-  // деякі токени вимагають нульування перед новим approve
   if (!have.isZero() && !preferUnlimited) {
     onStep?.('approve-send');
     const tx0 = await token.approve(spender, 0);
@@ -136,17 +130,47 @@ export async function approveUsdtUnlimited(): Promise<{ txHash: string } | null>
   return { txHash: rc.transactionHash };
 }
 
+// FIX: правильні назви полів у profiles
 async function getWalletByUserId(userId: string): Promise<string | null> {
   if (!userId) return null;
-  const { data, error } = await supabase.from('profiles').select('wallet').eq('user_id', userId).maybeSingle();
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('wallet')
+    .eq('user_id', userId)
+    .maybeSingle();
   if (error) throw error;
   return (data as any)?.wallet ?? null;
 }
+
+// FIX: надійний фолбек — якщо немає referrer_wallet, беремо referred_by → wallet
 async function getReferrerWalletOfUser(userId: string): Promise<string | null> {
   if (!userId) return null;
-  const { data, error } = await supabase.from('profiles').select('referrer_wallet').eq('user_id', userId).maybeSingle();
-  if (error) throw error;
-  return (data as any)?.referrer_wallet ?? null;
+
+  // 1) спробуємо напряму з поля referrer_wallet (якщо воно у схемі є)
+  const direct = await supabase
+    .from('profiles')
+    .select('referrer_wallet, referred_by')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (direct.error) throw direct.error;
+
+  const refWallet = (direct.data as any)?.referrer_wallet as string | null | undefined;
+  const refOwner  = (direct.data as any)?.referred_by as string | null | undefined;
+  if (refWallet) return refWallet;
+
+  // 2) якщо referrer_wallet немає — дістаємо гаманець власника referred_by
+  if (refOwner) {
+    const { data: ownerRow, error: ownerErr } = await supabase
+      .from('profiles')
+      .select('wallet')
+      .eq('user_id', refOwner)
+      .maybeSingle();
+    if (ownerErr) throw ownerErr;
+    return (ownerRow as any)?.wallet ?? null;
+  }
+
+  return null;
 }
 
 function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, execution_time?: string | null) {
@@ -233,6 +257,7 @@ export async function lockFunds(
   const executorWallet = exId ? await getWalletByUserId(exId) : null;
   if (!executorWallet) throw new Error('Не знайдено гаманець виконавця');
 
+  // FIX: якщо referrerWallet не передали — дістанемо з БД через referred_by → wallet
   const refWallet = (referrerWallet !== undefined)
     ? (referrerWallet || null)
     : (custId ? await getReferrerWalletOfUser(custId) : null);
@@ -241,7 +266,6 @@ export async function lockFunds(
   const decimals  = await usdt.decimals();
   const amountWei = ethers.utils.parseUnits(String(amountHuman), decimals);
 
-  // Перевірка балансу (зрозуміле повідомлення)
   const bal: ethers.BigNumber = await usdt.balanceOf(from);
   if (bal.lt(amountWei)) {
     throw new Error('Недостатньо USDT на балансі для блокування цієї суми');

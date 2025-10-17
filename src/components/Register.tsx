@@ -32,15 +32,16 @@ export default function Register() {
   const navigate = useNavigate();
 
   // ─────────────── Supabase helpers ───────────────
+  // FIX: id -> user_id, wallet_address -> wallet
   const verifyReferral = async (word: string) => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, wallet, referral_code')
+      .select('user_id, wallet, referral_code')
       .eq('referral_code', word.trim())
       .limit(1)
       .maybeSingle();
     if (error) throw error;
-    return data;
+    return data as { user_id: string; wallet: string | null; referral_code: string | null } | null;
   };
 
   const sendMagicLink = async (emailValue: string) => {
@@ -75,9 +76,10 @@ export default function Register() {
         return;
       }
 
+      // FIX: зберігаємо user_id реферера, а не неіснуючий id
       try {
         localStorage.setItem('bmb_ref_context', JSON.stringify({
-          referred_by: ref.id,
+          referred_by: ref.user_id,
           referrer_wallet: ref.wallet,
           referral_code: ref.referral_code,
         }));
@@ -147,16 +149,17 @@ export default function Register() {
         return;
       }
 
+      // FIX: select id->user_id; eq wallet_address->wallet
       const { data: existing } = await supabase
         .from('profiles')
-        .select('id')
-        .eq('wallet_address', address)
-        .single();
+        .select('user_id')
+        .eq('wallet', address)
+        .maybeSingle();
 
       if (!existing) {
         const context = localStorage.getItem('bmb_ref_context');
-        const payload = {
-          wallet_address: address,
+        const payload: Record<string, any> = {
+          wallet: address, // FIX: wallet, а не wallet_address
           created_at: new Date().toISOString(),
         };
 
@@ -164,9 +167,9 @@ export default function Register() {
           try {
             const parsed = JSON.parse(context);
             Object.assign(payload, {
-              referred_by: parsed.referred_by,
-              referrer_wallet: parsed.referrer_wallet,
-              referral_code: parsed.referral_code,
+              referred_by: parsed.referred_by ?? null,
+              referrer_wallet: parsed.referrer_wallet ?? null,
+              referral_code: parsed.referral_code ?? null,
             });
           } catch {}
         }
