@@ -320,7 +320,11 @@ export default function ReceivedScenarios() {
         '\n  escrowAddress:', ESCROW_ADDRESS
       );
 
-      if (statusOnChain !== 1) { alert('Escrow не у статусі Locked.'); return; }
+      // 🔧 FIX: Locked = 2 (було 1)
+      if (statusOnChain !== 2) {
+        alert('Escrow не у статусі Locked.');
+        return;
+      }
       if (executorOnChain !== who) {
         alert(`Підключений гаманець не є виконавцем цього сценарію.\nОчікується: ${executorOnChain}\nПідключено: ${who}`);
         return;
