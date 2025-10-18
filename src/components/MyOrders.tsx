@@ -321,6 +321,7 @@ export default function MyOrders() {
     return Math.floor(Date.now() / 1000) + 3600;
   }
 
+  // 🔧 ПАТЧ: гарантуємо, що execution_time завжди у майбутньому перед бронюванням
   const handleLock = async (s: Scenario) => {
     if (lockBusy[s.id]) return;
     if (!s.donation_amount_usdt || s.donation_amount_usdt <= 0) {
@@ -333,9 +334,30 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      const { executor, referrer } = await resolveWallets(s);
-      void deriveExecutionTimeSec(s);
+      // 1) гарантуємо, що execution_time в майбутньому (мін. +5 хв буфер)
+      let exec = deriveExecutionTimeSec(s);
+      const now = Math.floor(Date.now() / 1000);
+      let execWasShifted = false;
 
+      if (exec <= now + 300) { // якщо в минулому або надто близько — авто-зсув
+        exec = now + 2 * 3600; // +2 години буфер
+        execWasShifted = true;
+
+        // оновлюємо у БД і локальному стейті (щоб lockFundsMobileFlow підхопив новий час)
+        const iso = new Date(exec * 1000).toISOString();
+        try {
+          await supabase
+            .from('scenarios')
+            .update({ execution_time: iso })
+            .eq('id', s.id);
+        } catch { /* ignore */ }
+        setLocal(s.id, { execution_time: iso } as any);
+      }
+
+      // 2) резолвимо адреси
+      const { executor, referrer } = await resolveWallets(s);
+
+      // 3) запускаємо ончейн-флоу (мобайл/десктоп усе як було)
       const txHash = await lockFundsMobileFlow({
         scenarioId: s.id,
         executor,
@@ -344,12 +366,14 @@ export default function MyOrders() {
         onStatus: () => {},
       });
 
+      // 4) чекаємо підтвердження LOCKED ончейном
       const ok = await waitDealStatus(s.id, 2, 120_000, 3_000);
       if (!ok) {
         alert('Транзакція ще не зафіксована як Locked. Спробуйте оновити сторінку трохи пізніше.');
         return;
       }
 
+      // 5) фіксуємо у БД та локально
       await supabase
         .from('scenarios')
         .update({ escrow_tx_hash: txHash, status: 'agreed' as Status })
@@ -357,6 +381,18 @@ export default function MyOrders() {
 
       setLocal(s.id, { escrow_tx_hash: txHash as any, status: 'agreed' });
       markLockedLocal(s.id, true);
+
+      // 6) необов'язковий підказ — якщо ми зсували час
+      if (execWasShifted) {
+        try {
+          await pushNotificationManager.showNotification({
+            title: '⏰ Час виконання оновлено',
+            body: 'Ми автоматично посунули час виконання, щоб одразу забронювати кошти.',
+            tag: `exec-shift-${s.id}`,
+            requireSound: false,
+          });
+        } catch {}
+      }
     } catch (e: any) {
       alert(e?.message || 'Не вдалося заблокувати кошти.');
     } finally {
