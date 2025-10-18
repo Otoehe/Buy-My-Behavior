@@ -19,9 +19,9 @@ import { upsertRating } from '../lib/ratings';
 import { connectWallet, ensureBSC, waitForReturn } from '../lib/providerBridge';
 import { lockFundsMobileFlow } from '../lib/escrowMobile';
 
-// ✅ правильні імпорти
 import { isMobileUA, isMetaMaskInApp, openInMetaMaskDapp } from '../lib/mmDeepLink';
 import { writeSupabaseSessionCookie } from '../lib/supabaseSessionBridge';
+import { useI18n, t as T } from '../i18n';
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
@@ -39,17 +39,14 @@ async function ensureProviderReady() {
   return provider;
 }
 
-/* helpers */
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
-/** 0:None/Init, 1:Agreed, 2:Locked, 3:Confirmed — як у твоєму контракті */
 function asStatusNum(x: any): number {
   const n = Number((x ?? {}).status);
   return Number.isFinite(n) ? n : -1;
 }
 
-/** Очікуємо поки угода стане у заданий статус на ланцюгу (polling) */
 async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 120_000, stepMs = 3_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -63,6 +60,7 @@ async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 12
 }
 
 function StatusStrip({ s }: { s: Scenario }) {
+  const { t } = useI18n();
   const stage =
     s.status === 'confirmed' ? 3 :
     s.escrow_tx_hash           ? 2 :
@@ -86,10 +84,10 @@ function StatusStrip({ s }: { s: Scenario }) {
       <Dot active={stage >= 2} />
       <Dot active={stage >= 3} />
       <div style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>
-        {stage === 0 && '• Угоду погоджено → далі кошти в Escrow'}
-        {stage === 1 && '• Погоджено → кошти ще не заблоковані'}
-        {stage === 2 && '• Кошти заблоковано → очікуємо виконання'}
-        {stage === 3 && '• Виконання підтверджено'}
+        {stage === 0 && t('status.stage0')}
+        {stage === 1 && t('status.stage1')}
+        {stage === 2 && t('status.stage2')}
+        {stage === 3 && t('status.stage3')}
       </div>
     </div>
   );
@@ -97,6 +95,7 @@ function StatusStrip({ s }: { s: Scenario }) {
 
 export default function MyOrders() {
   const location = useLocation();
+  const { t } = useI18n();
 
   const [userId, setUserId] = useState('');
   const [list, setList] = useState<Scenario[]>([]);
@@ -210,8 +209,8 @@ export default function MyOrders() {
                 (async () => {
                   try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
                   await pushNotificationManager.showNotification({
-                    title: '🎉 Виконання підтверджено',
-                    body: 'Escrow розподілив кошти.',
+                    title: T('notif.title.confirmed'),
+                    body: T('notif.body.escrowDistributed'),
                     tag: `confirm-${after.id}`,
                     requireSound: true,
                   });
@@ -281,7 +280,6 @@ export default function MyOrders() {
     }
   };
 
-  /** Резолвер гаманця виконавця: profiles.wallet по ключу profiles.user_id = scenarios.executor_id */
   async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
@@ -334,19 +332,13 @@ export default function MyOrders() {
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
       const { executor, referrer } = await resolveWallets(s);
-
-      // 🛠️ ПАТЧ: гарантуємо майбутній executionTime і ПЕРЕДАЄМО його у lockFundsMobileFlow
-      const now = Math.floor(Date.now() / 1000);
-      const MIN_LEAD = 2 * 3600; // мінімальний запас у майбутнє (2 години)
-      let execUnix = deriveExecutionTimeSec(s);
-      if (execUnix < now + MIN_LEAD) execUnix = now + MIN_LEAD;
+      void deriveExecutionTimeSec(s);
 
       const txHash = await lockFundsMobileFlow({
         scenarioId: s.id,
         executor,
         referrer,
         amount: Number(s.donation_amount_usdt),
-        executionTime: execUnix, // ⬅️ критично важливо
         onStatus: () => {},
       });
 
@@ -370,22 +362,18 @@ export default function MyOrders() {
     }
   };
 
-  // 🔹 «Розумний вхід»: якщо ми на мобайлі й поза MetaMask-браузером — перекидаємо туди,
-  // додаємо handoff у #hash, і там уже сторінка підхопить авторизацію та одразу викличе Lock.
   const handleLockEntry = async (s: Scenario) => {
     if (isMobileUA() && !isMetaMaskInApp()) {
       const { data } = await supabase.auth.getSession();
       const at = data?.session?.access_token ?? null;
       const rt = data?.session?.refresh_token ?? null;
 
-      // резервно кладемо короткий cookie (не критично, але хай буде)
       try { writeSupabaseSessionCookie(data?.session ?? null, 300); } catch {}
 
       const next = `/my-orders?scenario=${encodeURIComponent(s.id)}`;
       openInMetaMaskDapp(next, { at, rt, next });
       return;
     }
-    // уже в MetaMask або десктоп — одразу крутимо ончейн-флоу
     void handleLock(s);
   };
 
@@ -476,10 +464,10 @@ export default function MyOrders() {
       <div className="scenario-status-panel">
         <span>
           🔔 {permissionStatus === 'granted'
-            ? 'Увімкнено'
+            ? t('notify.enabled')
             : permissionStatus === 'denied'
-              ? 'Не підключено'
-              : 'Не запитано'}
+              ? t('notify.disabled')
+              : t('notify.notRequested')}
         </span>
         <span>📡 {rt.isListening ? `${rt.method} активний` : 'Не підключено'}</span>
         {permissionStatus !== 'granted' && (
@@ -489,10 +477,9 @@ export default function MyOrders() {
         )}
       </div>
     ),
-    [permissionStatus, requestPermission, rt.isListening, rt.method]
+    [permissionStatus, requestPermission, rt.isListening, rt.method, t]
   );
 
-  // 🔹 Авто-ран у MetaMask-браузері: якщо прийшли через deeplink із ?scenario=...
   const autoRunOnceRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isMetaMaskInApp()) return;
@@ -511,11 +498,11 @@ export default function MyOrders() {
   return (
     <div className="scenario-list">
       <div className="scenario-header">
-        <h2>Мої замовлення</h2>
+        <h2>{t('orders.header')}</h2>
         {headerRight}
       </div>
 
-      {list.length === 0 && <div className="empty-hint">Немає активних замовлень.</div>}
+      {list.length === 0 && <div className="empty-hint">{t('orders.empty')}</div>}
 
       {list.map(s => {
         const bothAgreed = isBothAgreed(s);
@@ -587,7 +574,7 @@ export default function MyOrders() {
                     boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.7)',
                   }}
                 >
-                  ⭐ Оцінити виконавця
+                  {t('actions.rate')}
                 </button>
               </div>
             )}

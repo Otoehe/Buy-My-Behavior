@@ -1,4 +1,5 @@
 import React from 'react';
+import { useI18n } from '../i18n';
 
 export type Status = 'pending' | 'agreed' | 'confirmed' | 'disputed' | string;
 
@@ -25,42 +26,37 @@ type Props = {
   role: 'customer' | 'executor';
   s: Scenario;
 
-  // редагування опису/суми
   onChangeDesc?: (v: string) => void;
   onCommitDesc?: (v: string) => void | Promise<void>;
   onChangeAmount?: (v: number | null) => void;
   onCommitAmount?: (v: number | null) => void | Promise<void>;
 
-  // дії
   onAgree?: () => void;
   onLock?: () => void;
   onConfirm?: () => void;
   onDispute?: () => void;
   onOpenLocation?: () => void;
 
-  // доступності
   canAgree?: boolean;
   canLock?: boolean;
   canConfirm?: boolean;
   canDispute?: boolean;
   hasCoords?: boolean;
 
-  // стан кнопок
   busyAgree?: boolean;
   busyLock?: boolean;
   busyConfirm?: boolean;
 
-  // опціонально приховати деякі кнопки в конкретних етапах
   hideLock?: boolean;
   hideConfirm?: boolean;
   hideDispute?: boolean;
 
-  // рейтинг (якщо використовується)
   isRated?: boolean;
   onOpenRate?: () => void;
 };
 
 export default function ScenarioCard(props: Props) {
+  const { t } = useI18n();
   const {
     s, role,
     onChangeDesc, onCommitDesc,
@@ -74,7 +70,6 @@ export default function ScenarioCard(props: Props) {
 
   const confirmed = s.status === 'confirmed';
 
-  // локальні хелпери перетворення значення суми
   const amountToString = (v: number | null) => (v ?? '') as any;
   const handleAmountChange = (raw: string) => {
     if (!onChangeAmount) return;
@@ -90,46 +85,18 @@ export default function ScenarioCard(props: Props) {
     onCommitAmount(Number.isFinite(v) ? v : null);
   };
 
-  // стилі (адитивно, без зміни існуючих класів)
-  const hintStyle: React.CSSProperties = {
-    fontSize: 12,
-    lineHeight: '16px',
-    opacity: 0.8,
-    marginBottom: 8,
-  };
-  const labelStyle: React.CSSProperties = {
-    fontSize: 13,
-    lineHeight: '18px',
-    marginBottom: 6,
-    opacity: 0.9,
-  };
-  const amountPillStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    borderRadius: 9999,
-    padding: '4px 8px',
-  };
-  const amountInputStyle: React.CSSProperties = {
-    borderRadius: 9999,
-    padding: '14px 16px',
-    fontSize: 18,
-    height: 48,
-    outline: 'none',
-  };
+  const hintStyle: React.CSSProperties = { fontSize: 12, lineHeight: '16px', opacity: 0.8, marginBottom: 8 };
+  const labelStyle: React.CSSProperties = { fontSize: 13, lineHeight: '18px', marginBottom: 6, opacity: 0.9 };
+  const amountPillStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, borderRadius: 9999, padding: '4px 8px' };
+  const amountInputStyle: React.CSSProperties = { borderRadius: 9999, padding: '14px 16px', fontSize: 18, height: 48, outline: 'none' };
 
   return (
     <div className="scenario-card" data-card-id={s.id}>
       <div className="scenario-info">
+        <div style={hintStyle}>{t('hint.editable')}</div>
 
-        {/* 🔔 НАГАДУВАННЯ над полем опису */}
-        <div style={hintStyle}>
-          Опис сценарію і сума добровільного донату редагуються обома учасниками до Погодження угоди.
-        </div>
-
-        {/* ОПИС */}
         <div>
-          <strong>Опис:</strong><br />
+          <strong>{t('labels.description')}</strong><br />
           <textarea
             value={s.description ?? ''}
             maxLength={1000}
@@ -140,23 +107,19 @@ export default function ScenarioCard(props: Props) {
           />
         </div>
 
-        {/* МЕТА (дата/час) */}
         <div className="meta-row" style={{ marginTop: 8 }}>
           <div className="meta-col">
-            <div className="meta-label">Дата:</div>
+            <div className="meta-label">{t('labels.date')}</div>
             <div className="meta-value">{s.date}</div>
           </div>
           <div className="meta-col">
-            <div className="meta-label">Час:</div>
+            <div className="meta-label">{t('labels.time')}</div>
             <div className="meta-value">{s.time || '—'}</div>
           </div>
         </div>
 
-        {/* СУМА */}
         <div className="amount-row" style={{ marginTop: 10 }}>
-          <label className="amount-label" style={labelStyle}>
-            Сума добровільного донату на підтримку креативності
-          </label>
+          <label className="amount-label" style={labelStyle}>{t('labels.amount')}</label>
           <div className="amount-pill" style={amountPillStyle}>
             <input
               className="amount-input"
@@ -169,70 +132,43 @@ export default function ScenarioCard(props: Props) {
               disabled={confirmed}
               style={amountInputStyle}
             />
-            <span className="amount-unit">USDT</span>
+            <span className="amount-unit">{t('units.usdt')}</span>
           </div>
         </div>
       </div>
 
-      {/* КНОПКИ ДІЙ */}
       <div className="scenario-actions">
-        {/* Погодити угоду */}
-        <button
-          className="btn agree"
-          onClick={onAgree}
-          disabled={!canAgree || !!busyAgree}
-        >
-          {busyAgree ? '…' : '🤝 Погодити угоду'}
+        <button className="btn agree" onClick={onAgree} disabled={!canAgree || !!busyAgree}>
+          {busyAgree ? '…' : t('actions.agree')}
         </button>
 
-        {/* Забронювати кошти (може бути прихована у Виконавця) */}
         {!hideLock && (
-          <button
-            className="btn lock"
-            onClick={onLock}
-            disabled={!canLock || !!busyLock}
-          >
-            {busyLock ? '…' : '💳 Забронювати кошти'}
+          <button className="btn lock" onClick={onLock} disabled={!canLock || !!busyLock}>
+            {busyLock ? '…' : t('actions.lock')}
           </button>
         )}
 
-        {/* Підтвердити виконання */}
         {!hideConfirm && (
-          <button
-            className="btn confirm"
-            onClick={onConfirm}
-            disabled={!canConfirm || !!busyConfirm}
-          >
-            {busyConfirm ? '…' : '✅ Підтвердити виконання'}
+          <button className="btn confirm" onClick={onConfirm} disabled={!canConfirm || !!busyConfirm}>
+            {busyConfirm ? '…' : t('actions.confirm')}
           </button>
         )}
 
-        {/* Оспорити виконання (кнопка тільки коли доступна) */}
         {!hideDispute && (
-          <button
-            className="btn dispute"
-            onClick={onDispute}
-            disabled={!canDispute}
-          >
-            ⚖️ Оспорити виконання
+          <button className="btn dispute" onClick={onDispute} disabled={!canDispute}>
+            {t('actions.dispute')}
           </button>
         )}
 
-        {/* Локація — завжди активна, якщо є координати */}
-        <button
-          className="btn location"
-          onClick={onOpenLocation}
-          disabled={!hasCoords}
-        >
-          📍 Показати локацію
+        <button className="btn location" onClick={onOpenLocation} disabled={!hasCoords}>
+          {t('actions.location')}
         </button>
 
-        {/* Рейтинг (якщо потрібен) */}
         {s.status === 'confirmed' && onOpenRate && (
           isRated ? (
-            <span style={{ marginLeft: 8, opacity: 0.85 }}>⭐ Оцінено</span>
+            <span style={{ marginLeft: 8, opacity: 0.85 }}>{t('actions.rated')}</span>
           ) : (
-            <button className="btn" onClick={onOpenRate}>⭐ Оцінити</button>
+            <button className="btn" onClick={onOpenRate}>{t('actions.rate')}</button>
           )
         )}
       </div>

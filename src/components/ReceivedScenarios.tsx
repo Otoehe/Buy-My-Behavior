@@ -1,4 +1,3 @@
-// 📄 src/components/ReceivedScenarios.tsx
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import {
@@ -22,8 +21,8 @@ import {
   uploadEvidenceAndAttach,
   ensureDisputeRowForScenario,
 } from '../lib/disputeApi';
+import { useI18n, t as T } from '../i18n';
 
-// Типи для цього компонента (runtime не зачіпають)
 export type Status = 'pending' | 'agreed' | 'confirmed' | 'disputed' | string;
 export interface Scenario {
   id: string;
@@ -48,11 +47,7 @@ export interface Scenario {
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
 
-// ── helpers
-async function ensureBSCAndGetSigner() {
-  await ensureBSC();
-  return await getSigner();
-}
+async function ensureBSCAndGetSigner() { await ensureBSC(); return await getSigner(); }
 function humanizeEthersError(err: any): string {
   const m = String(err?.shortMessage || err?.reason || err?.error?.message || err?.message || '');
   if (!m) return 'Невідома помилка';
@@ -75,6 +70,7 @@ export function reachedExecutionTime(s: Scenario) {
 }
 
 export default function ReceivedScenarios() {
+  const { t } = useI18n();
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [userId, setUserId] = useState('');
   const uidRef = useRef('');
@@ -93,7 +89,6 @@ export default function ReceivedScenarios() {
   const { permissionStatus, requestPermission } = useNotifications();
   const rt = useRealtimeNotifications(userId);
 
-  /** Інʼєкція локального CSS, щоб триґер із RateCounterpartyModal був великою кнопкою як інші */
   useLayoutEffect(() => {
     const styleId = 'bmb-rate-button-patch';
     if (!document.getElementById(styleId)) {
@@ -121,9 +116,9 @@ export default function ReceivedScenarios() {
   }, []);
 
   function stepOf(s: Scenario) {
-    if (!s.is_agreed_by_executor) return 1; // погодити
-    if (!s.escrow_tx_hash && s.is_agreed_by_customer) return 0; // чекаємо lock
-    if (s.escrow_tx_hash && reachedExecutionTime(s) && !s.is_completed_by_executor) return 2; // підтвердити
+    if (!s.is_agreed_by_executor) return 1;
+    if (!s.escrow_tx_hash && s.is_agreed_by_customer) return 0;
+    if (s.escrow_tx_hash && reachedExecutionTime(s) && !s.is_completed_by_executor) return 2;
     return 0;
   }
   const canAgree = (s: Scenario) => stepOf(s) === 1 && !agreeBusy[s.id];
@@ -156,8 +151,8 @@ export default function ReceivedScenarios() {
                 (async () => {
                   try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
                   await pushNotificationManager.showNotification({
-                    title: '🎉 Виконання підтверджено',
-                    body: 'Escrow розподілив кошти.',
+                    title: T('notif.title.confirmed'),
+                    body: T('notif.body.escrowDistributed'),
                     tag: `scenario-confirmed-${s.id}`,
                     requireSound: true
                   });
@@ -167,8 +162,8 @@ export default function ReceivedScenarios() {
                 (async () => {
                   try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
                   await pushNotificationManager.showNotification({
-                    title: '💳 Клієнт заблокував кошти',
-                    body: 'Escrow активовано. Очікуємо час виконання.',
+                    title: T('notif.title.locked'),
+                    body: T('notif.body.locked'),
                     tag: `escrow-locked-${s.id}`,
                     requireSound: true
                   });
@@ -230,7 +225,6 @@ export default function ReceivedScenarios() {
   const setLocal = (id: string, patch: Partial<Scenario>) =>
     setScenarios(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
 
-  // редагування опису/суми → pending + скидання погоджень
   const updateScenarioField = async (id: string, field: keyof Scenario, value: any) => {
     if (field === 'donation_amount_usdt') {
       if (value === '' || value === null) {
@@ -278,7 +272,7 @@ export default function ReceivedScenarios() {
       try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
       await pushNotificationManager.showNotification({
         title: '🤝 Угоду погоджено (виконавець)',
-        body: s.is_agreed_by_customer ? 'Можна блокувати кошти (escrow).' : 'Чекаємо дію замовника.',
+        body: s.is_agreed_by_customer ? T('notif.title.locked') : 'Чекаємо дію замовника.',
         tag: `agree-executor-${s.id}`, requireSound: true
       });
     } catch (e:any) {
@@ -296,35 +290,11 @@ export default function ReceivedScenarios() {
       const who = (await signer.getAddress()).toLowerCase();
       const provider = signer.provider as ethers.providers.Web3Provider;
 
-      // DEBUG: ключ для цього сценарію
-      const b32 = generateScenarioIdBytes32(s.id);
+      const dealBefore = await getDealOnChain(s.id);
+      const statusOnChain = Number((dealBefore as any).status);
+      const executorOnChain = String((dealBefore as any).executor || '').toLowerCase();
 
-      // Отримуємо стан на чейні і ЛОГуємо все, що важливо
-      let dealBefore: any = undefined;
-      try {
-        dealBefore = await getDealOnChain(s.id);
-      } catch (e) {
-        console.debug('[CONFIRM][ERROR] getDealOnChain failed', e);
-      }
-      const statusOnChain = Number((dealBefore as any)?.status ?? -1);
-      const executorOnChain = String((dealBefore as any)?.executor || '').toLowerCase();
-
-      // DEBUG: повний зріз
-      console.debug(
-        '[CONFIRM] scenarioId:', s.id,
-        '\n  bytes32:', b32,
-        '\n  dealBefore:', dealBefore,
-        '\n  statusOnChain:', statusOnChain,
-        '\n  executorOnChain:', executorOnChain,
-        '\n  connected:', who,
-        '\n  escrowAddress:', ESCROW_ADDRESS
-      );
-
-      // 🔧 FIX: Locked = 2 (було 1)
-      if (statusOnChain !== 2) {
-        alert('Escrow не у статусі Locked.');
-        return;
-      }
+      if (statusOnChain !== 1) { alert('Escrow не у статусі Locked.'); return; }
       if (executorOnChain !== who) {
         alert(`Підключений гаманець не є виконавцем цього сценарію.\nОчікується: ${executorOnChain}\nПідключено: ${who}`);
         return;
@@ -334,36 +304,15 @@ export default function ReceivedScenarios() {
       if (bal.lt(ethers.utils.parseUnits('0.00005', 'ether'))) { alert('Недостатньо нативної монети для комісії.'); return; }
 
       try {
+        const b32 = generateScenarioIdBytes32(s.id);
         const abi = ['function confirmCompletion(bytes32)'];
         const c = new ethers.Contract(ESCROW_ADDRESS, abi, signer);
-
-        // DEBUG: сухий прогон і газ
-        try {
-          await c.callStatic.confirmCompletion(b32);
-          console.debug('[CONFIRM] callStatic.confirmCompletion ok');
-        } catch (e) {
-          console.debug('[CONFIRM][callStatic] reverted:', e);
-          throw e;
-        }
-
-        let gas;
-        try {
-          gas = await c.estimateGas.confirmCompletion(b32);
-          console.debug('[CONFIRM] estimated gas:', gas?.toString?.());
-        } catch (e) {
-          gas = ethers.BigNumber.from(150000);
-          console.debug('[CONFIRM] estimateGas failed, fallback gas:', gas.toString(), e);
-        }
-
+        await c.callStatic.confirmCompletion(b32);
+        let gas; try { gas = await c.estimateGas.confirmCompletion(b32); } catch { gas = ethers.BigNumber.from(150000); }
         const tx = await c.confirmCompletion(b32, { gasLimit: gas.mul(12).div(10) });
-        console.debug('[CONFIRM] sent tx:', tx.hash);
         await tx.wait();
-        console.debug('[CONFIRM] tx mined');
-      } catch (e) {
-        console.debug('[CONFIRM] direct call failed, fallback wrapper...', e);
-        // fallback на обгортку
+      } catch {
         await confirmCompletionOnChain({ scenarioId: s.id });
-        console.debug('[CONFIRM] fallback wrapper done');
       }
 
       setLocal(s.id, { is_completed_by_executor: true });
@@ -375,32 +324,26 @@ export default function ReceivedScenarios() {
 
       const deal = await getDealOnChain(s.id);
       let st = Number((deal as any).status);
-      console.debug('[CONFIRM] status after tx:', st, 'deal:', deal);
       if (st !== 3) st = await waitForChainRelease(s.id);
-      console.debug('[CONFIRM] final status after wait:', st);
-
       if (st === 3) {
         await (supabase as any).from('scenarios').update({ status: 'confirmed' }).eq('id', s.id);
         try { SOUND.currentTime = 0; await SOUND.play(); } catch {}
         await pushNotificationManager.showNotification({
-          title: '🎉 Виконання підтверджено',
-          body: 'Escrow розподілив кошти.',
+          title: T('notif.title.confirmed'),
+          body: T('notif.body.escrowDistributed'),
           tag: `scenario-confirmed-${s.id}`,
           requireSound: true
         });
         setShowFinalToast(true);
       }
     } catch (e:any) {
-      console.debug('[CONFIRM][ERROR]', e); // DEBUG: щоб мати стек у консолі
       alert(humanizeEthersError(e));
     } finally {
       setConfirmBusy(p => ({ ...p, [s.id]: false }));
     }
   };
 
-  // СПОРИ
   const loadOpenDispute = useCallback(async (scenarioId: string) => {
-    // отримаємо відкритий спір або створимо, якщо його ще немає
     let d = await getLatestDisputeByScenario(scenarioId);
     if (!d || d.status !== 'open') {
       const { data: s } = await (supabase as any)
@@ -434,17 +377,14 @@ export default function ReceivedScenarios() {
     } finally { setUploading(p => ({ ...p, [s.id]: false })); ev.target.value = ''; }
   };
 
-  // стилі (інлайн) — уніфікація з «замовником»
   const hintStyle: React.CSSProperties  = { fontSize: 12, lineHeight: '16px', opacity: 0.8, marginBottom: 8 };
   const labelStyle: React.CSSProperties = { fontSize: 13, lineHeight: '18px', marginBottom: 6, opacity: 0.9 };
 
-  // «Пілюля» суми — білий овал із тінню, по центру (як у замовника)
   const pillRowStyle: React.CSSProperties = { marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' };
   const amountPill: React.CSSProperties  = { display: 'flex', alignItems: 'center', gap: 8, borderRadius: 9999, padding: '2px 8px', background: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,.06)' };
   const amountInput: React.CSSProperties = { borderRadius: 9999, padding: '10px 14px', fontSize: 16, height: 40, outline: 'none', border: '1px solid rgba(0,0,0,.06)', background: '#fff', textAlign: 'center', minWidth: 92 };
   const amountUnit:  React.CSSProperties = { fontWeight: 700 };
 
-  // тільки цілі числа або порожньо
   const parseDigits = (raw: string): number | null | 'invalid' => {
     if (raw.trim() === '') return null;
     if (!/^[0-9]+$/.test(raw.trim())) return 'invalid';
@@ -454,9 +394,9 @@ export default function ReceivedScenarios() {
   return (
     <div className="scenario-list">
       <div className="scenario-header">
-        <h2>Отримані сценарії</h2>
+        <h2>{t('received.header')}</h2>
         <div className="scenario-status-panel">
-          <span>🔔 {permissionStatus === 'granted' ? 'Увімкнено' : permissionStatus === 'denied' ? 'Не підключено' : 'Не запитано'}</span>
+          <span>🔔 {permissionStatus === 'granted' ? t('notify.enabled') : permissionStatus === 'denied' ? t('notify.disabled') : t('notify.notRequested')}</span>
           <span>📡 {rt.isListening ? `${rt.method} активний` : 'Не підключено'}</span>
           {permissionStatus !== 'granted' && <button onClick={requestPermission} className="notify-btn">🔔 Дозволити</button>}
         </div>
@@ -466,15 +406,14 @@ export default function ReceivedScenarios() {
         const canRate = s.status === 'confirmed' && !ratedMap[s.id];
         return (
           <div key={s.id} className="scenario-card" data-card-id={s.id}>
-            {/* єдиний класичний степер статусів — як у замовника */}
             <div style={{ marginBottom: 10 }}>
               <StatusStripClassic state={s} />
             </div>
 
             <div className="scenario-info">
-              <div style={hintStyle}>Опис сценарію і сума добровільного донату редагуються обома учасниками до Погодження угоди.</div>
+              <div style={hintStyle}>{t('hint.editable')}</div>
               <div>
-                <strong>Опис:</strong><br/>
+                <strong>{t('labels.description')}</strong><br/>
                 <textarea
                   value={s.description ?? ''}
                   maxLength={1000}
@@ -486,13 +425,12 @@ export default function ReceivedScenarios() {
               </div>
 
               <div className="meta-row">
-                <div className="meta-col"><div className="meta-label">Дата:</div><div className="meta-value">{s.date}</div></div>
-                <div className="meta-col"><div className="meta-label">Час:</div><div className="meta-value">{s.time || '—'}</div></div>
+                <div className="meta-col"><div className="meta-label">{t('labels.date')}</div><div className="meta-value">{s.date}</div></div>
+                <div className="meta-col"><div className="meta-label">{t('labels.time')}</div><div className="meta-value">{s.time || '—'}</div></div>
               </div>
 
-              {/* Сума — уніфікована біла пілюля */}
               <div className="amount-row" style={pillRowStyle}>
-                <label className="amount-label" style={labelStyle}>Сума добровільного донату на підтримку креативності</label>
+                <label className="amount-label" style={labelStyle}>{t('labels.amount')}</label>
                 <div className="amount-pill" style={amountPill}>
                   <input
                     type="text"
@@ -515,16 +453,15 @@ export default function ReceivedScenarios() {
                     }}
                     style={amountInput}
                   />
-                  <span className="amount-unit" style={amountUnit}>USDT</span>
+                  <span className="amount-unit" style={amountUnit}>{t('units.usdt')}</span>
                 </div>
               </div>
             </div>
 
             <div className="scenario-actions">
-              <button className="btn agree"   onClick={() => handleAgree(s)}  disabled={!canAgree(s)}>🤝 Погодити угоду</button>
-              <button className="btn confirm" onClick={() => handleConfirm(s)} disabled={!canConfirm(s)}>✅ Підтвердити виконання</button>
+              <button className="btn agree"   onClick={() => handleAgree(s)}  disabled={!canAgree(s)}>{t('actions.agree')}</button>
+              <button className="btn confirm" onClick={() => handleConfirm(s)} disabled={!canConfirm(s)}>{t('actions.confirm')}</button>
 
-              {/* Велика кнопка оцінки — через .rate-wrap (CSS інʼєкцію див. вище) */}
               <div className="rate-wrap" style={{ width: '100%' }}>
                 <RateCounterpartyModal
                   scenarioId={s.id}
@@ -534,10 +471,9 @@ export default function ReceivedScenarios() {
                 />
               </div>
               {!canRate && s.status === 'confirmed' && ratedMap[s.id] && (
-                <div className="flags-line">⭐ Оцінено</div>
+                <div className="flags-line">{t('actions.rated')}</div>
               )}
 
-              {/* Завантаження відеодоказу у відкритому спорі */}
               <input
                 type="file"
                 accept="video/*"
@@ -562,14 +498,14 @@ export default function ReceivedScenarios() {
                 }
                 title={!openDisputes[s.id] ? 'Доступно лише при відкритому спорі' : ''}
               >
-                {uploading[s.id] ? '…' : '📹 ЗАВАНТАЖИТИ ВІДЕОДОКАЗ'}
+                {uploading[s.id] ? '…' : t('actions.dispute')}
               </button>
 
               <button
                 className="btn location"
                 onClick={() => hasCoords(s) && window.open(`https://www.google.com/maps?q=${s.latitude},${s.longitude}`, '_blank')}
                 disabled={!hasCoords(s)}
-              >📍 Показати локацію</button>
+              >{t('actions.location')}</button>
             </div>
           </div>
         );
