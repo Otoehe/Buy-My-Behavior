@@ -34,7 +34,7 @@ type DealTuple = {
   execAt: number;
   deadline: number;
   flags: number;
-  status: number;
+  status: number; // 0-init, 1-agreed, 2-locked, 3-confirmed
   disputeOpenedAt: number;
   votesExecutor: number;
   votesCustomer: number;
@@ -86,7 +86,6 @@ async function assertNetworkAndCode(eip1193: Eip1193Provider, web3: ethers.provi
   if (!codeUsdt || codeUsdt === '0x')   throw new Error('USDT_ADDRESS не є контрактом у цій мережі');
 }
 
-// “розбудити” підпис (після повернення з MetaMask)
 async function warmupSignature(signer: ethers.Signer) {
   try { await signer.signMessage('BMB warmup ' + Date.now()); } catch { /* ignore */ }
 }
@@ -130,47 +129,17 @@ export async function approveUsdtUnlimited(): Promise<{ txHash: string } | null>
   return { txHash: rc.transactionHash };
 }
 
-// FIX: правильні назви полів у profiles
 async function getWalletByUserId(userId: string): Promise<string | null> {
   if (!userId) return null;
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('wallet')
-    .eq('user_id', userId)
-    .maybeSingle();
+  const { data, error } = await supabase.from('profiles').select('wallet').eq('user_id', userId).maybeSingle();
   if (error) throw error;
   return (data as any)?.wallet ?? null;
 }
-
-// FIX: надійний фолбек — якщо немає referrer_wallet, беремо referred_by → wallet
 async function getReferrerWalletOfUser(userId: string): Promise<string | null> {
   if (!userId) return null;
-
-  // 1) спробуємо напряму з поля referrer_wallet (якщо воно у схемі є)
-  const direct = await supabase
-    .from('profiles')
-    .select('referrer_wallet, referred_by')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (direct.error) throw direct.error;
-
-  const refWallet = (direct.data as any)?.referrer_wallet as string | null | undefined;
-  const refOwner  = (direct.data as any)?.referred_by as string | null | undefined;
-  if (refWallet) return refWallet;
-
-  // 2) якщо referrer_wallet немає — дістаємо гаманець власника referred_by
-  if (refOwner) {
-    const { data: ownerRow, error: ownerErr } = await supabase
-      .from('profiles')
-      .select('wallet')
-      .eq('user_id', refOwner)
-      .maybeSingle();
-    if (ownerErr) throw ownerErr;
-    return (ownerRow as any)?.wallet ?? null;
-  }
-
-  return null;
+  const { data, error } = await supabase.from('profiles').select('referrer_wallet').eq('user_id', userId).maybeSingle();
+  if (error) throw error;
+  return (data as any)?.referrer_wallet ?? null;
 }
 
 function toUnixSeconds(dateStr?: string | null, timeStr?: string | null, execution_time?: string | null) {
@@ -193,10 +162,7 @@ export async function quickOneClickSetup(): Promise<{ address: string; approveTx
   return { address: addr, approveTxHash };
 }
 
-/**
- * lockFunds з підтримкою мобільного UX та опцій.
- * Старі виклики (тільки з arg) працюють як і раніше.
- */
+/** ГОЛОВНЕ: lockFunds з executionTime */
 export async function lockFunds(
   arg:
     | number
@@ -257,7 +223,6 @@ export async function lockFunds(
   const executorWallet = exId ? await getWalletByUserId(exId) : null;
   if (!executorWallet) throw new Error('Не знайдено гаманець виконавця');
 
-  // FIX: якщо referrerWallet не передали — дістанемо з БД через referred_by → wallet
   const refWallet = (referrerWallet !== undefined)
     ? (referrerWallet || null)
     : (custId ? await getReferrerWalletOfUser(custId) : null);

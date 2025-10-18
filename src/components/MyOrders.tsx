@@ -19,12 +19,9 @@ import { upsertRating } from '../lib/ratings';
 import { connectWallet, ensureBSC, waitForReturn } from '../lib/providerBridge';
 import { lockFundsMobileFlow } from '../lib/escrowMobile';
 
-// ✅ правильні імпорти
+// ✅ правильні імпорти deeplink bridge (залишаємо як у тебе)
 import { isMobileUA, isMetaMaskInApp, openInMetaMaskDapp } from '../lib/mmDeepLink';
 import { writeSupabaseSessionCookie } from '../lib/supabaseSessionBridge';
-
-// i18n
-import { useI18n } from '../i18n';
 
 const SOUND = new Audio('/notification.wav');
 SOUND.volume = 0.8;
@@ -35,24 +32,22 @@ async function withTimeout<T>(p: Promise<T>, ms = 8000, label = 'op'): Promise<T
     new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Timeout:${label}`)), ms)) as any,
   ]);
 }
-
 async function ensureProviderReady() {
   const { provider } = await connectWallet();
   await ensureBSC(provider);
   return provider;
 }
 
-/* helpers */
+// helpers
 const isBothAgreed = (s: Scenario) => !!s.is_agreed_by_customer && !!s.is_agreed_by_executor;
 const canEditFields = (s: Scenario) => !isBothAgreed(s) && !s.escrow_tx_hash && s.status !== 'confirmed';
 
-/** 0:None/Init, 1:Agreed, 2:Locked, 3:Confirmed — як у твоєму контракті */
+// 0:init, 1:agreed, 2:locked, 3:confirmed
 function asStatusNum(x: any): number {
   const n = Number((x ?? {}).status);
   return Number.isFinite(n) ? n : -1;
 }
 
-/** Очікуємо поки угода стане у заданий статус на ланцюгу (polling) */
 async function waitDealStatus(scenarioId: string, target: number, timeoutMs = 120_000, stepMs = 3_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -100,9 +95,6 @@ function StatusStrip({ s }: { s: Scenario }) {
 
 export default function MyOrders() {
   const location = useLocation();
-
-  // i18n
-  const { t, setLocale } = useI18n();
 
   const [userId, setUserId] = useState('');
   const [list, setList] = useState<Scenario[]>([]);
@@ -287,8 +279,7 @@ export default function MyOrders() {
     }
   };
 
-  /** Резолвер гаманця виконавця: profiles.wallet по ключу profiles.user_id = scenarios.executor_id */
-  async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string }> {
+  async function resolveWallets(s: Scenario): Promise<{ executor: string; referrer: string; execUnix: number }> {
     const ZERO = '0x0000000000000000000000000000000000000000';
 
     let executor =
@@ -312,19 +303,13 @@ export default function MyOrders() {
     }
 
     const referrer = (s as any).referrer_wallet ?? ZERO;
-    return { executor, referrer };
-  }
 
-  function deriveExecutionTimeSec(s: Scenario): number {
-    if ((s as any).execution_time) {
-      const t = new Date((s as any).execution_time).getTime();
-      if (!Number.isNaN(t)) return Math.floor(t / 1000);
-    }
-    if ((s as any).date) {
-      const t = new Date(`${(s as any).date}T${(s as any).time || '00:00'}`).getTime();
-      if (!Number.isNaN(t)) return Math.floor(t / 1000);
-    }
-    return Math.floor(Date.now() / 1000) + 3600;
+    const execUnix =
+      s.execution_time
+        ? Math.floor(new Date(s.execution_time).getTime() / 1000)
+        : Math.floor(new Date(`${s.date}T${s.time || '00:00'}`).getTime() / 1000);
+
+    return { executor, referrer, execUnix: Number.isFinite(execUnix) ? execUnix : Math.floor(Date.now()/1000) + 3600 };
   }
 
   const handleLock = async (s: Scenario) => {
@@ -339,14 +324,14 @@ export default function MyOrders() {
 
     setLockBusy(p => ({ ...p, [s.id]: true }));
     try {
-      const { executor, referrer } = await resolveWallets(s);
-      void deriveExecutionTimeSec(s);
+      const { executor, referrer, execUnix } = await resolveWallets(s);
 
       const txHash = await lockFundsMobileFlow({
         scenarioId: s.id,
         executor,
         referrer,
         amount: Number(s.donation_amount_usdt),
+        executionTime: execUnix,
         onStatus: () => {},
       });
 
@@ -370,22 +355,17 @@ export default function MyOrders() {
     }
   };
 
-  // 🔹 «Розумний вхід»: якщо ми на мобайлі й поза MetaMask-браузером — перекидаємо туди,
-  // додаємо handoff у #hash, і там уже сторінка підхопить авторизацію та одразу викличе Lock.
   const handleLockEntry = async (s: Scenario) => {
     if (isMobileUA() && !isMetaMaskInApp()) {
       const { data } = await supabase.auth.getSession();
       const at = data?.session?.access_token ?? null;
       const rt = data?.session?.refresh_token ?? null;
-
-      // резервно кладемо короткий cookie (не критично, але хай буде)
       try { writeSupabaseSessionCookie(data?.session ?? null, 300); } catch {}
 
       const next = `/my-orders?scenario=${encodeURIComponent(s.id)}`;
       openInMetaMaskDapp(next, { at, rt, next });
       return;
     }
-    // уже в MetaMask або десктоп — одразу крутимо ончейн-флоу
     void handleLock(s);
   };
 
@@ -408,7 +388,6 @@ export default function MyOrders() {
     setConfirmBusy(p => ({ ...p, [s.id]: true }));
     try {
       const eth = await ensureProviderReady();
-
       try { await withTimeout(eth.request({ method: 'eth_chainId' }), 4000, 'poke4'); } catch {}
       try { await withTimeout(eth.request({ method: 'eth_accounts' }), 4000, 'poke5'); } catch {}
       try { await waitForReturn(15000); } catch {}
@@ -471,35 +450,27 @@ export default function MyOrders() {
     }
   };
 
-  const notifLabel =
-    permissionStatus === 'granted'
-      ? t('notifications.enabled')
-      : permissionStatus === 'denied'
-        ? t('notifications.denied')
-        : t('notifications.notRequested');
-
   const headerRight = useMemo(
     () => (
-      <div className="scenario-status-panel" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <span>🔔 {notifLabel}</span>
+      <div className="scenario-status-panel">
+        <span>
+          🔔 {permissionStatus === 'granted'
+            ? 'Увімкнено'
+            : permissionStatus === 'denied'
+              ? 'Не підключено'
+              : 'Не запитано'}
+        </span>
         <span>📡 {rt.isListening ? `${rt.method} активний` : 'Не підключено'}</span>
         {permissionStatus !== 'granted' && (
           <button className="notify-btn" onClick={requestPermission}>
-            🔔 {t('notifications.notRequested')}
+            🔔 Дозволити
           </button>
         )}
-
-        {/* Перемикач мов */}
-        <div style={{ display: 'flex', gap: 6, marginLeft: 8 }}>
-          <button type="button" onClick={() => setLocale('uk')}>UK</button>
-          <button type="button" onClick={() => setLocale('en')}>EN</button>
-        </div>
       </div>
     ),
-    [notifLabel, permissionStatus, requestPermission, rt.isListening, rt.method, setLocale, t]
+    [permissionStatus, requestPermission, rt.isListening, rt.method]
   );
 
-  // 🔹 Авто-ран у MetaMask-браузері: якщо прийшли через deeplink із ?scenario=...
   const autoRunOnceRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isMetaMaskInApp()) return;
@@ -518,7 +489,7 @@ export default function MyOrders() {
   return (
     <div className="scenario-list">
       <div className="scenario-header">
-        <h2>{t('orders.my')}</h2>
+        <h2>Мої замовлення</h2>
         {headerRight}
       </div>
 
